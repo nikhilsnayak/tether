@@ -1,0 +1,23 @@
+{
+  "$schema": "https://ui.shadcn.com/schema.json",
+  "style": "base-nova",
+  "rsc": false,
+  "tsx": true,
+  "tailwind": {
+    "config": "",
+    "css": "src/styles/globals.css",
+    "baseColor": "neutral",
+    "cssVariables": true
+  },
+  "iconLibrary": "lucide",
+  "aliases": {
+    "components": "@turborepo-effect-starter/ui/components",
+    "utils": "@turborepo-effect-starter/ui/lib/utils",
+    "hooks": "@turborepo-effect-starter/ui/hooks",
+    "lib": "@turborepo-effect-starter/ui/lib",
+    "ui": "@turborepo-effect-starter/ui/components"
+  },
+  "rtl": false,
+  "menuColor": "default",
+  "menuAccent": "subtle"
+}

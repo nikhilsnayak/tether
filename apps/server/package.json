@@ -1,0 +1,24 @@
+{
+  "name": "server",
+  "private": true,
+  "type": "module",
+  "module": "index.ts",
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio"
+  },
+  "dependencies": {
+    "@effect/platform-bun": "catalog:",
+    "@effect/sql-pg": "catalog:",
+    "@types/bun": "catalog:",
+    "@types/pg": "^8.20.0",
+    "@turborepo-effect-starter/contracts": "workspace:*",
+    "drizzle-kit": "^1.0.0-rc.4",
+    "drizzle-orm": "^1.0.0-rc.4",
+    "effect": "catalog:",
+    "pg": "^8.21.0",
+    "typescript": "catalog:"
+  }
+}
