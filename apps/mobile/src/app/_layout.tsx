@@ -1,5 +1,5 @@
 import { RegistryProvider } from '@effect/atom-react';
-import { serverUrlAtom } from '@turborepo-effect-starter/client-runtime';
+import { serverUrlAtom } from '@tether/client-runtime';
 import { Stack } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 

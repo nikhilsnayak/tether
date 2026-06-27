@@ -1,7 +1,7 @@
 'use client';
 
 import { Separator as SeparatorPrimitive } from '@base-ui/react/separator';
-import { cn } from '@turborepo-effect-starter/ui/lib/utils';
+import { cn } from '@tether/ui/lib/utils';
 
 function Separator({ className, orientation = 'horizontal', ...props }: SeparatorPrimitive.Props) {
   return (

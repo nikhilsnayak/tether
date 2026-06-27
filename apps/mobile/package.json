@@ -10,8 +10,8 @@
   },
   "dependencies": {
     "@effect/atom-react": "catalog:",
-    "@turborepo-effect-starter/client-runtime": "workspace:*",
-    "@turborepo-effect-starter/contracts": "workspace:*",
+    "@tether/client-runtime": "workspace:*",
+    "@tether/contracts": "workspace:*",
     "@types/react": "~19.2.2",
     "effect": "catalog:",
     "expo": "~56.0.12",

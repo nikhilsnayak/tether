@@ -1,3 +1,3 @@
-import { TodoRpcs } from './modules/todo/Rpcs';
+import { RoomRpcs } from './modules/room';
 
-export const AppRpcs = TodoRpcs;
+export const AppRpcs = RoomRpcs;

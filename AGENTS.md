@@ -2,7 +2,7 @@
 
 - No dev dependencies — everything goes under `dependencies`.
 - Shared deps live in the root `package.json` catalog and are consumed via `catalog:`.
-- Exception: `apps/mobile` pins `react`, `react-native`, and `@types/react` to the versions its Expo SDK ships (Expo controls them), not the catalog. Safe because `@turborepo-effect-starter/client-runtime` is React-free, so web and mobile can run different React versions.
+- Exception: `apps/mobile` pins `react`, `react-native`, and `@types/react` to the versions its Expo SDK ships (Expo controls them), not the catalog. Safe because `@tether/client-runtime` is React-free, so web and mobile can run different React versions.
 
 ## Vendored Repositories (`@repos/`)
 
@@ -10,7 +10,7 @@ Read-only reference for the libraries they mirror. Don't edit them unless asked,
 
 ## Shared Package Modules
 
-`@turborepo-effect-starter/client-runtime` and `@turborepo-effect-starter/contracts` expose each feature as one subpath per module — `@turborepo-effect-starter/<pkg>/modules/<feature>`, resolved via a per-module `index.ts` barrel. Module symbols are never re-exported from the package root barrel (`src/index.ts`), which carries only cross-cutting core. Import feature code from its subpath, not the root.
+`@tether/client-runtime` and `@tether/contracts` expose each feature as one subpath per module — `@tether/<pkg>/modules/<feature>`, resolved via a per-module `index.ts` barrel. Module symbols are never re-exported from the package root barrel (`src/index.ts`), which carries only cross-cutting core. Import feature code from its subpath, not the root.
 
 ## Effect
 

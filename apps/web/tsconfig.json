@@ -4,7 +4,7 @@
   "compilerOptions": {
     "paths": {
       "@/*": ["./src/*"],
-      "@turborepo-effect-starter/ui/*": ["../../packages/ui/src/*"]
+      "@tether/ui/*": ["../../packages/ui/src/*"]
     }
   }
 }

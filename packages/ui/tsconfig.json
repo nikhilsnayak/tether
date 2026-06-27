@@ -9,7 +9,7 @@
     "strict": true,
     "noEmit": true,
     "paths": {
-      "@turborepo-effect-starter/ui/*": ["./src/*"]
+      "@tether/ui/*": ["./src/*"]
     }
   },
   "include": ["."],

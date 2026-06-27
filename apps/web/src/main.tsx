@@ -1,8 +1,8 @@
-import '@turborepo-effect-starter/ui/globals.css';
+import '@tether/ui/globals.css';
 import { RegistryProvider } from '@effect/atom-react';
 import { RouterProvider, createRouter } from '@tanstack/react-router';
-import { serverUrlAtom } from '@turborepo-effect-starter/client-runtime';
-import { Toaster } from '@turborepo-effect-starter/ui/components/toast';
+import { serverUrlAtom } from '@tether/client-runtime';
+import { Toaster } from '@tether/ui/components/toast';
 import { StrictMode } from 'react';
 import ReactDOM from 'react-dom/client';
 

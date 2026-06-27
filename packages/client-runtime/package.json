@@ -1,5 +1,5 @@
 {
-  "name": "@turborepo-effect-starter/client-runtime",
+  "name": "@tether/client-runtime",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -9,7 +9,7 @@
     "./modules/*": "./src/modules/*/index.ts"
   },
   "dependencies": {
-    "@turborepo-effect-starter/contracts": "workspace:*",
+    "@tether/contracts": "workspace:*",
     "effect": "catalog:",
     "typescript": "catalog:"
   }

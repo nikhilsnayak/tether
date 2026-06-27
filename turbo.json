@@ -11,6 +11,17 @@
       "cache": false,
       "persistent": true
     },
+    "test": {
+      "dependsOn": ["^test"]
+    },
+    "test:integration": {
+      "cache": false,
+      "dependsOn": ["^test:integration"]
+    },
+    "test:watch": {
+      "cache": false,
+      "persistent": true
+    },
     "//#lint": {},
     "//#lint:fix": {
       "cache": false

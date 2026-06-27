@@ -14,8 +14,8 @@
     "components": "@/components",
     "hooks": "@/hooks",
     "lib": "@/lib",
-    "utils": "@turborepo-effect-starter/ui/lib/utils",
-    "ui": "@turborepo-effect-starter/ui/components"
+    "utils": "@tether/ui/lib/utils",
+    "ui": "@tether/ui/components"
   },
   "rtl": false,
   "menuColor": "default",

@@ -1,6 +1,6 @@
 import { Toast } from '@base-ui/react/toast';
-import { Button } from '@turborepo-effect-starter/ui/components/button';
-import { cn } from '@turborepo-effect-starter/ui/lib/utils';
+import { Button } from '@tether/ui/components/button';
+import { cn } from '@tether/ui/lib/utils';
 import { CircleAlert, CircleCheck, X } from 'lucide-react';
 
 const manager = Toast.createToastManager();

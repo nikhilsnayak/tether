@@ -1,7 +1,11 @@
-import { AppRpcs } from '@turborepo-effect-starter/contracts';
+import { AppRpcs } from '@tether/contracts';
 import { Layer } from 'effect';
 import { RpcServer } from 'effect/unstable/rpc';
 
-import { TodoHandlersLive } from './modules/todo/Handlers';
+import { RoomHandlers } from './modules/room/Handlers';
+import { RoomService } from './modules/room/RoomService';
 
-export const RpcLive = RpcServer.layer(AppRpcs).pipe(Layer.provide(TodoHandlersLive));
+export const RpcLive = RpcServer.layer(AppRpcs).pipe(
+  Layer.provide(RoomHandlers),
+  Layer.provide(RoomService.layer),
+);

@@ -4,21 +4,19 @@
   "type": "module",
   "module": "index.ts",
   "scripts": {
-    "dev": "bun run --watch src/index.ts",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
-    "db:studio": "drizzle-kit studio"
+    "dev": "bun --bun run --watch src/index.ts",
+    "test": "vitest run src",
+    "test:integration": "vitest run integrations",
+    "test:watch": "vitest --watch"
   },
   "dependencies": {
     "@effect/platform-bun": "catalog:",
-    "@effect/sql-pg": "catalog:",
+    "@effect/platform-node": "catalog:",
+    "@effect/vitest": "catalog:",
+    "@tether/contracts": "workspace:*",
     "@types/bun": "catalog:",
-    "@types/pg": "^8.20.0",
-    "@turborepo-effect-starter/contracts": "workspace:*",
-    "drizzle-kit": "^1.0.0-rc.4",
-    "drizzle-orm": "^1.0.0-rc.4",
     "effect": "catalog:",
-    "pg": "^8.21.0",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

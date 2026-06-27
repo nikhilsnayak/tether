@@ -1,6 +1,6 @@
-import { Label } from '@turborepo-effect-starter/ui/components/label';
-import { Separator } from '@turborepo-effect-starter/ui/components/separator';
-import { cn } from '@turborepo-effect-starter/ui/lib/utils';
+import { Label } from '@tether/ui/components/label';
+import { Separator } from '@tether/ui/components/separator';
+import { cn } from '@tether/ui/lib/utils';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { useMemo } from 'react';
 

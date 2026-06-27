@@ -11,11 +11,11 @@
   },
   "iconLibrary": "lucide",
   "aliases": {
-    "components": "@turborepo-effect-starter/ui/components",
-    "utils": "@turborepo-effect-starter/ui/lib/utils",
-    "hooks": "@turborepo-effect-starter/ui/hooks",
-    "lib": "@turborepo-effect-starter/ui/lib",
-    "ui": "@turborepo-effect-starter/ui/components"
+    "components": "@tether/ui/components",
+    "utils": "@tether/ui/lib/utils",
+    "hooks": "@tether/ui/hooks",
+    "lib": "@tether/ui/lib",
+    "ui": "@tether/ui/components"
   },
   "rtl": false,
   "menuColor": "default",
