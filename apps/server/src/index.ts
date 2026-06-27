@@ -10,6 +10,7 @@ const HttpLive = HttpRouter.serve(AppLayer, { disableListenLog: true }).pipe(
   Layer.provide(
     BunHttpServer.layerConfig({
       hostname: Config.string('HOST').pipe(Config.withDefault('0.0.0.0')),
+      idleTimeout: Config.succeed(0),
       port: Config.number('PORT').pipe(Config.withDefault(8008)),
     }),
   ),

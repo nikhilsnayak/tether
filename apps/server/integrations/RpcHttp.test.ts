@@ -7,6 +7,8 @@ import {
   PeerLeftEvent,
   PeerNotInRoom,
   RoomId,
+  RoomSessionOpenedEvent,
+  SessionDescriptionSignal,
   SignalReceivedEvent,
 } from '@tether/contracts/modules/room';
 import { Deferred, Effect, Fiber, Layer, Stream } from 'effect';
@@ -39,36 +41,40 @@ describe('RpcHttp', { timeout: 10_000 }, () => {
       const client = yield* RpcClient.make(AppRpcs);
       const aliceSawBob = yield* Deferred.make<void>();
 
-      const aliceFiber = yield* client.JoinRoom({ roomId, selfId: alice }).pipe(
+      const aliceFiber = yield* client.OpenRoomSession({ roomId, selfId: alice }).pipe(
         Stream.tap(({ event }) =>
           event._tag === '@tether/PeerJoinedEvent' && event.peerId === bob
             ? Deferred.succeed(aliceSawBob, undefined)
             : Effect.void,
         ),
-        Stream.take(3),
+        Stream.take(4),
         Stream.runCollect,
         Effect.forkChild({ startImmediately: true }),
       );
       const bobFiber = yield* client
-        .JoinRoom({ roomId, selfId: bob })
+        .OpenRoomSession({ roomId, selfId: bob })
         .pipe(Stream.runDrain, Effect.forkChild({ startImmediately: true }));
 
       yield* Deferred.await(aliceSawBob);
       yield* client.SendSignal({
         roomId,
         selfId: bob,
-        signal: { type: 'answer', sdp: 'integration-answer' },
+        signal: new SessionDescriptionSignal({ type: 'answer', sdp: 'integration-answer' }),
       });
       yield* Fiber.interrupt(bobFiber);
 
       const events = yield* Fiber.join(aliceFiber);
 
       assert.deepStrictEqual(events, [
+        { event: new RoomSessionOpenedEvent({ peerId: null }) },
         { event: new PeerJoinedEvent({ peerId: bob }) },
         {
           event: new SignalReceivedEvent({
             peerId: bob,
-            signal: { type: 'answer', sdp: 'integration-answer' },
+            signal: new SessionDescriptionSignal({
+              type: 'answer',
+              sdp: 'integration-answer',
+            }),
           }),
         },
         { event: new PeerLeftEvent({ peerId: bob }) },
@@ -84,7 +90,7 @@ describe('RpcHttp', { timeout: 10_000 }, () => {
         .SendSignal({
           roomId,
           selfId: mallory,
-          signal: { type: 'offer', sdp: 'not-in-room' },
+          signal: new SessionDescriptionSignal({ type: 'offer', sdp: 'not-in-room' }),
         })
         .pipe(Effect.flip);
 

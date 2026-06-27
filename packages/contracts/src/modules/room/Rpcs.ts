@@ -1,18 +1,18 @@
 import { Rpc, RpcGroup } from 'effect/unstable/rpc';
 
 import {
-  JoinRoomError,
-  JoinRoomPayload,
-  JoinRoomSuccess,
+  OpenRoomSessionError,
+  OpenRoomSessionPayload,
+  OpenRoomSessionSuccess,
   SendSignalError,
   SendSignalPayload,
 } from './Schemas';
 
-const JoinRoomRpc = Rpc.make('JoinRoom', {
+const OpenRoomSessionRpc = Rpc.make('OpenRoomSession', {
   stream: true,
-  payload: JoinRoomPayload,
-  success: JoinRoomSuccess,
-  error: JoinRoomError,
+  payload: OpenRoomSessionPayload,
+  success: OpenRoomSessionSuccess,
+  error: OpenRoomSessionError,
 });
 
 const SendSignalRpc = Rpc.make('SendSignal', {
@@ -20,4 +20,4 @@ const SendSignalRpc = Rpc.make('SendSignal', {
   error: SendSignalError,
 });
 
-export const RoomRpcs = RpcGroup.make(JoinRoomRpc, SendSignalRpc);
+export const RoomRpcs = RpcGroup.make(OpenRoomSessionRpc, SendSignalRpc);

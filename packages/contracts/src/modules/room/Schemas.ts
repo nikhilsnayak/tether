@@ -6,11 +6,33 @@ export type PeerId = typeof PeerId.Type;
 export const RoomId = Schema.String.pipe(Schema.brand('RoomId'));
 export type RoomId = typeof RoomId.Type;
 
-export const Signal = Schema.Struct({
-  type: Schema.Literals(['offer', 'answer']),
-  sdp: Schema.String,
-});
+export class SessionDescriptionSignal extends Schema.TaggedClass<SessionDescriptionSignal>()(
+  '@tether/SessionDescriptionSignal',
+  {
+    type: Schema.Literals(['offer', 'answer']),
+    sdp: Schema.String,
+  },
+) {}
+
+export class IceCandidateSignal extends Schema.TaggedClass<IceCandidateSignal>()(
+  '@tether/IceCandidateSignal',
+  {
+    candidate: Schema.String,
+    sdpMid: Schema.NullOr(Schema.String),
+    sdpMLineIndex: Schema.NullOr(Schema.Number),
+    usernameFragment: Schema.NullOr(Schema.String),
+  },
+) {}
+
+export const Signal = Schema.Union([SessionDescriptionSignal, IceCandidateSignal]);
 export type Signal = typeof Signal.Type;
+
+export class RoomSessionOpenedEvent extends Schema.TaggedClass<RoomSessionOpenedEvent>()(
+  '@tether/RoomSessionOpenedEvent',
+  {
+    peerId: Schema.NullOr(PeerId),
+  },
+) {}
 
 export class PeerJoinedEvent extends Schema.TaggedClass<PeerJoinedEvent>()(
   '@tether/PeerJoinedEvent',
@@ -51,19 +73,24 @@ export class PeerNotInRoom extends Schema.TaggedErrorClass<PeerNotInRoom>()(
   },
 ) {}
 
-export const RoomEvent = Schema.Union([PeerJoinedEvent, PeerLeftEvent, SignalReceivedEvent]);
+export const RoomEvent = Schema.Union([
+  RoomSessionOpenedEvent,
+  PeerJoinedEvent,
+  PeerLeftEvent,
+  SignalReceivedEvent,
+]);
 export type RoomEvent = typeof RoomEvent.Type;
 
-export const JoinRoomPayload = Schema.Struct({
+export const OpenRoomSessionPayload = Schema.Struct({
   selfId: PeerId,
   roomId: RoomId,
 });
 
-export const JoinRoomSuccess = Schema.Struct({
+export const OpenRoomSessionSuccess = Schema.Struct({
   event: RoomEvent,
 });
 
-export const JoinRoomError = Schema.Union([RoomFull, PeerAlreadyJoined]);
+export const OpenRoomSessionError = Schema.Union([RoomFull, PeerAlreadyJoined]);
 
 export const SendSignalPayload = Schema.Struct({
   selfId: PeerId,

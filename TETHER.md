@@ -149,10 +149,11 @@ A new `room` (signaling) feature-slice. **No DB, no adapter, no sync engine.**
 Smallest thing that teaches the Effect signaling server **and** raw WebRTC.
 
 1. ✅ **`contracts` — signaling protocol** (`packages/contracts/src/modules/room/`):
-   - Two RPCs: `JoinRoom { selfId, roomId }` (**streaming** → pushes `RoomEvent`s)
-     and `SendSignal { selfId, roomId, signal }` (unary, with membership
-     validation).
-   - `RoomEvent` union: `PeerJoinedEvent { peerId }`, `PeerLeftEvent { peerId }`,
+   - Two RPCs: `OpenRoomSession { selfId, roomId }` (**streaming** → acknowledges
+     the session and pushes `RoomEvent`s) and
+     `SendSignal { selfId, roomId, signal }` (unary, with membership validation).
+   - `RoomEvent` union: `RoomSessionOpenedEvent { peerId: PeerId | null }`,
+     `PeerJoinedEvent { peerId }`, `PeerLeftEvent { peerId }`, and
      `SignalReceivedEvent { peerId, signal }`.
    - `Signal { type: 'offer' | 'answer', sdp }`. **ICE not modeled yet** — will
      extend `Signal` into a tagged union (`description | candidate`) when the web
@@ -164,12 +165,13 @@ Smallest thing that teaches the Effect signaling server **and** raw WebRTC.
    - 2-person room (max 2 participants).
 2. ✅ **`apps/server` — `Room` relay (the Effect learning):**
    - ✅ **`RoomService.ts`** — in-memory `Map<RoomId, { members, pubsub }>` behind a
-     `SynchronizedRef`. `join` atomically creates a subscription before exposing
-     membership, rejects duplicate peers and rooms over capacity, and returns a
-     complete `Stream<RoomEvent>` containing initial state followed by live
-     events. `Effect.acquireRelease` owns disconnect cleanup, publishes
-     `PeerLeft`, and GCs empty rooms. `sendSignal` atomically validates membership
-     before publishing. `leave` and the underlying `PubSub` stay private.
+     `SynchronizedRef`. `openSession` atomically creates a subscription before
+     exposing membership, rejects duplicate peers and rooms over capacity, and
+     returns a complete `Stream<RoomEvent>` beginning with
+     `RoomSessionOpenedEvent` followed by live events. `Effect.acquireRelease`
+     owns disconnect cleanup, publishes `PeerLeft`, and GCs empty rooms.
+     `sendSignal` atomically validates membership before publishing. `leave` and
+     the underlying `PubSub` stay private.
    - ✅ **`Handlers.ts`** — transport adapter only: maps the domain event stream to
      RPC `{ event }` responses and delegates `SendSignal` to the service.
    - ✅ **`Rpc.ts` / `App.ts`** — handlers, service, `/rpc` HTTP protocol, and NDJSON
@@ -201,9 +203,11 @@ WebRTC signaling needs the server to **push** the other peer's offer/answer/ICE
 unsolicited. **Decision: stay entirely in the `@effect/rpc` world over the
 existing HTTP NDJSON protocol — no WebSocket.**
 
-- `JoinRoom` is a **streaming RPC** (`stream: true`): the client opens it once and
+- `OpenRoomSession` is a **streaming RPC** (`stream: true`): the first event
+  acknowledges that membership is active and provides the existing peer, then
   the server pushes `RoomEvent`s for the life of the connection (SSE-equivalent
-  over HTTP/ndjson). The held-open stream **is** the realtime channel.
+  over HTTP/ndjson). The held-open stream **is** both the room-session lifetime
+  and realtime channel.
 - `SendSignal` is a separate **unary RPC** for messages going up.
 - Proven by the HTTP integration suite: server→client streaming, cancellation,
   and typed errors work over `layerProtocolHttp` + `layerNdjson`. No WebSocket or
@@ -211,9 +215,10 @@ existing HTTP NDJSON protocol — no WebSocket.**
 
 **Consequences this shaped:**
 
-- `JoinRoom` (a stream) and `SendSignal` (a separate request) are **independent
-  HTTP calls with no session glue**, so the client must **self-identify in every
-  message** (`selfId`) — that's why the client mints its own `PeerId`.
+- `OpenRoomSession` (a stream) and `SendSignal` (a separate request) are
+  **independent HTTP calls with no session glue**, so the client must
+  **self-identify in every message** (`selfId`) — that's why the client mints its
+  own `PeerId`.
 - **Echo:** a `PubSub` broadcasts to all subscribers including the sender, so
   `RoomService` filters each subscriber's own events from its domain stream.
 - **Identity boundary:** protocol membership is enforced, but `selfId` is still
@@ -233,7 +238,8 @@ existing HTTP NDJSON protocol — no WebSocket.**
   `@tether/*`, and the example slices were removed. **Current state:** room
   contracts, scoped server service, RPC handlers, HTTP/NDJSON wiring, typed
   errors, unit tests, and integration tests are complete and typecheck clean.
-  **Next:** build `@tether/client-runtime/modules/room` to consume `JoinRoom` and
-  expose `SendSignal`, then implement the web `RTCPeerConnection` client.
+  **Next:** use `@tether/client-runtime/modules/room` to consume
+  `OpenRoomSession` and `SendSignal`, then implement the web
+  `RTCPeerConnection` client.
 - Source template (reference only): `/home/nikhils/.personal/turborepo-effect-starter`.
 - Reference example slice to mirror: the **`todo`** module across all packages.

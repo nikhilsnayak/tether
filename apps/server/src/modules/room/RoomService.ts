@@ -3,6 +3,7 @@ import {
   PeerJoinedEvent,
   PeerLeftEvent,
   PeerNotInRoom,
+  RoomSessionOpenedEvent,
   RoomFull,
   SignalReceivedEvent,
   type PeerId,
@@ -45,7 +46,10 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
       );
     });
 
-    const join = Effect.fn('@tether/RoomService.join')(function* (roomId: RoomId, selfId: PeerId) {
+    const openSession = Effect.fn('@tether/RoomService.openSession')(function* (
+      roomId: RoomId,
+      selfId: PeerId,
+    ) {
       return yield* Effect.acquireRelease(
         SynchronizedRef.modifyEffect(
           registryRef,
@@ -76,7 +80,7 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
             yield* PubSub.publish(ctx.pubsub, new PeerJoinedEvent({ peerId: selfId }));
 
             const peerId = ctx.members.find((member) => member !== selfId) ?? null;
-            const initial = peerId === null ? [] : [new PeerJoinedEvent({ peerId })];
+            const initial = [new RoomSessionOpenedEvent({ peerId })];
 
             const events = Stream.fromArray<RoomEvent>(initial).pipe(
               Stream.concat(Stream.fromSubscription(subscription)),
@@ -111,7 +115,7 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
       );
     });
 
-    return { join, sendSignal };
+    return { openSession, sendSignal };
   }),
 }) {
   static readonly layer = Layer.effect(this, this.make);

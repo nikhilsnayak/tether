@@ -1,5 +1,6 @@
 import { assert, describe, it } from '@effect/vitest';
 import {
+  IceCandidateSignal,
   PeerId,
   PeerAlreadyJoined,
   PeerJoinedEvent,
@@ -8,6 +9,8 @@ import {
   RoomFull,
   RoomId,
   RoomRpcs,
+  RoomSessionOpenedEvent,
+  SessionDescriptionSignal,
   SignalReceivedEvent,
 } from '@tether/contracts/modules/room';
 import { Effect, Fiber, Layer, Stream } from 'effect';
@@ -27,20 +30,21 @@ const TestHandlers = RoomHandlers.pipe(Layer.provide(RoomService.layerTest));
 const makeClient = RpcTest.makeClient(RoomRpcs).pipe(Effect.provide(TestHandlers));
 
 describe('RoomHandlers', () => {
-  it.effect('seeds the newcomer and leaves when its stream closes', () =>
+  it.effect('acknowledges the session and leaves when its stream closes', () =>
     Effect.gen(function* () {
       const client = yield* makeClient;
       const aliceFiber = yield* client
-        .JoinRoom({ roomId, selfId: alice })
-        .pipe(Stream.take(2), Stream.runCollect, Effect.forkChild({ startImmediately: true }));
+        .OpenRoomSession({ roomId, selfId: alice })
+        .pipe(Stream.take(3), Stream.runCollect, Effect.forkChild({ startImmediately: true }));
 
       const bobEvents = yield* client
-        .JoinRoom({ roomId, selfId: bob })
+        .OpenRoomSession({ roomId, selfId: bob })
         .pipe(Stream.take(1), Stream.runCollect);
       const aliceEvents = yield* Fiber.join(aliceFiber);
 
-      assert.deepStrictEqual(bobEvents, [{ event: new PeerJoinedEvent({ peerId: alice }) }]);
+      assert.deepStrictEqual(bobEvents, [{ event: new RoomSessionOpenedEvent({ peerId: alice }) }]);
       assert.deepStrictEqual(aliceEvents, [
+        { event: new RoomSessionOpenedEvent({ peerId: null }) },
         { event: new PeerJoinedEvent({ peerId: bob }) },
         { event: new PeerLeftEvent({ peerId: bob }) },
       ]);
@@ -51,22 +55,25 @@ describe('RoomHandlers', () => {
     Effect.gen(function* () {
       const client = yield* makeClient;
       const aliceFiber = yield* client
-        .JoinRoom({ roomId, selfId: alice })
-        .pipe(Stream.take(1), Stream.runCollect, Effect.forkChild({ startImmediately: true }));
+        .OpenRoomSession({ roomId, selfId: alice })
+        .pipe(Stream.take(2), Stream.runCollect, Effect.forkChild({ startImmediately: true }));
 
       yield* client.SendSignal({
         roomId,
         selfId: alice,
-        signal: { type: 'offer', sdp: 'self-offer' },
+        signal: new SessionDescriptionSignal({ type: 'offer', sdp: 'self-offer' }),
       });
       const bobFiber = yield* client
-        .JoinRoom({ roomId, selfId: bob })
+        .OpenRoomSession({ roomId, selfId: bob })
         .pipe(Stream.runDrain, Effect.forkChild({ startImmediately: true }));
 
       const aliceEvents = yield* Fiber.join(aliceFiber);
       yield* Fiber.interrupt(bobFiber);
 
-      assert.deepStrictEqual(aliceEvents, [{ event: new PeerJoinedEvent({ peerId: bob }) }]);
+      assert.deepStrictEqual(aliceEvents, [
+        { event: new RoomSessionOpenedEvent({ peerId: null }) },
+        { event: new PeerJoinedEvent({ peerId: bob }) },
+      ]);
     }),
   );
 
@@ -74,27 +81,38 @@ describe('RoomHandlers', () => {
     Effect.gen(function* () {
       const client = yield* makeClient;
       const aliceFiber = yield* client
-        .JoinRoom({ roomId, selfId: alice })
-        .pipe(Stream.take(2), Stream.runCollect, Effect.forkChild({ startImmediately: true }));
+        .OpenRoomSession({ roomId, selfId: alice })
+        .pipe(Stream.take(3), Stream.runCollect, Effect.forkChild({ startImmediately: true }));
       const bobFiber = yield* client
-        .JoinRoom({ roomId, selfId: bob })
+        .OpenRoomSession({ roomId, selfId: bob })
         .pipe(Stream.runDrain, Effect.forkChild({ startImmediately: true }));
 
       yield* client.SendSignal({
         roomId,
         selfId: bob,
-        signal: { type: 'answer', sdp: 'test-answer' },
+        signal: new IceCandidateSignal({
+          candidate: 'candidate:integration-test',
+          sdpMid: '0',
+          sdpMLineIndex: 0,
+          usernameFragment: 'test-fragment',
+        }),
       });
 
       const aliceEvents = yield* Fiber.join(aliceFiber);
       yield* Fiber.interrupt(bobFiber);
 
       assert.deepStrictEqual(aliceEvents, [
+        { event: new RoomSessionOpenedEvent({ peerId: null }) },
         { event: new PeerJoinedEvent({ peerId: bob }) },
         {
           event: new SignalReceivedEvent({
             peerId: bob,
-            signal: { type: 'answer', sdp: 'test-answer' },
+            signal: new IceCandidateSignal({
+              candidate: 'candidate:integration-test',
+              sdpMid: '0',
+              sdpMLineIndex: 0,
+              usernameFragment: 'test-fragment',
+            }),
           }),
         },
       ]);
@@ -105,23 +123,26 @@ describe('RoomHandlers', () => {
     Effect.gen(function* () {
       const client = yield* makeClient;
       const aliceFiber = yield* client
-        .JoinRoom({ roomId, selfId: alice })
-        .pipe(Stream.take(2), Stream.runCollect, Effect.forkChild({ startImmediately: true }));
+        .OpenRoomSession({ roomId, selfId: alice })
+        .pipe(Stream.take(3), Stream.runCollect, Effect.forkChild({ startImmediately: true }));
       const bobFiber = yield* client
-        .JoinRoom({ roomId, selfId: bob })
+        .OpenRoomSession({ roomId, selfId: bob })
         .pipe(Stream.runDrain, Effect.forkChild({ startImmediately: true }));
 
       const error = yield* client
         .SendSignal({
           roomId,
           selfId: mallory,
-          signal: { type: 'offer', sdp: 'unauthorized-offer' },
+          signal: new SessionDescriptionSignal({
+            type: 'offer',
+            sdp: 'unauthorized-offer',
+          }),
         })
         .pipe(Effect.flip);
       yield* client.SendSignal({
         roomId,
         selfId: bob,
-        signal: { type: 'answer', sdp: 'authorized-answer' },
+        signal: new SessionDescriptionSignal({ type: 'answer', sdp: 'authorized-answer' }),
       });
 
       const aliceEvents = yield* Fiber.join(aliceFiber);
@@ -131,11 +152,15 @@ describe('RoomHandlers', () => {
       assert.strictEqual(error.roomId, roomId);
       assert.strictEqual(error.peerId, mallory);
       assert.deepStrictEqual(aliceEvents, [
+        { event: new RoomSessionOpenedEvent({ peerId: null }) },
         { event: new PeerJoinedEvent({ peerId: bob }) },
         {
           event: new SignalReceivedEvent({
             peerId: bob,
-            signal: { type: 'answer', sdp: 'authorized-answer' },
+            signal: new SessionDescriptionSignal({
+              type: 'answer',
+              sdp: 'authorized-answer',
+            }),
           }),
         },
       ]);
@@ -146,14 +171,14 @@ describe('RoomHandlers', () => {
     Effect.gen(function* () {
       const client = yield* makeClient;
       const aliceFiber = yield* client
-        .JoinRoom({ roomId, selfId: alice })
+        .OpenRoomSession({ roomId, selfId: alice })
         .pipe(Stream.runDrain, Effect.forkChild({ startImmediately: true }));
       const bobFiber = yield* client
-        .JoinRoom({ roomId, selfId: bob })
+        .OpenRoomSession({ roomId, selfId: bob })
         .pipe(Stream.runDrain, Effect.forkChild({ startImmediately: true }));
 
       const error = yield* client
-        .JoinRoom({ roomId, selfId: charlie })
+        .OpenRoomSession({ roomId, selfId: charlie })
         .pipe(Stream.runDrain, Effect.flip);
 
       yield* Fiber.interrupt(aliceFiber);
@@ -168,14 +193,14 @@ describe('RoomHandlers', () => {
     Effect.gen(function* () {
       const client = yield* makeClient;
       const aliceFiber = yield* client
-        .JoinRoom({ roomId, selfId: alice })
+        .OpenRoomSession({ roomId, selfId: alice })
         .pipe(Stream.runDrain, Effect.forkChild({ startImmediately: true }));
       const bobFiber = yield* client
-        .JoinRoom({ roomId, selfId: bob })
+        .OpenRoomSession({ roomId, selfId: bob })
         .pipe(Stream.runDrain, Effect.forkChild({ startImmediately: true }));
 
       const error = yield* client
-        .JoinRoom({ roomId, selfId: alice })
+        .OpenRoomSession({ roomId, selfId: alice })
         .pipe(Stream.runDrain, Effect.flip);
 
       yield* Fiber.interrupt(aliceFiber);

@@ -7,6 +7,8 @@ import {
   PeerNotInRoom,
   RoomFull,
   RoomId,
+  RoomSessionOpenedEvent,
+  SessionDescriptionSignal,
   SignalReceivedEvent,
 } from '@tether/contracts/modules/room';
 import { Effect, Exit, Stream } from 'effect';
@@ -27,14 +29,17 @@ describe('RoomService', () => {
       Effect.gen(function* () {
         const room = yield* RoomService;
 
-        const first = yield* room.join(roomId, alice);
-        const second = yield* room.join(roomId, bob);
-        const error = yield* room.join(roomId, charlie).pipe(Effect.flip);
-        const firstEvents = yield* first.pipe(Stream.take(1), Stream.runCollect);
+        const first = yield* room.openSession(roomId, alice);
+        const second = yield* room.openSession(roomId, bob);
+        const error = yield* room.openSession(roomId, charlie).pipe(Effect.flip);
+        const firstEvents = yield* first.pipe(Stream.take(2), Stream.runCollect);
         const secondEvents = yield* second.pipe(Stream.take(1), Stream.runCollect);
 
-        assert.deepStrictEqual(firstEvents, [new PeerJoinedEvent({ peerId: bob })]);
-        assert.deepStrictEqual(secondEvents, [new PeerJoinedEvent({ peerId: alice })]);
+        assert.deepStrictEqual(firstEvents, [
+          new RoomSessionOpenedEvent({ peerId: null }),
+          new PeerJoinedEvent({ peerId: bob }),
+        ]);
+        assert.deepStrictEqual(secondEvents, [new RoomSessionOpenedEvent({ peerId: alice })]);
         assert.instanceOf(error, RoomFull);
         assert.strictEqual(error.roomId, roomId);
       }),
@@ -47,7 +52,7 @@ describe('RoomService', () => {
         const room = yield* RoomService;
         const exits = yield* Effect.forEach(
           [alice, bob, charlie],
-          (peerId) => room.join(roomId, peerId).pipe(Effect.exit),
+          (peerId) => room.openSession(roomId, peerId).pipe(Effect.exit),
           { concurrency: 'unbounded' },
         );
 
@@ -57,15 +62,16 @@ describe('RoomService', () => {
     ),
   );
 
-  it.effect('publishes lifecycle events and leaves when the join scope closes', () =>
+  it.effect('publishes lifecycle events and leaves when the session scope closes', () =>
     withRoomService(
       Effect.gen(function* () {
         const room = yield* RoomService;
-        const events = yield* room.join(roomId, alice);
-        yield* Effect.scoped(room.join(roomId, bob));
-        const received = yield* events.pipe(Stream.take(2), Stream.runCollect);
+        const events = yield* room.openSession(roomId, alice);
+        yield* Effect.scoped(room.openSession(roomId, bob));
+        const received = yield* events.pipe(Stream.take(3), Stream.runCollect);
 
         assert.deepStrictEqual(received, [
+          new RoomSessionOpenedEvent({ peerId: null }),
           new PeerJoinedEvent({ peerId: bob }),
           new PeerLeftEvent({ peerId: bob }),
         ]);
@@ -77,10 +83,10 @@ describe('RoomService', () => {
     withRoomService(
       Effect.gen(function* () {
         const room = yield* RoomService;
-        yield* room.join(roomId, alice);
-        yield* room.join(roomId, bob);
+        yield* room.openSession(roomId, alice);
+        yield* room.openSession(roomId, bob);
 
-        const error = yield* room.join(roomId, alice).pipe(Effect.flip);
+        const error = yield* room.openSession(roomId, alice).pipe(Effect.flip);
 
         assert.instanceOf(error, PeerAlreadyJoined);
         assert.strictEqual(error.roomId, roomId);
@@ -93,17 +99,21 @@ describe('RoomService', () => {
     withRoomService(
       Effect.gen(function* () {
         const room = yield* RoomService;
-        const events = yield* room.join(roomId, alice);
-        yield* room.join(roomId, bob);
+        const events = yield* room.openSession(roomId, alice);
+        yield* room.openSession(roomId, bob);
         const event = new SignalReceivedEvent({
           peerId: bob,
-          signal: { type: 'offer', sdp: 'test-offer' },
+          signal: new SessionDescriptionSignal({ type: 'offer', sdp: 'test-offer' }),
         });
 
         yield* room.sendSignal(roomId, bob, event.signal);
-        const received = yield* events.pipe(Stream.take(2), Stream.runCollect);
+        const received = yield* events.pipe(Stream.take(3), Stream.runCollect);
 
-        assert.deepStrictEqual(received, [new PeerJoinedEvent({ peerId: bob }), event]);
+        assert.deepStrictEqual(received, [
+          new RoomSessionOpenedEvent({ peerId: null }),
+          new PeerJoinedEvent({ peerId: bob }),
+          event,
+        ]);
       }),
     ),
   );
@@ -112,18 +122,18 @@ describe('RoomService', () => {
     withRoomService(
       Effect.gen(function* () {
         const room = yield* RoomService;
-        yield* room.join(roomId, alice);
-        const bobEvents = yield* room.join(roomId, bob);
+        yield* room.openSession(roomId, alice);
+        const bobEvents = yield* room.openSession(roomId, bob);
 
         const signal = new SignalReceivedEvent({
           peerId: alice,
-          signal: { type: 'offer', sdp: 'immediate-offer' },
+          signal: new SessionDescriptionSignal({ type: 'offer', sdp: 'immediate-offer' }),
         });
         yield* room.sendSignal(roomId, alice, signal.signal);
 
         const received = yield* bobEvents.pipe(Stream.take(2), Stream.runCollect);
 
-        assert.deepStrictEqual(received, [new PeerJoinedEvent({ peerId: alice }), signal]);
+        assert.deepStrictEqual(received, [new RoomSessionOpenedEvent({ peerId: alice }), signal]);
       }),
     ),
   );
@@ -132,12 +142,16 @@ describe('RoomService', () => {
     withRoomService(
       Effect.gen(function* () {
         const room = yield* RoomService;
-        yield* Effect.scoped(room.join(roomId, alice));
+        yield* Effect.scoped(room.openSession(roomId, alice));
 
         const error = yield* room
-          .sendSignal(roomId, alice, { type: 'offer', sdp: 'missing-room' })
+          .sendSignal(
+            roomId,
+            alice,
+            new SessionDescriptionSignal({ type: 'offer', sdp: 'missing-room' }),
+          )
           .pipe(Effect.flip);
-        yield* room.join(roomId, bob);
+        yield* room.openSession(roomId, bob);
 
         assert.instanceOf(error, PeerNotInRoom);
         assert.strictEqual(error.roomId, roomId);

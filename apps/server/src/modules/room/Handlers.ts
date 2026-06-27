@@ -8,8 +8,8 @@ export const RoomHandlers = RoomRpcs.toLayer(
     const room = yield* RoomService;
 
     return RoomRpcs.of({
-      JoinRoom: Effect.fnUntraced(function* ({ roomId, selfId }) {
-        const events = yield* room.join(roomId, selfId);
+      OpenRoomSession: Effect.fnUntraced(function* ({ roomId, selfId }) {
+        const events = yield* room.openSession(roomId, selfId);
 
         return events.pipe(Stream.map((event) => ({ event })));
       }, Stream.unwrap),
