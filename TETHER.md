@@ -155,9 +155,8 @@ Smallest thing that teaches the Effect signaling server **and** raw WebRTC.
    - `RoomEvent` union: `RoomSessionOpenedEvent { peerId: PeerId | null }`,
      `PeerJoinedEvent { peerId }`, `PeerLeftEvent { peerId }`, and
      `SignalReceivedEvent { peerId, signal }`.
-   - `Signal { type: 'offer' | 'answer', sdp }`. **ICE not modeled yet** — will
-     extend `Signal` into a tagged union (`description | candidate`) when the web
-     client needs it (WebRTC concept #2).
+   - `Signal` is a tagged union of session descriptions (`offer` / `answer`) and
+     ICE candidates.
    - Typed client errors: `RoomFull`, `PeerAlreadyJoined`, and `PeerNotInRoom`.
    - **Terminology (ratified):** `selfId` = me (client→server payloads only),
      `peerId` = the other peer (server→client events only). The server turns a

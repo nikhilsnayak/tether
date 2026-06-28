@@ -118,6 +118,30 @@ describe('RoomService', () => {
     ),
   );
 
+  it.effect('delivers signals to the peer in FIFO order', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const room = yield* RoomService;
+        const aliceEvents = yield* room.openSession(roomId, alice);
+        yield* room.openSession(roomId, bob);
+
+        const signals = ['one', 'two', 'three'].map(
+          (sdp) => new SessionDescriptionSignal({ type: 'offer' as const, sdp }),
+        );
+
+        yield* Effect.forEach(signals, (signal) => room.sendSignal(roomId, bob, signal));
+
+        const received = yield* aliceEvents.pipe(Stream.take(5), Stream.runCollect);
+
+        assert.deepStrictEqual(received, [
+          new RoomSessionOpenedEvent({ peerId: null }),
+          new PeerJoinedEvent({ peerId: bob }),
+          ...signals.map((signal) => new SignalReceivedEvent({ peerId: bob, signal })),
+        ]);
+      }),
+    ),
+  );
+
   it.effect('does not lose a signal published before the newcomer consumes', () =>
     withRoomService(
       Effect.gen(function* () {

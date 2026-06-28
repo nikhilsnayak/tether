@@ -9,7 +9,6 @@
     "ios": "expo start --ios"
   },
   "dependencies": {
-    "@effect/atom-react": "catalog:",
     "@tether/client-runtime": "workspace:*",
     "@tether/contracts": "workspace:*",
     "@types/react": "~19.2.2",

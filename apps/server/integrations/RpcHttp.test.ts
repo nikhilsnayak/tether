@@ -1,4 +1,4 @@
-import { NodeHttpServer } from '@effect/platform-node';
+import { BunHttpServer } from '@effect/platform-bun';
 import { assert, describe, it } from '@effect/vitest';
 import { AppRpcs } from '@tether/contracts';
 import {
@@ -32,7 +32,7 @@ const HttpLive = RpcClient.layerProtocolHttp({
   transformClient: HttpClient.mapRequest(HttpClientRequest.appendUrl('/rpc')),
 }).pipe(
   Layer.provideMerge(TestServer),
-  Layer.provide([NodeHttpServer.layerTest, RpcSerialization.layerNdjson]),
+  Layer.provide([BunHttpServer.layerTest, RpcSerialization.layerNdjson]),
 );
 
 describe('RpcHttp', { timeout: 10_000 }, () => {

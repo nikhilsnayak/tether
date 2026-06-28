@@ -4,14 +4,13 @@
   "type": "module",
   "module": "index.ts",
   "scripts": {
-    "dev": "bun --bun run --watch src/index.ts",
+    "dev": "bun run --watch src/index.ts",
     "test": "vitest run src",
     "test:integration": "vitest run integrations",
     "test:watch": "vitest --watch"
   },
   "dependencies": {
     "@effect/platform-bun": "catalog:",
-    "@effect/platform-node": "catalog:",
     "@effect/vitest": "catalog:",
     "@tether/contracts": "workspace:*",
     "@types/bun": "catalog:",

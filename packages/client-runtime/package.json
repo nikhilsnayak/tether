@@ -5,8 +5,7 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
-    ".": "./src/index.ts",
-    "./modules/*": "./src/modules/*/index.ts"
+    ".": "./src/index.ts"
   },
   "dependencies": {
     "@tether/contracts": "workspace:*",
