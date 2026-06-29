@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@effect/atom-react": "catalog:",
     "@rolldown/plugin-babel": "^0.2.3",
     "@tailwindcss/vite": "catalog:",
     "@tanstack/devtools-vite": "^0.8.1",

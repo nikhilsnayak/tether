@@ -10,7 +10,7 @@
  * WaitingForPeer
  *   | PeerJoined(peerId)
  *   v
- * PeerKnown(answerer, channel = null, connecting)
+ * PeerKnown(answerer, channel = awaiting remote)
  *   | RemoteDataChannel("chat")
  *   v
  * PeerKnown(answerer, channel = remote, connecting)
@@ -50,13 +50,17 @@ import {
   type SessionDescriptionSignal as SessionDescriptionSignalType,
 } from '@tether/contracts/modules/room';
 import { Effect, Queue, Stream } from 'effect';
+import { Atom } from 'effect/unstable/reactivity';
 
 import type { RoomSession } from '../types';
+import { peerSessionViewAtom } from './atoms';
 import {
   CHAT_CHANNEL_LABEL,
   type BrowserCommand,
+  type ChatMessage,
   type PeerConnectionActorState,
   type PeerConnectionCommand,
+  type UiCommand,
 } from './model';
 import {
   acquirePeerConnection,
@@ -200,8 +204,7 @@ const makePeerConnectionActor = ({
       peerConnection,
       peerId,
       role: 'offerer',
-      dataChannel,
-      dataChannelStatus: 'connecting',
+      dataChannelState: { _tag: 'DataChannelConnecting', dataChannel },
     };
   });
 
@@ -216,8 +219,7 @@ const makePeerConnectionActor = ({
       peerConnection: state.peerConnection,
       peerId,
       role: 'answerer',
-      dataChannel: null,
-      dataChannelStatus: 'connecting',
+      dataChannelState: { _tag: 'AwaitingRemoteDataChannel' },
     };
   });
 
@@ -272,13 +274,13 @@ const makePeerConnectionActor = ({
     if (
       state._tag !== 'PeerKnown' ||
       state.role !== 'answerer' ||
-      state.dataChannel !== null ||
+      state.dataChannelState._tag !== 'AwaitingRemoteDataChannel' ||
       dataChannel.label !== CHAT_CHANNEL_LABEL
     ) {
       return yield* unexpectedCommand('unexpected remote data channel');
     }
 
-    state = { ...state, dataChannel };
+    state = { ...state, dataChannelState: { _tag: 'DataChannelConnecting', dataChannel } };
     yield* observeDataChannel(dataChannel, browserCommandQueue);
   });
 
@@ -296,13 +298,25 @@ const makePeerConnectionActor = ({
   const handleDataChannelOpened = Effect.fn('@tether/web/handleDataChannelOpened')(function* (
     dataChannel: RTCDataChannel,
   ) {
-    if (state._tag !== 'PeerKnown' || state.dataChannel !== dataChannel) {
+    if (
+      state._tag === 'PeerKnown' &&
+      state.dataChannelState._tag === 'DataChannelOpen' &&
+      state.dataChannelState.dataChannel === dataChannel
+    ) {
+      return;
+    }
+
+    if (
+      state._tag !== 'PeerKnown' ||
+      state.dataChannelState._tag !== 'DataChannelConnecting' ||
+      state.dataChannelState.dataChannel !== dataChannel
+    ) {
       return yield* unexpectedCommand('open event came from an unowned data channel');
     }
-    if (state.dataChannelStatus === 'open') return;
 
-    state = { ...state, dataChannelStatus: 'open' };
-    yield* Effect.sync(() => dataChannel.send(`hello from ${selfId}`));
+    state = { ...state, dataChannelState: { _tag: 'DataChannelOpen', dataChannel } };
+    yield* Atom.update(peerSessionViewAtom, (view) => ({ ...view, status: 'connected' as const }));
+
     yield* Effect.logInfo(`Chat data channel opened with peer ${state.peerId}`);
   });
 
@@ -311,13 +325,45 @@ const makePeerConnectionActor = ({
     dataChannel: RTCDataChannel,
     data: unknown,
   ) {
-    if (state._tag !== 'PeerKnown' || state.dataChannel !== dataChannel) {
+    if (
+      state._tag !== 'PeerKnown' ||
+      state.dataChannelState._tag !== 'DataChannelOpen' ||
+      state.dataChannelState.dataChannel !== dataChannel
+    ) {
       return yield* unexpectedCommand('message came from an unowned data channel');
     }
     if (typeof data !== 'string') {
       return yield* unexpectedCommand('non-text chat payload');
     }
+    const id = yield* Effect.sync(() => crypto.randomUUID());
+    const message: ChatMessage = { id, sender: 'peer', text: data };
+
+    yield* Atom.update(peerSessionViewAtom, (view) => ({
+      ...view,
+      messages: [...view.messages, message],
+    }));
+
     yield* Effect.logInfo(`Chat message from ${state.peerId}: ${data}`);
+  });
+
+  /** Sends one text message over the owned chat channel. */
+  const handleUiSendMessage = Effect.fn('@tether/web/handleUiSendMessage')(function* (
+    text: string,
+  ) {
+    if (state._tag !== 'PeerKnown' || state.dataChannelState._tag !== 'DataChannelOpen') {
+      return yield* unexpectedCommand('UI send message on a non-open data channel');
+    }
+    const { dataChannel } = state.dataChannelState;
+
+    yield* Effect.sync(() => dataChannel.send(text));
+
+    const id = yield* Effect.sync(() => crypto.randomUUID());
+    const message: ChatMessage = { id, sender: 'self', text };
+
+    yield* Atom.update(peerSessionViewAtom, (view) => ({
+      ...view,
+      messages: [...view.messages, message],
+    }));
   });
 
   /** Dispatches one serialized server or browser command. */
@@ -335,6 +381,8 @@ const makePeerConnectionActor = ({
         return yield* handleDataChannelOpened(command.dataChannel);
       case 'DataChannelMessageReceived':
         return yield* handleDataChannelMessage(command.dataChannel, command.data);
+      case 'SendMessage':
+        return yield* handleUiSendMessage(command.message);
     }
   });
 };
@@ -345,9 +393,11 @@ const makePeerConnectionActor = ({
  */
 export const runPeerSession = Effect.fn('@tether/web/runPeerSession')(function* (
   session: RoomSession,
+  uiCommandQueue: Queue.Queue<UiCommand>,
 ) {
   const client = yield* AppClient;
   const browserCommandQueue = yield* Queue.unbounded<BrowserCommand>();
+
   const handleCommand = makePeerConnectionActor({
     ...session,
     client,
@@ -367,9 +417,13 @@ export const runPeerSession = Effect.fn('@tether/web/runPeerSession')(function* 
       }),
     ),
   );
-  const browserCommandStream = Stream.fromQueue(browserCommandQueue);
 
-  yield* Stream.merge(roomCommandStream, browserCommandStream, {
+  const browserCommandStream = Stream.fromQueue(browserCommandQueue);
+  const uiCommandStream = Stream.fromQueue(uiCommandQueue);
+
+  const localCommandStream = Stream.merge(uiCommandStream, browserCommandStream);
+
+  yield* Stream.merge(roomCommandStream, localCommandStream, {
     haltStrategy: 'left',
   }).pipe(Stream.runForEach(handleCommand));
 });

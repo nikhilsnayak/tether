@@ -48,6 +48,7 @@
       "name": "web",
       "version": "0.0.1",
       "dependencies": {
+        "@effect/atom-react": "catalog:",
         "@rolldown/plugin-babel": "^0.2.3",
         "@tailwindcss/vite": "catalog:",
         "@tanstack/devtools-vite": "^0.8.1",
@@ -111,6 +112,7 @@
     },
   },
   "catalog": {
+    "@effect/atom-react": "^4.0.0-beta.91",
     "@effect/platform-bun": "^4.0.0-beta.91",
     "@effect/vitest": "^4.0.0-beta.91",
     "@tailwindcss/vite": "^4.3.0",
@@ -279,6 +281,8 @@
     "@dotenvx/dotenvx": ["@dotenvx/dotenvx@1.72.0", "", { "dependencies": { "commander": "^11.1.0", "conf": "^10.2.0", "dotenv": "^17.2.1", "eciesjs": "^0.4.10", "enquirer": "^2.4.1", "env-paths": "^2.2.1", "execa": "^5.1.1", "fdir": "^6.2.0", "ignore": "^5.3.0", "object-treeify": "1.1.33", "open": "^8.4.2", "picomatch": "^4.0.4", "systeminformation": "^5.22.11", "undici": "^7.11.0", "which": "^4.0.0", "yocto-spinner": "^1.1.0" }, "bin": { "dotenvx": "src/cli/dotenvx.js" } }, "sha512-rNaVGv1VvLma/E3pXyEAWjWoNif0Pc5Vo4gm6028pnw0n6+t2o3LpNlJ1oIaWEUeq7IOjUNYmG0o4XdNTV7wyQ=="],
 
     "@ecies/ciphers": ["@ecies/ciphers@0.2.6", "", { "peerDependencies": { "@noble/ciphers": "^1.0.0" } }, "sha512-patgsRPKGkhhoBjETV4XxD0En4ui5fbX0hzayqI3M8tvNMGUoUvmyYAIWwlxBc1KX5cturfqByYdj5bYGRpN9g=="],
+
+    "@effect/atom-react": ["@effect/atom-react@4.0.0-beta.92", "", { "peerDependencies": { "effect": "^4.0.0-beta.92", "react": "^19.2.4", "scheduler": "*" } }, "sha512-C3KfrgtD550d2o5vjWwnElkCAz3dzYS9uZMYjsS208cxuMsg/sKYyCaGdh9P8oC1wZ+AL5hbboaPsCpP7dawPg=="],
 
     "@effect/language-service": ["@effect/language-service@0.86.2", "", { "bin": { "effect-language-service": "cli.js" } }, "sha512-SaPln+8srOqDJDUwNTDmP5e+IYpEDr9+1epGznnsLqu8xvo6VnxyWARdeLpqvZJlb0Pgy9ca7ppqvvdWbHPXAg=="],
 
