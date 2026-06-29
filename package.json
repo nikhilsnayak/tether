@@ -15,7 +15,6 @@
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
     "test": "turbo test",
-    "test:integration": "turbo test:integration",
     "test:watch": "turbo test:watch",
     "prepare": "effect-language-service patch"
   },

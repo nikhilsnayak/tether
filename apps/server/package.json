@@ -6,7 +6,6 @@
   "scripts": {
     "dev": "bun run --watch src/index.ts",
     "test": "vitest run src",
-    "test:integration": "bunx --bun vitest run integrations",
     "test:watch": "vitest --watch"
   },
   "dependencies": {

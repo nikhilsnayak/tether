@@ -19,6 +19,6 @@ const CorsLive = Layer.unwrap(
 );
 
 export const AppLayer = Layer.mergeAll(RpcLive, HealthRoute, CorsLive).pipe(
-  Layer.provide(RpcServer.layerProtocolHttp({ path: '/rpc' })),
-  Layer.provide(RpcSerialization.layerNdjson),
+  Layer.provide(RpcServer.layerProtocolWebsocket({ path: '/rpc' })),
+  Layer.provide(RpcSerialization.layerJson),
 );

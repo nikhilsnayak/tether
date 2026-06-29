@@ -8,10 +8,10 @@ export const NetworkAddressBanner = Layer.effectDiscard(
     const { address } = yield* HttpServer.HttpServer;
     if (address._tag !== 'TcpAddress') return;
 
-    const lines = [`  ➜  Local:    http://localhost:${address.port}/`];
+    const lines = [`  ➜  Local:    ws://localhost:${address.port}/`];
     for (const iface of Object.values(networkInterfaces()).flat()) {
       if (iface?.family === 'IPv4' && !iface.internal) {
-        lines.push(`  ➜  Network:  http://${iface.address}:${address.port}/`);
+        lines.push(`  ➜  Network:  ws://${iface.address}:${address.port}/`);
       }
     }
 
