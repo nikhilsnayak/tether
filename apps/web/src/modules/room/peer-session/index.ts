@@ -177,7 +177,12 @@ const makePeerConnectionActor = ({
   browserCommandQueue,
 }: ActorDependencies) => {
   const session = { roomId, selfId };
+  let nextMessageSequence = 0;
   let state: PeerConnectionActorState = { _tag: 'AwaitingRoomSession' };
+
+  /** Returns a stable message id for this actor's local chat log. */
+  const makeMessageId = (sender: ChatMessage['sender']) =>
+    `${selfId}:${sender}:${nextMessageSequence++}`;
 
   /** Handles the server acknowledgement and establishes this peer's role. */
   const handleRoomSessionOpened = Effect.fn('@tether/web/handleRoomSessionOpened')(function* (
@@ -335,8 +340,11 @@ const makePeerConnectionActor = ({
     if (typeof data !== 'string') {
       return yield* unexpectedCommand('non-text chat payload');
     }
-    const id = yield* Effect.sync(() => crypto.randomUUID());
-    const message: ChatMessage = { id, sender: 'peer', text: data };
+    const message: ChatMessage = {
+      id: makeMessageId('peer'),
+      sender: 'peer',
+      text: data,
+    };
 
     yield* Atom.update(peerSessionViewAtom, (view) => ({
       ...view,
@@ -357,8 +365,11 @@ const makePeerConnectionActor = ({
 
     yield* Effect.sync(() => dataChannel.send(text));
 
-    const id = yield* Effect.sync(() => crypto.randomUUID());
-    const message: ChatMessage = { id, sender: 'self', text };
+    const message: ChatMessage = {
+      id: makeMessageId('self'),
+      sender: 'self',
+      text,
+    };
 
     yield* Atom.update(peerSessionViewAtom, (view) => ({
       ...view,
