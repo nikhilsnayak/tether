@@ -121,7 +121,9 @@ A feature is a vertical slice across only the packages and apps that need it:
 - `apps/server/src/modules/<m>/<X>Repository.ts` — DB access (Drizzle) if needed.
 - Wire into `apps/server/src/Rpc.ts`: `RpcServer.layer(AppRpcs).pipe(Layer.provide(...))`.
 - `packages/client-runtime/src/AppClient.ts` provides the shared React-free RPC
-  client. Browser-specific state and atoms stay in the web feature.
+  client. `packages/client-runtime/src/modules/room/` owns the platform-neutral
+  peer-session actor, state model, and dependency contracts. Browser WebRTC and
+  React Atom adapters stay in the web feature.
 - `apps/web/src/modules/<m>/components/*` + a route in `apps/web/src/routes/`.
 - `apps/mobile/src/modules/<m>/components/*`.
 
@@ -185,6 +187,55 @@ Smallest thing that teaches the Effect signaling server **and** raw WebRTC.
    - ✅ An in-band data channel and Effect atom-backed chat UI validate the
      connection end to end across tabs and LAN devices.
    - ⬜ Add camera and microphone tracks to the validated peer connection.
+
+### Client peer-session flow
+
+`@tether/client-runtime/modules/room` owns the handshake and chat rules; it has
+no React, DOM, or browser WebRTC dependency. The app supplies three Effect
+services: `AppClient` for signaling RPCs, `PeerSessionPlatform` for native WebRTC
+operations, and `PeerSessionEventSink` for projecting domain events into UI
+state.
+
+```text
+LIFETIME
+React screen -> peerSessionAtom -> startPeerSession (scoped resource)
+
+INPUTS                              SERIALIZED PROCESSOR
+OpenRoomSession -> RoomEvent -------------+
+WebRTC listener -> PlatformCommand -------+--> merged stream --> actor
+sendMessage -> SendMessage ---------------+
+
+ACTOR OUTPUTS
+actor --> SendSignal RPC ---------> signaling server
+      --> PeerSessionPlatform ----> browser WebRTC
+      --> PeerSessionEventSink ---> peerSessionViewAtom ---> React render
+```
+
+The private local queue adapts browser callbacks and UI commands into a stream;
+it is merged with the server event stream and consumed by exactly one actor
+fiber. This serialization is the coordination guarantee: offer/answer, ICE,
+channel lifecycle, and chat commands cannot mutate actor state concurrently.
+The `OpenRoomSession` stream controls lifetime. The Effect Atom retains the
+scoped session, and releasing it interrupts the actor, removes listeners, and
+closes the native peer connection.
+
+The deterministic role split is:
+
+- The first peer receives `RoomSessionOpened(peerId = null)`, waits, and becomes
+  the **answerer** after `PeerJoined`.
+- The second peer receives `RoomSessionOpened(peerId = firstPeer)`, creates the
+  chat data channel, becomes the **offerer**, and sends the offer.
+- The answerer applies the offer, creates and sends the answer, then adopts the
+  remotely-created chat channel.
+- Both sides exchange ICE through `SendSignal`. Opening the owned chat channel
+  emits `Connected`; sent and received text emit `ChatMessageAdded` events for
+  the UI projection.
+
+Signals from another peer, SDP that contradicts the assigned role, non-text
+messages, and callbacks from an unowned data channel are logged and ignored.
+RPC/platform failures terminate the actor. `PeerLeft` currently only logs the
+departure; resetting the view or supporting a replacement peer remains future
+session-lifecycle work.
 
 **Done = two browser tabs (or two laptops) on a private 1:1 video/audio call.**
 

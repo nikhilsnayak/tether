@@ -1,10 +1,11 @@
 import { useAtomValue } from '@effect/atom-react';
+import { CatchBoundary } from '@tanstack/react-router';
+import type { RoomSession } from '@tether/client-runtime/modules/room';
 import { PeerId, RoomId } from '@tether/contracts/modules/room';
-import { type FormEvent, useState } from 'react';
+import { Suspense, type FormEvent, useState } from 'react';
 
 import { usePeerConnection } from '../hooks/use-peer-connection';
-import { peerSessionViewAtom } from '../peer-session/atoms';
-import type { RoomSession } from '../types';
+import { peerSessionViewAtom } from '../peer-session/view';
 
 export function RoomConfigurationScreen() {
   const [session, setSession] = useState<RoomSession | null>(null);
@@ -25,8 +26,29 @@ export function RoomConfigurationScreen() {
           Join Room
         </button>
       ) : (
-        <RoomSessionScreen session={session} />
+        <CatchBoundary
+          errorComponent={PeerSessionError}
+          getResetKey={() => `${session.roomId}:${session.selfId}`}
+        >
+          <Suspense fallback={<PeerSessionLoading />}>
+            <RoomSessionScreen session={session} />
+          </Suspense>
+        </CatchBoundary>
       )}
+    </div>
+  );
+}
+
+function PeerSessionLoading() {
+  return <p className='text-sm text-slate-600'>Starting peer session…</p>;
+}
+
+function PeerSessionError({ error }: { error: unknown }) {
+  const message = error instanceof Error ? error.message : 'Unknown peer-session failure';
+
+  return (
+    <div className='rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800'>
+      Peer session failed: {message}
     </div>
   );
 }

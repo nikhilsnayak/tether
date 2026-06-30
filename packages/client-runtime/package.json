@@ -5,11 +5,18 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./modules/*": "./src/modules/*/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run src",
+    "test:watch": "vitest --watch"
   },
   "dependencies": {
+    "@effect/vitest": "catalog:",
     "@tether/contracts": "workspace:*",
     "effect": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

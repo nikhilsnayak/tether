@@ -76,9 +76,11 @@
       "name": "@tether/client-runtime",
       "version": "0.0.0",
       "dependencies": {
+        "@effect/vitest": "catalog:",
         "@tether/contracts": "workspace:*",
         "effect": "catalog:",
         "typescript": "catalog:",
+        "vitest": "catalog:",
       },
     },
     "packages/contracts": {
