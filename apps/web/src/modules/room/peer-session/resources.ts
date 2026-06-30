@@ -1,15 +1,9 @@
-/**
- * Scoped adapters around browser WebRTC resources.
- *
- * Browser callbacks never mutate actor state or run Effects. They snapshot an
- * event into a command and enqueue it for the peer-session actor.
- */
+/** Scoped WebRTC resources and callback-to-command adapters. */
 
 import { Effect, Queue } from 'effect';
 
 import { CHAT_CHANNEL_LABEL, type BrowserCommand } from './model';
 
-/** Acquires the room's peer connection and closes it with the surrounding scope. */
 export const acquirePeerConnection = Effect.acquireRelease(
   Effect.sync(
     () =>
@@ -20,10 +14,6 @@ export const acquirePeerConnection = Effect.acquireRelease(
   (peerConnection) => Effect.sync(() => peerConnection.close()),
 );
 
-/**
- * Bridges peer-connection ICE and remote-channel events into the actor queue.
- * Listener removal runs before the peer connection is closed.
- */
 export const observePeerConnection = Effect.fn('@tether/web/observePeerConnection')(function* (
   peerConnection: RTCPeerConnection,
   queue: Queue.Queue<BrowserCommand>,
@@ -98,6 +88,5 @@ export const observeDataChannel = Effect.fn('@tether/web/observeDataChannel')(fu
   handleOpen();
 });
 
-/** Creates the single in-band chat channel owned by the offerer. */
 export const createChatDataChannel = (peerConnection: RTCPeerConnection) =>
   Effect.sync(() => peerConnection.createDataChannel(CHAT_CHANNEL_LABEL));

@@ -1,5 +1,3 @@
-/** React lifecycle adapter for a scoped peer session. */
-
 import { RegistryContext } from '@effect/atom-react';
 import { Effect, Fiber, Queue } from 'effect';
 import { AtomRegistry } from 'effect/unstable/reactivity';
@@ -11,7 +9,6 @@ import { runPeerSession } from '../peer-session';
 import type { UiCommand } from '../peer-session/model';
 import type { RoomSession } from '../types';
 
-/** Mounts one peer session and interrupts all scoped resources on unmount. */
 export function usePeerConnection({ input }: { input: RoomSession }) {
   const { roomId, selfId } = input;
 

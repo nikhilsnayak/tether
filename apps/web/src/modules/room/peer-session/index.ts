@@ -1,45 +1,3 @@
-/**
- * Runs one serialized WebRTC peer session over the room signaling RPC.
- *
- * State transitions:
- *
- * ```text
- * AwaitingRoomSession
- *   | RoomSessionOpened(peerId = null)
- *   v
- * WaitingForPeer
- *   | PeerJoined(peerId)
- *   v
- * PeerKnown(answerer, channel = awaiting remote)
- *   | RemoteDataChannel("chat")
- *   v
- * PeerKnown(answerer, channel = remote, connecting)
- *   | DataChannelOpened(remote)
- *   v
- * PeerKnown(answerer, channel = remote, open)
- *
- * AwaitingRoomSession
- *   | RoomSessionOpened(peerId)
- *   | createDataChannel("chat") -> create/send offer
- *   v
- * PeerKnown(offerer, channel = local, connecting)
- *   | receive/apply answer -> DataChannelOpened(local)
- *   v
- * PeerKnown(offerer, channel = local, open)
- * ```
- *
- * Command serialization:
- *
- * ```text
- * OpenRoomSession events ------------------+
- *                                           +-> merge -> runForEach -> actor state / WebRTC
- * WebRTC callbacks -> Queue -> Stream ------+
- * ```
- *
- * Only the actor touches WebRTC state. Browser callbacks only enqueue commands,
- * which prevents SDP and ICE operations from overtaking one another.
- */
-
 import { AppClient } from '@tether/client-runtime';
 import {
   IceCandidateSignal,
@@ -69,22 +27,18 @@ import {
   observePeerConnection,
 } from './resources';
 
-/** Concrete signaling client supplied by the application runtime. */
 type AppClientService = AppClient['Service'];
 
-/** Stable services and identity captured by one actor instance. */
 interface ActorDependencies extends RoomSession {
   readonly client: AppClientService;
   readonly browserCommandQueue: Queue.Queue<BrowserCommand>;
 }
 
-/** Extracts the required SDP or fails the session on an invalid browser result. */
 const requireSdp = (description: RTCSessionDescriptionInit, kind: 'offer' | 'answer') =>
   description.sdp === undefined
     ? Effect.fail(new Error(`Failed to create ${kind}: SDP is undefined`))
     : Effect.succeed(description.sdp);
 
-/** Relays one local session description through the room signaling RPC. */
 const sendSessionDescription = Effect.fn('@tether/web/sendSessionDescription')(function* (
   client: AppClientService,
   session: RoomSession,
@@ -97,7 +51,6 @@ const sendSessionDescription = Effect.fn('@tether/web/sendSessionDescription')(f
   });
 });
 
-/** Creates, applies, and relays the offer before queued ICE can be processed. */
 const createAndSendOffer = Effect.fn('@tether/web/createAndSendOffer')(function* (
   client: AppClientService,
   session: RoomSession,
@@ -109,7 +62,6 @@ const createAndSendOffer = Effect.fn('@tether/web/createAndSendOffer')(function*
   yield* sendSessionDescription(client, session, 'offer', sdp);
 });
 
-/** Applies a remote offer, then creates, applies, and relays its answer. */
 const acceptOfferAndSendAnswer = Effect.fn('@tether/web/acceptOfferAndSendAnswer')(function* (
   client: AppClientService,
   session: RoomSession,
@@ -126,11 +78,9 @@ const acceptOfferAndSendAnswer = Effect.fn('@tether/web/acceptOfferAndSendAnswer
   yield* sendSessionDescription(client, session, 'answer', sdp);
 });
 
-/** Applies the answer to the offerer's pending local offer. */
 const acceptAnswer = (peerConnection: RTCPeerConnection, signal: SessionDescriptionSignalType) =>
   Effect.tryPromise(() => peerConnection.setRemoteDescription({ type: 'answer', sdp: signal.sdp }));
 
-/** Converts and applies one remote ICE candidate. */
 const applyRemoteIceCandidate = (
   peerConnection: RTCPeerConnection,
   signal: IceCandidateSignalType,
@@ -144,7 +94,6 @@ const applyRemoteIceCandidate = (
     }),
   );
 
-/** Converts and relays one local ICE candidate through the signaling RPC. */
 const sendLocalIceCandidate = Effect.fn('@tether/web/sendLocalIceCandidate')(function* (
   client: AppClientService,
   session: RoomSession,
@@ -161,7 +110,6 @@ const sendLocalIceCandidate = Effect.fn('@tether/web/sendLocalIceCandidate')(fun
   });
 });
 
-/** Logs and ignores a command that violates the current protocol state. */
 const unexpectedCommand = (message: string) =>
   Effect.logWarning(`Peer session ignored: ${message}`);
 
@@ -180,11 +128,9 @@ const makePeerConnectionActor = ({
   let nextMessageSequence = 0;
   let state: PeerConnectionActorState = { _tag: 'AwaitingRoomSession' };
 
-  /** Returns a stable message id for this actor's local chat log. */
   const makeMessageId = (sender: ChatMessage['sender']) =>
     `${selfId}:${sender}:${nextMessageSequence++}`;
 
-  /** Handles the server acknowledgement and establishes this peer's role. */
   const handleRoomSessionOpened = Effect.fn('@tether/web/handleRoomSessionOpened')(function* (
     peerId: PeerId | null,
   ) {
@@ -213,7 +159,6 @@ const makePeerConnectionActor = ({
     };
   });
 
-  /** Records the joining peer and assigns the incumbent answerer role. */
   const handlePeerJoined = Effect.fn('@tether/web/handlePeerJoined')(function* (peerId: PeerId) {
     if (state._tag !== 'WaitingForPeer') {
       return yield* unexpectedCommand('peer joined outside WaitingForPeer');
@@ -228,7 +173,6 @@ const makePeerConnectionActor = ({
     };
   });
 
-  /** Applies one authenticated signal from the actor's currently known peer. */
   const handleSignal = Effect.fn('@tether/web/handleSignal')(function* (
     peerId: PeerId,
     signal: SessionDescriptionSignalType | IceCandidateSignalType,
@@ -258,7 +202,6 @@ const makePeerConnectionActor = ({
     }
   });
 
-  /** Routes one server room event into the corresponding actor transition. */
   const handleRoomEvent = Effect.fn('@tether/web/handleRoomEvent')(function* (event: RoomEvent) {
     switch (event._tag) {
       case '@tether/RoomSessionOpenedEvent':
@@ -272,7 +215,6 @@ const makePeerConnectionActor = ({
     }
   });
 
-  /** Accepts the one remotely-created chat channel on the answerer. */
   const handleRemoteDataChannel = Effect.fn('@tether/web/handleRemoteDataChannel')(function* (
     dataChannel: RTCDataChannel,
   ) {
@@ -289,7 +231,6 @@ const makePeerConnectionActor = ({
     yield* observeDataChannel(dataChannel, browserCommandQueue);
   });
 
-  /** Relays a locally-generated ICE candidate after a peer is known. */
   const handleLocalIceCandidate = Effect.fn('@tether/web/handleLocalIceCandidate')(function* (
     candidate: RTCIceCandidateInit,
   ) {
@@ -299,7 +240,6 @@ const makePeerConnectionActor = ({
     yield* sendLocalIceCandidate(client, session, candidate);
   });
 
-  /** Marks the owned channel open and sends the temporary transport probe once. */
   const handleDataChannelOpened = Effect.fn('@tether/web/handleDataChannelOpened')(function* (
     dataChannel: RTCDataChannel,
   ) {
@@ -325,7 +265,6 @@ const makePeerConnectionActor = ({
     yield* Effect.logInfo(`Chat data channel opened with peer ${state.peerId}`);
   });
 
-  /** Validates and records one text message from the owned chat channel. */
   const handleDataChannelMessage = Effect.fn('@tether/web/handleDataChannelMessage')(function* (
     dataChannel: RTCDataChannel,
     data: unknown,
@@ -354,7 +293,6 @@ const makePeerConnectionActor = ({
     yield* Effect.logInfo(`Chat message from ${state.peerId}: ${data}`);
   });
 
-  /** Sends one text message over the owned chat channel. */
   const handleUiSendMessage = Effect.fn('@tether/web/handleUiSendMessage')(function* (
     text: string,
   ) {
@@ -377,7 +315,6 @@ const makePeerConnectionActor = ({
     }));
   });
 
-  /** Dispatches one serialized server or browser command. */
   return Effect.fn('@tether/web/handlePeerConnectionCommand')(function* (
     command: PeerConnectionCommand,
   ) {
@@ -399,8 +336,69 @@ const makePeerConnectionActor = ({
 };
 
 /**
- * Runs the room RPC, browser event bridge, and serialized peer actor until the
- * room stream ends or the surrounding scope is interrupted.
+ * Serializes room events, browser callbacks, and UI commands through one actor.
+ * Browser callbacks only enqueue commands, preventing SDP and ICE operations
+ * from overtaking one another.
+ *
+ * ```text
+ *                                  AwaitingRoomSession
+ *                                            |
+ *                     RoomSessionOpenedEvent | acquire RTCPeerConnection
+ *                                            | observe ICE + datachannel events
+ *                         +------------------+------------------+
+ *                         | peerId = null                       | peerId = existing peer
+ *                         v                                     | create local "chat" channel
+ *                   WaitingForPeer                              | observe channel events
+ *                         |                                     | create + set local offer
+ *         PeerJoinedEvent |                                     | SendSignal(offer)
+ *                         |                                     v
+ *                         |                         PeerKnown(role = offerer,
+ *                         |                           channel = DataChannelConnecting)
+ *                         |                                     |
+ *                         |                SignalReceived(answer) | set remote answer
+ *                         |                                     | (state unchanged)
+ *                         v                                     |
+ *             PeerKnown(role = answerer,                        |
+ *               channel = AwaitingRemoteDataChannel)            |
+ *                         |                                     |
+ *   SignalReceived(offer) | set remote offer                    |
+ *                         | create + set local answer           |
+ *                         | SendSignal(answer)                  |
+ *                         | (state unchanged)                   |
+ *                         |                                     |
+ *      RemoteDataChannel  | require label = "chat"              |
+ *                         | observe channel events              |
+ *                         v                                     |
+ *             PeerKnown(role = answerer,                        |
+ *               channel = DataChannelConnecting)                |
+ *                         |                                     |
+ *                         +------------------+------------------+
+ *                                            |
+ *                          DataChannelOpened | require owned channel
+ *                                            | set view.status = connected
+ *                                            v
+ *                                PeerKnown(role unchanged,
+ *                                  channel = DataChannelOpen)
+ *                                            |
+ *                 +--------------------------+--------------------------+
+ *                 |                          |                          |
+ *                 v                          v                          v
+ * DataChannelMessageReceived        SendMessage UI command       duplicate open
+ * validate text + owned channel     dataChannel.send(text)          ignored
+ * append peer message to atom       append self message to atom         |
+ *                 |                          |                          |
+ *                 +--------------------------+--------------------------+
+ *                                            |
+ *                              state remains DataChannelOpen
+ *
+ * While PeerKnown, ICE is exchanged independently of role/channel state:
+ *
+ *   LocalIceCandidate ------------> SendSignal(ice candidate)
+ *   SignalReceived(ice candidate) -> RTCPeerConnection.addIceCandidate(...)
+ *
+ * PeerLeftEvent is currently logged without changing actor or view state.
+ * Commands invalid for the current state or peer are logged and ignored.
+ * ```
  */
 export const runPeerSession = Effect.fn('@tether/web/runPeerSession')(function* (
   session: RoomSession,

@@ -32,8 +32,8 @@ So v0 is identical whether Tether stays "a private calling app" or grows into
 ## 2. Goals & constraints
 
 - **Primary goal:** experiment with / learn **everything** — especially Effect.
-  The Effect learning lives in the **signaling server** (rooms, PubSub, Scope,
-  fibers, Schema'd protocol), not in WebRTC itself.
+  Effect owns the signaling server and the client's serialized peer-session
+  workflow; browser WebRTC callbacks are adapted into that workflow as commands.
 - **Secondary:** genuinely useful in daily life (calling a specific person).
 - **Cost: zero.** WebRTC media is peer-to-peer (never touches the server), so no
   media-server cost. Signaling server is tiny (Bun on a free tier or localhost).
@@ -43,8 +43,7 @@ So v0 is identical whether Tether stays "a private calling app" or grows into
 - **WebRTC: raw, by hand** ("raw-dog it") — deliberate learning rep. 1:1 is the
   tractable case (no SFU/mesh/simulcast). If it ever eats weeks, fall back to
   LiveKit (open-source, self-hostable) and move on — but the intent is to learn
-  the fundamentals: offer/answer, ICE, STUN/TURN, perfect negotiation,
-  multi-track.
+  the fundamentals: offer/answer, ICE, STUN/TURN, renegotiation, and multi-track.
 
 ## 3. Roles & platforms (decided)
 
@@ -89,7 +88,7 @@ implying movies-only.)
 ## 5. Tech stack (Nikhil's `turborepo-effect-starter`)
 
 Monorepo at `/home/nikhils/.personal/tether` (its own git repo). Bun +
-Turborepo. **Effect 4 (beta, `^4.0.0-beta.90`)**, React 19, TypeScript 6,
+Turborepo. **Effect 4 (beta, `^4.0.0-beta.91`)**, React 19, TypeScript 6,
 Tailwind v4, oxlint/oxfmt.
 
 ```
@@ -99,14 +98,13 @@ apps/
   mobile/   Expo 56 + expo-router + @effect/atom-react + react-native 0.85
 packages/
   contracts/      shared Effect Schema + @effect/rpc definitions; exports ./modules/*
-  client-runtime/ shared client (AppClient, Atoms per module); exports ./modules/*
+  client-runtime/ shared React-free RPC client
   ui/             shared React components (button, input, field, toast, ...)
 ```
 
 ### Architecture pattern: **`@effect/rpc`, vertical feature-slices**
 
-A feature = one `module` replicated across packages. The example slice is `todo`.
-To add a feature you mirror its files:
+A feature is a vertical slice across only the packages and apps that need it:
 
 - `packages/contracts/src/modules/<m>/Schemas.ts` — `Schema` types, branded ids
   (e.g. `Schema.String.check(Schema.isUUID(7)).pipe(Schema.brand('TodoId'))`),
@@ -122,7 +120,8 @@ To add a feature you mirror its files:
 - `apps/server/src/modules/<m>/<X>Service.ts` — `Context.Service` business logic.
 - `apps/server/src/modules/<m>/<X>Repository.ts` — DB access (Drizzle) if needed.
 - Wire into `apps/server/src/Rpc.ts`: `RpcServer.layer(AppRpcs).pipe(Layer.provide(...))`.
-- `packages/client-runtime/src/modules/<m>/Atoms.ts` + `index.ts` — `@effect/atom-react`.
+- `packages/client-runtime/src/AppClient.ts` provides the shared React-free RPC
+  client. Browser-specific state and atoms stay in the web feature.
 - `apps/web/src/modules/<m>/components/*` + a route in `apps/web/src/routes/`.
 - `apps/mobile/src/modules/<m>/components/*`.
 
@@ -178,11 +177,14 @@ Smallest thing that teaches the Effect signaling server **and** raw WebRTC.
    - ✅ **Tests** — 13 service/handler tests plus 2 real HTTP/NDJSON integration
      tests in `apps/server/integrations/`, covering streaming, cancellation,
      typed wire errors, capacity, duplicate peers, and membership validation.
-3. ⬜ **`apps/web` — two tabs, raw `RTCPeerConnection`:**
-   - Both sides send **camera + mic**.
-   - Perfect-negotiation handshake (polite/impolite peer) over the signaling
-     channel; free Google STUN; no TURN yet.
-   - Connection-status atoms via `@effect/atom-react`.
+3. 🟨 **`apps/web` — raw `RTCPeerConnection`:**
+   - ✅ Deterministic offerer/answerer handshake over the signaling stream with
+     Google STUN and no TURN.
+   - ✅ One serialized peer-session actor coordinates room events, WebRTC
+     callbacks, ICE, and UI commands.
+   - ✅ An in-band data channel and Effect atom-backed chat UI validate the
+     connection end to end across tabs and LAN devices.
+   - ⬜ Add camera and microphone tracks to the validated peer connection.
 
 **Done = two browser tabs (or two laptops) on a private 1:1 video/audio call.**
 
@@ -237,8 +239,7 @@ existing HTTP NDJSON protocol — no WebSocket.**
   `@tether/*`, and the example slices were removed. **Current state:** room
   contracts, scoped server service, RPC handlers, HTTP/NDJSON wiring, typed
   errors, unit tests, and integration tests are complete and typecheck clean.
-  **Next:** use `@tether/client-runtime/modules/room` to consume
-  `OpenRoomSession` and `SendSignal`, then implement the web
-  `RTCPeerConnection` client.
+  The web client now completes signaling, ICE exchange, and text chat over a
+  WebRTC data channel. **Next:** add camera and microphone tracks.
 - Source template (reference only): `/home/nikhils/.personal/turborepo-effect-starter`.
 - Reference example slice to mirror: the **`todo`** module across all packages.
