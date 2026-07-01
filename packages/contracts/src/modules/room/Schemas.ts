@@ -57,6 +57,8 @@ export class RoomFull extends Schema.TaggedErrorClass<RoomFull>()('@tether/RoomF
   roomId: RoomId,
 }) {}
 
+export const isRoomFull = Schema.is(RoomFull);
+
 export class PeerAlreadyJoined extends Schema.TaggedErrorClass<PeerAlreadyJoined>()(
   '@tether/PeerAlreadyJoined',
   {
@@ -65,6 +67,8 @@ export class PeerAlreadyJoined extends Schema.TaggedErrorClass<PeerAlreadyJoined
   },
 ) {}
 
+export const isPeerAlreadyJoined = Schema.is(PeerAlreadyJoined);
+
 export class PeerNotInRoom extends Schema.TaggedErrorClass<PeerNotInRoom>()(
   '@tether/PeerNotInRoom',
   {
@@ -72,6 +76,8 @@ export class PeerNotInRoom extends Schema.TaggedErrorClass<PeerNotInRoom>()(
     peerId: PeerId,
   },
 ) {}
+
+export const isPeerNotInRoom = Schema.is(PeerNotInRoom);
 
 export const RoomEvent = Schema.Union([
   RoomSessionOpenedEvent,

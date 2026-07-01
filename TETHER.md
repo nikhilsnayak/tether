@@ -33,7 +33,7 @@ So v0 is identical whether Tether stays "a private calling app" or grows into
 
 - **Primary goal:** experiment with / learn **everything** — especially Effect.
   Effect owns the signaling server and the client's serialized peer-session
-  workflow; browser WebRTC callbacks are adapted into that workflow as commands.
+  workflow; browser WebRTC callbacks are adapted into that workflow as platform events.
 - **Secondary:** genuinely useful in daily life (calling a specific person).
 - **Cost: zero.** WebRTC media is peer-to-peer (never touches the server), so no
   media-server cost. Signaling server is tiny (Bun on a free tier or localhost).
@@ -202,7 +202,7 @@ React screen -> peerSessionAtom -> startPeerSession (scoped resource)
 
 INPUTS                              SERIALIZED PROCESSOR
 OpenRoomSession -> RoomEvent -------------+
-WebRTC listener -> PlatformCommand -------+--> merged stream --> actor
+WebRTC listener -> PlatformEvent ---------+--> merged stream --> actor
 sendMessage -> SendMessage ---------------+
 
 ACTOR OUTPUTS
@@ -215,9 +215,11 @@ The private local queue adapts browser callbacks and UI commands into a stream;
 it is merged with the server event stream and consumed by exactly one actor
 fiber. This serialization is the coordination guarantee: offer/answer, ICE,
 channel lifecycle, and chat commands cannot mutate actor state concurrently.
-The `OpenRoomSession` stream controls lifetime. The Effect Atom retains the
-scoped session, and releasing it interrupts the actor, removes listeners, and
-closes the native peer connection.
+The `OpenRoomSession` stream controls the overall session lifetime. Within it,
+the actor owns one replaceable connection-generation child scope containing the
+native peer connection and all of its listeners. Releasing the Effect Atom
+closes the whole session; replacing a departed peer closes only the current
+generation.
 
 The deterministic role split is:
 
@@ -232,10 +234,16 @@ The deterministic role split is:
   the UI projection.
 
 Signals from another peer, SDP that contradicts the assigned role, non-text
-messages, and callbacks from an unowned data channel are logged and ignored.
-RPC/platform failures terminate the actor. `PeerLeft` currently only logs the
-departure; resetting the view or supporting a replacement peer remains future
-session-lifecycle work.
+messages, and callbacks from an unowned connection or data channel are logged
+and ignored. When the active peer leaves, its generation is closed before a
+fresh connection is acquired; the incumbent returns to `WaitingForPeer` and can
+accept the next `PeerJoined`. Failure of the current peer connection or closure
+of its owned data channel starts a short timer in that generation scope. A
+concurrent `PeerLeft` closes the scope and cancels the timer; otherwise expiry
+terminates the actor and projects `SessionFailed`. Once a peer is known, a
+separate generation-scoped deadline fails negotiation if the chat channel never
+opens. Events and timeout inputs carrying stale handles are ignored. Other
+RPC/platform failures also terminate the actor.
 
 **Done = two browser tabs (or two laptops) on a private 1:1 video/audio call.**
 

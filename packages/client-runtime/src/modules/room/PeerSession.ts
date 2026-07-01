@@ -1,4 +1,7 @@
 import {
+  isPeerAlreadyJoined,
+  isPeerNotInRoom,
+  isRoomFull,
   SessionDescriptionSignal,
   type IceCandidateSignal,
   type PeerId,
@@ -6,7 +9,7 @@ import {
   type SessionDescriptionSignal as SessionDescriptionSignalType,
   type Signal,
 } from '@tether/contracts/modules/room';
-import { Effect, Queue, Stream } from 'effect';
+import { Cause, Data, Effect, Exit, Option, Queue, Scope, Stream } from 'effect';
 
 import { AppClient } from '../../AppClient';
 import {
@@ -14,50 +17,88 @@ import {
   type ChatMessage,
   type DataChannelHandle,
   type PeerConnectionHandle,
-  type PeerSessionActorState,
-  type PlatformCommand,
-  type PlatformCommandDispatch,
+  type PlatformEvent,
   type RoomSession,
   type SessionDescription,
 } from './PeerSessionModel';
 import { PeerSessionEventSink, PeerSessionPlatform } from './PeerSessionServices';
+
+type PeerRole = 'offerer' | 'answerer';
+
+type DataChannelState =
+  | {
+      readonly _tag: 'AwaitingRemoteDataChannel';
+    }
+  | {
+      readonly _tag: 'DataChannelConnecting';
+      readonly dataChannel: DataChannelHandle;
+    }
+  | {
+      readonly _tag: 'DataChannelOpen';
+      readonly dataChannel: DataChannelHandle;
+    };
+
+type PeerSessionActorState =
+  | {
+      readonly _tag: 'AwaitingRoomSession';
+    }
+  | {
+      readonly _tag: 'WaitingForPeer';
+      readonly generation: PeerConnectionGeneration;
+    }
+  | {
+      readonly _tag: 'PeerKnown';
+      readonly generation: PeerConnectionGeneration;
+      readonly peerId: PeerId;
+      readonly role: PeerRole;
+      readonly dataChannelState: DataChannelState;
+    };
 
 type PeerSessionUiCommand = {
   readonly _tag: 'SendMessage';
   readonly message: string;
 };
 
-type PeerSessionLocalCommand = PlatformCommand | PeerSessionUiCommand;
+type PeerSessionLocalInput = PlatformEvent | PeerSessionUiCommand;
 
-type PeerSessionCommand =
+type PeerSessionLocalInputDispatch = (input: PeerSessionLocalInput) => void;
+
+type PeerSessionInput =
   | {
       readonly _tag: 'RoomEvent';
       readonly event: RoomEvent;
     }
-  | PeerSessionLocalCommand;
+  | PeerSessionLocalInput;
+
+type PeerConnectionGeneration = {
+  readonly scope: Scope.Closeable;
+  readonly peerConnection: PeerConnectionHandle;
+};
 
 const requireDescription = (description: SessionDescription, type: 'offer' | 'answer') =>
   description.sdp === undefined
     ? Effect.fail(new Error(`Failed to create ${type}: SDP is undefined`))
     : Effect.succeed({ type, sdp: description.sdp } as const);
 
-const unexpectedCommand = (message: string) =>
-  Effect.logWarning(`Peer session ignored: ${message}`);
+class PeerTransportFailure extends Data.TaggedError('PeerTransportFailure')<{
+  readonly reason: 'peer-connection-failed' | 'data-channel-closed';
+}> {}
 
 /**
- * Builds the stateful command handler for one peer session.
+ * Builds the stateful input handler for one peer session.
  *
  * The handler deliberately has no browser or React knowledge. It mutates one
- * private state value and interprets each command using the injected RPC,
- * platform, and event-sink services. Commands must be passed to the returned
+ * private state value and interprets each input using the injected RPC,
+ * platform, and event-sink services. Inputs must be passed to the returned
  * handler serially; {@link startPeerSession} provides that serialization in
  * production, while tests can drive the handler directly.
  */
 export const makePeerSessionActor = Effect.fn('@tether/client-runtime/makePeerSessionActor')(
-  function* (session: RoomSession, dispatchPlatformCommand: PlatformCommandDispatch) {
+  function* (session: RoomSession, dispatchLocalInput: PeerSessionLocalInputDispatch) {
     const client = yield* AppClient;
     const platform = yield* PeerSessionPlatform;
     const eventSink = yield* PeerSessionEventSink;
+    const peerSessionScope = yield* Scope.Scope;
     let nextMessageSequence = 0;
     let state: PeerSessionActorState = {
       _tag: 'AwaitingRoomSession',
@@ -91,31 +132,60 @@ export const makePeerSessionActor = Effect.fn('@tether/client-runtime/makePeerSe
       },
     );
 
+    const acquirePeerConnectionGeneration = Effect.fn(
+      '@tether/client-runtime/acquirePeerConnectionGeneration',
+    )(function* () {
+      const connectionScope = yield* Scope.fork(peerSessionScope);
+      const peerConnection = yield* platform.acquirePeerConnection.pipe(
+        Scope.provide(connectionScope),
+      );
+      yield* platform
+        .observePeerConnection(peerConnection, dispatchLocalInput)
+        .pipe(Scope.provide(connectionScope));
+
+      return { scope: connectionScope, peerConnection };
+    });
+
     const handleRoomSessionOpened = Effect.fn('@tether/client-runtime/handleRoomSessionOpened')(
       function* (peerId: PeerId | null) {
         if (state._tag !== 'AwaitingRoomSession') {
-          return yield* unexpectedCommand('room session opened more than once');
+          return yield* Effect.logWarning(
+            `Ignored duplicate room session open: room=${session.roomId} self=${session.selfId}`,
+          );
         }
 
-        const peerConnection = yield* platform.acquirePeerConnection;
-        yield* platform.observePeerConnection(peerConnection, dispatchPlatformCommand);
+        const generation = yield* acquirePeerConnectionGeneration();
 
         if (peerId === null) {
-          state = { _tag: 'WaitingForPeer', peerConnection };
+          state = { _tag: 'WaitingForPeer', generation };
+          yield* Effect.logInfo(
+            `Room session opened; waiting for peer: room=${session.roomId} self=${session.selfId}`,
+          );
+
           return;
         }
 
-        const dataChannel = yield* platform.createDataChannel(peerConnection, CHAT_CHANNEL_LABEL);
-        yield* platform.observeDataChannel(dataChannel, dispatchPlatformCommand);
-        yield* createAndSendOffer(peerConnection);
+        const dataChannel = yield* platform.createDataChannel(
+          generation.peerConnection,
+          CHAT_CHANNEL_LABEL,
+        );
+
+        yield* platform
+          .observeDataChannel(dataChannel, dispatchLocalInput)
+          .pipe(Scope.provide(generation.scope));
+
+        yield* createAndSendOffer(generation.peerConnection);
 
         state = {
           _tag: 'PeerKnown',
-          peerConnection,
+          generation,
           peerId,
           role: 'offerer',
           dataChannelState: { _tag: 'DataChannelConnecting', dataChannel },
         };
+        yield* Effect.logInfo(
+          `Room session opened as offerer; offer sent: room=${session.roomId} self=${session.selfId} peer=${peerId}`,
+        );
       },
     );
 
@@ -123,16 +193,21 @@ export const makePeerSessionActor = Effect.fn('@tether/client-runtime/makePeerSe
       peerId: PeerId,
     ) {
       if (state._tag !== 'WaitingForPeer') {
-        return yield* unexpectedCommand('peer joined outside WaitingForPeer');
+        return yield* Effect.logDebug(
+          `Ignored peer join outside WaitingForPeer: room=${session.roomId} self=${session.selfId} peer=${peerId}`,
+        );
       }
 
       state = {
         _tag: 'PeerKnown',
-        peerConnection: state.peerConnection,
+        generation: state.generation,
         peerId,
         role: 'answerer',
         dataChannelState: { _tag: 'AwaitingRemoteDataChannel' },
       };
+      yield* Effect.logInfo(
+        `Peer joined; acting as answerer: room=${session.roomId} self=${session.selfId} peer=${peerId}`,
+      );
     });
 
     const handleSignal = Effect.fn('@tether/client-runtime/handleSignal')(function* (
@@ -140,29 +215,69 @@ export const makePeerSessionActor = Effect.fn('@tether/client-runtime/makePeerSe
       signal: SessionDescriptionSignalType | IceCandidateSignal,
     ) {
       if (state._tag !== 'PeerKnown' || peerId !== state.peerId) {
-        return yield* unexpectedCommand('signal arrived before or from outside the active pairing');
+        return yield* Effect.logDebug(
+          `Ignored signal outside active pairing: room=${session.roomId} self=${session.selfId} peer=${peerId}`,
+        );
       }
 
       switch (signal._tag) {
         case '@tether/SessionDescriptionSignal': {
           if (signal.type === 'offer') {
             if (state.role !== 'answerer') {
-              return yield* unexpectedCommand('offer received by the offerer');
+              return yield* Effect.logWarning(
+                `Ignored offer received as offerer: room=${session.roomId} self=${session.selfId} peer=${peerId}`,
+              );
             }
-            return yield* acceptOfferAndSendAnswer(state.peerConnection, signal);
+            yield* acceptOfferAndSendAnswer(state.generation.peerConnection, signal);
+            yield* Effect.logInfo(
+              `Offer accepted and answer sent: room=${session.roomId} self=${session.selfId} peer=${peerId}`,
+            );
+            return;
           }
 
           if (state.role !== 'offerer') {
-            return yield* unexpectedCommand('answer received by the answerer');
+            return yield* Effect.logWarning(
+              `Ignored answer received as answerer: room=${session.roomId} self=${session.selfId} peer=${peerId}`,
+            );
           }
-          return yield* platform.setRemoteDescription(state.peerConnection, {
+          yield* platform.setRemoteDescription(state.generation.peerConnection, {
             type: 'answer',
             sdp: signal.sdp,
           });
+          yield* Effect.logInfo(
+            `Answer applied: room=${session.roomId} self=${session.selfId} peer=${peerId}`,
+          );
+          return;
         }
         case '@tether/IceCandidateSignal':
-          return yield* platform.addIceCandidate(state.peerConnection, signal);
+          return yield* platform.addIceCandidate(state.generation.peerConnection, signal);
       }
+    });
+
+    const handlePeerLeft = Effect.fn('@tether/client-runtime/handlePeerLeft')(function* (
+      peerId: PeerId,
+    ) {
+      if (state._tag !== 'PeerKnown' || peerId !== state.peerId) {
+        return yield* Effect.logDebug(
+          `Ignored departure outside active pairing: room=${session.roomId} self=${session.selfId} peer=${peerId}`,
+        );
+      }
+
+      const currentGeneration = state.generation;
+
+      yield* Scope.close(currentGeneration.scope, Exit.void);
+
+      const newGeneration = yield* acquirePeerConnectionGeneration();
+
+      state = {
+        _tag: 'WaitingForPeer',
+        generation: newGeneration,
+      };
+
+      yield* Effect.logInfo(
+        `Peer departed; waiting for replacement: room=${session.roomId} self=${session.selfId} peer=${peerId}`,
+      );
+      yield* eventSink.emit({ _tag: 'PeerDeparted', peerId });
     });
 
     const handleRoomEvent = Effect.fn('@tether/client-runtime/handleRoomEvent')(function* (
@@ -176,32 +291,81 @@ export const makePeerSessionActor = Effect.fn('@tether/client-runtime/makePeerSe
         case '@tether/SignalReceivedEvent':
           return yield* handleSignal(event.peerId, event.signal);
         case '@tether/PeerLeftEvent':
-          return yield* Effect.logInfo(`Peer left room: ${event.peerId}`);
+          return yield* handlePeerLeft(event.peerId);
       }
     });
 
     const handleRemoteDataChannel = Effect.fn('@tether/client-runtime/handleRemoteDataChannel')(
-      function* (dataChannel: DataChannelHandle) {
+      function* (peerConnection: PeerConnectionHandle, dataChannel: DataChannelHandle) {
         if (
           state._tag !== 'PeerKnown' ||
+          state.generation.peerConnection !== peerConnection ||
           state.role !== 'answerer' ||
           state.dataChannelState._tag !== 'AwaitingRemoteDataChannel' ||
           platform.dataChannelLabel(dataChannel) !== CHAT_CHANNEL_LABEL
         ) {
-          return yield* unexpectedCommand('unexpected remote data channel');
+          return yield* Effect.logDebug(
+            `Ignored unexpected remote data channel: room=${session.roomId} self=${session.selfId}`,
+          );
         }
 
         state = { ...state, dataChannelState: { _tag: 'DataChannelConnecting', dataChannel } };
-        yield* platform.observeDataChannel(dataChannel, dispatchPlatformCommand);
+        yield* platform
+          .observeDataChannel(dataChannel, dispatchLocalInput)
+          .pipe(Scope.provide(state.generation.scope));
+        yield* Effect.logInfo(
+          `Remote data channel accepted: room=${session.roomId} self=${session.selfId} peer=${state.peerId}`,
+        );
       },
     );
 
     const handleLocalIceCandidate = Effect.fn('@tether/client-runtime/handleLocalIceCandidate')(
-      function* (candidate: IceCandidateSignal) {
-        if (state._tag !== 'PeerKnown') {
-          return yield* unexpectedCommand('local ICE candidate arrived before a peer was known');
+      function* (peerConnection: PeerConnectionHandle, candidate: IceCandidateSignal) {
+        if (state._tag !== 'PeerKnown' || state.generation.peerConnection !== peerConnection) {
+          return yield* Effect.logDebug(
+            `Ignored local ICE candidate outside active pairing: room=${session.roomId} self=${session.selfId}`,
+          );
         }
         yield* sendSignal(candidate);
+      },
+    );
+
+    const handlePeerConnectionFailed = Effect.fn(
+      '@tether/client-runtime/handlePeerConnectionFailed',
+    )(function* (peerConnection: PeerConnectionHandle) {
+      if (
+        state._tag === 'AwaitingRoomSession' ||
+        state.generation.peerConnection !== peerConnection
+      ) {
+        return yield* Effect.logDebug(
+          `Ignored failure from unowned peer connection: room=${session.roomId} self=${session.selfId}`,
+        );
+      }
+
+      yield* Effect.logWarning(
+        `Peer connection failed: room=${session.roomId} self=${session.selfId}`,
+      );
+
+      return yield* new PeerTransportFailure({ reason: 'peer-connection-failed' });
+    });
+
+    const handleDataChannelClosed = Effect.fn('@tether/client-runtime/handleDataChannelClosed')(
+      function* (dataChannel: DataChannelHandle) {
+        if (
+          state._tag !== 'PeerKnown' ||
+          state.dataChannelState._tag === 'AwaitingRemoteDataChannel' ||
+          state.dataChannelState.dataChannel !== dataChannel
+        ) {
+          return yield* Effect.logDebug(
+            `Ignored close from unowned data channel: room=${session.roomId} self=${session.selfId}`,
+          );
+        }
+
+        yield* Effect.logWarning(
+          `Data channel closed: room=${session.roomId} self=${session.selfId}`,
+        );
+
+        return yield* new PeerTransportFailure({ reason: 'data-channel-closed' });
       },
     );
 
@@ -220,12 +384,16 @@ export const makePeerSessionActor = Effect.fn('@tether/client-runtime/makePeerSe
           state.dataChannelState._tag !== 'DataChannelConnecting' ||
           state.dataChannelState.dataChannel !== dataChannel
         ) {
-          return yield* unexpectedCommand('open event came from an unowned data channel');
+          return yield* Effect.logDebug(
+            `Ignored open from unowned data channel: room=${session.roomId} self=${session.selfId}`,
+          );
         }
 
         state = { ...state, dataChannelState: { _tag: 'DataChannelOpen', dataChannel } };
+        yield* Effect.logInfo(
+          `Data channel opened: room=${session.roomId} self=${session.selfId} peer=${state.peerId}`,
+        );
         yield* eventSink.emit({ _tag: 'Connected', peerId: state.peerId });
-        yield* Effect.logInfo(`Chat data channel opened with peer ${state.peerId}`);
       },
     );
 
@@ -236,10 +404,14 @@ export const makePeerSessionActor = Effect.fn('@tether/client-runtime/makePeerSe
           state.dataChannelState._tag !== 'DataChannelOpen' ||
           state.dataChannelState.dataChannel !== dataChannel
         ) {
-          return yield* unexpectedCommand('message came from an unowned data channel');
+          return yield* Effect.logDebug(
+            `Ignored message from unowned data channel: room=${session.roomId} self=${session.selfId}`,
+          );
         }
         if (typeof data !== 'string') {
-          return yield* unexpectedCommand('non-text chat payload');
+          return yield* Effect.logWarning(
+            `Ignored non-text chat payload: room=${session.roomId} self=${session.selfId}`,
+          );
         }
 
         yield* eventSink.emit({
@@ -253,7 +425,9 @@ export const makePeerSessionActor = Effect.fn('@tether/client-runtime/makePeerSe
       text: string,
     ) {
       if (state._tag !== 'PeerKnown' || state.dataChannelState._tag !== 'DataChannelOpen') {
-        return yield* unexpectedCommand('UI send message on a non-open data channel');
+        return yield* Effect.logWarning(
+          `Ignored send while data channel is not open: room=${session.roomId} self=${session.selfId}`,
+        );
       }
 
       yield* platform.sendDataChannelMessage(state.dataChannelState.dataChannel, text);
@@ -263,22 +437,26 @@ export const makePeerSessionActor = Effect.fn('@tether/client-runtime/makePeerSe
       });
     });
 
-    return Effect.fn('@tether/client-runtime/handlePeerSessionCommand')(function* (
-      command: PeerSessionCommand,
+    return Effect.fn('@tether/client-runtime/handlePeerSessionInput')(function* (
+      input: PeerSessionInput,
     ) {
-      switch (command._tag) {
+      switch (input._tag) {
         case 'RoomEvent':
-          return yield* handleRoomEvent(command.event);
+          return yield* handleRoomEvent(input.event);
         case 'RemoteDataChannel':
-          return yield* handleRemoteDataChannel(command.dataChannel);
+          return yield* handleRemoteDataChannel(input.peerConnection, input.dataChannel);
         case 'LocalIceCandidate':
-          return yield* handleLocalIceCandidate(command.candidate);
+          return yield* handleLocalIceCandidate(input.peerConnection, input.candidate);
         case 'DataChannelOpened':
-          return yield* handleDataChannelOpened(command.dataChannel);
+          return yield* handleDataChannelOpened(input.dataChannel);
         case 'DataChannelMessageReceived':
-          return yield* handleDataChannelMessage(command.dataChannel, command.data);
+          return yield* handleDataChannelMessage(input.dataChannel, input.data);
+        case 'PeerConnectionFailed':
+          return yield* handlePeerConnectionFailed(input.peerConnection);
+        case 'DataChannelClosed':
+          return yield* handleDataChannelClosed(input.dataChannel);
         case 'SendMessage':
-          return yield* handleUiSendMessage(command.message);
+          return yield* handleUiSendMessage(input.message);
       }
     });
   },
@@ -293,7 +471,7 @@ export const makePeerSessionActor = Effect.fn('@tether/client-runtime/makePeerSe
  * ```text
  * INPUTS                              SERIALIZED PROCESSOR
  * OpenRoomSession -> RoomEvent -------------+
- * platform callback -> PlatformCommand -----+--> merged stream --> actor
+ * platform callback -> PlatformEvent -------+--> merged stream --> actor
  * sendMessage -> SendMessage ---------------+
  *
  * ACTOR OUTPUTS
@@ -308,18 +486,21 @@ export const makePeerSessionActor = Effect.fn('@tether/client-runtime/makePeerSe
  * The room stream is the lifetime authority: when it ends, `haltStrategy:
  * "left"` ends the merged stream even though the local queue is still open.
  *
- * The surrounding scope owns the actor fiber, peer connection, and installed
- * platform listeners. Closing that scope interrupts the stream and runs every
- * registered finalizer. The returned {@link PeerSession.sendMessage} only
+ * The surrounding scope owns the actor fiber and one replaceable connection-
+ * generation child scope. The child owns the peer connection plus its peer-
+ * connection and data-channel listeners. Closing the session closes its current
+ * child as well. The returned {@link PeerSession.sendMessage} only
  * reports whether the command was accepted by the local queue; delivery is
  * validated later by the actor against the current data-channel state.
  *
- * Invalid or stale commands are logged and ignored rather than changing state:
+ * Invalid or stale inputs are logged and ignored rather than changing state:
  * this includes signals from another peer, role-inappropriate SDP, non-text
- * payloads, and events from an unowned channel. A duplicate open event for the
- * owned channel is intentionally idempotent. `PeerLeftEvent` currently records
- * the departure only; reconnect/reset behavior has not been introduced yet.
- * Failures from RPC or platform operations are not recovered here and therefore
+ * payloads, and events carrying an unowned connection or channel handle. A
+ * duplicate open event for the owned channel is intentionally idempotent. When
+ * the active peer leaves, the actor closes that generation, acquires a fresh
+ * one, returns to `WaitingForPeer`, and emits `PeerDeparted`.
+ * A failure from the current peer connection or the current owned data channel
+ * terminates the actor immediately. Other RPC or platform failures also
  * terminate the scoped actor fiber.
  *
  * ```text
@@ -328,8 +509,8 @@ export const makePeerSessionActor = Effect.fn('@tether/client-runtime/makePeerSe
  * [AwaitingRoomSession]
  *          |
  *          | RoomSessionOpened
- *          | - acquire peer connection
- *          | - observe ICE and remote data-channel events
+ *          | - fork a connection-generation scope
+ *          | - acquire and observe its peer connection
  *          |
  *          +-- peerId = null ---------> ANSWERER PATH
  *          |
@@ -401,6 +582,42 @@ export const makePeerSessionActor = Effect.fn('@tether/client-runtime/makePeerSe
  *                - ignore; state remains open
  *
  *
+ * ACTIVE PEER DEPARTURE
+ *
+ * [PeerKnown + current generation]
+ *          |
+ *          | PeerLeft(active peer)
+ *          | - close current generation scope
+ *          |   - remove data-channel listeners
+ *          |   - remove peer-connection listeners
+ *          |   - close peer connection and its channels
+ *          | - fork and acquire a fresh generation
+ *          | - emit PeerDeparted(peerId)
+ *          v
+ * [WaitingForPeer + fresh generation]
+ *          |
+ *          | PeerJoined(nextPeerId)
+ *          v
+ * [PeerKnown]
+ *   role: answerer
+ *   channel: AwaitingRemoteDataChannel
+ *
+ * Queued callbacks from the closed generation carry its old opaque handle.
+ * Connection/channel identity checks reject them after replacement.
+ *
+ *
+ * TERMINAL TRANSPORT FAILURE
+ *
+ * PeerConnectionFailed(current generation)
+ *   OR DataChannelClosed(current owned channel)
+ *          |
+ *          | - fail actor immediately with PeerTransportFailure
+ *          | - emit SessionFailed
+ *          | - close session scope and its current generation
+ *
+ * The same events carrying stale generation/channel handles are ignored.
+ *
+ *
  * ICE EXCHANGE (independent while PeerKnown)
  *
  * LocalIceCandidate
@@ -419,34 +636,97 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
   session: RoomSession,
 ) {
   const client = yield* AppClient;
-  const localCommandQueue = yield* Queue.unbounded<PeerSessionLocalCommand>();
-  const dispatchPlatformCommand: PlatformCommandDispatch = (command) => {
-    Queue.offerUnsafe(localCommandQueue, command);
+  const peerSessionEventSink = yield* PeerSessionEventSink;
+  const localInputQueue = yield* Queue.unbounded<PeerSessionLocalInput>();
+  const dispatchLocalInput: PeerSessionLocalInputDispatch = (input) => {
+    Queue.offerUnsafe(localInputQueue, input);
   };
-  const handleCommand = yield* makePeerSessionActor(session, dispatchPlatformCommand);
 
-  yield* Effect.logInfo(`Peer session started: room=${session.roomId} self=${session.selfId}`);
-  yield* Effect.addFinalizer(() =>
-    Effect.logInfo(`Peer session stopped: room=${session.roomId} self=${session.selfId}`),
-  );
-
-  const roomCommandStream = client.OpenRoomSession(session).pipe(
+  const roomInputStream = client.OpenRoomSession(session).pipe(
     Stream.map(
-      ({ event }): PeerSessionCommand => ({
+      ({ event }): PeerSessionInput => ({
         _tag: 'RoomEvent',
         event,
       }),
     ),
   );
-  const localCommandStream = Stream.fromQueue(localCommandQueue);
 
-  yield* Stream.merge(roomCommandStream, localCommandStream, {
-    haltStrategy: 'left',
-  }).pipe(Stream.runForEach(handleCommand), Effect.forkScoped({ startImmediately: true }));
+  const localInputStream = Stream.fromQueue(localInputQueue);
+
+  yield* Effect.logInfo(`Peer session started: room=${session.roomId} self=${session.selfId}`);
+  yield* Effect.addFinalizer(() =>
+    Effect.logInfo(`Peer session stopped: room=${session.roomId} self=${session.selfId}`),
+  );
+  yield* peerSessionEventSink.emit({ _tag: 'SessionStarted' });
+
+  const actorLoop = Effect.gen(function* () {
+    const inputHandler = yield* makePeerSessionActor(session, dispatchLocalInput);
+
+    return yield* Stream.merge(roomInputStream, localInputStream, {
+      haltStrategy: 'left',
+    }).pipe(Stream.runForEach(inputHandler));
+  });
+
+  yield* Effect.scoped(actorLoop).pipe(
+    Effect.onExit(
+      Effect.fnUntraced(function* (exit) {
+        if (Exit.isSuccess(exit)) {
+          yield* Effect.logInfo(
+            `Signaling stream ended: room=${session.roomId} self=${session.selfId}`,
+          );
+          return yield* peerSessionEventSink.emit({ _tag: 'SignalingDisconnected' });
+        }
+
+        if (!Cause.hasInterruptsOnly(exit.cause)) {
+          const maybeError = Cause.findErrorOption(exit.cause);
+
+          if (Option.isSome(maybeError)) {
+            const error = maybeError.value;
+
+            if (isRoomFull(error)) {
+              yield* Effect.logWarning(
+                `Room join rejected because room is full: room=${session.roomId} self=${session.selfId}`,
+              );
+              return yield* peerSessionEventSink.emit({
+                _tag: 'RoomJoinRejected',
+                reason: 'room-full',
+              });
+            }
+
+            if (isPeerAlreadyJoined(error)) {
+              yield* Effect.logWarning(
+                `Room join rejected because peer identity is already present: room=${session.roomId} self=${session.selfId}`,
+              );
+              return yield* peerSessionEventSink.emit({
+                _tag: 'RoomJoinRejected',
+                reason: 'peer-already-joined',
+              });
+            }
+
+            if (isPeerNotInRoom(error)) {
+              yield* Effect.logWarning(
+                `Signaling rejected because peer is no longer in room: room=${session.roomId} self=${session.selfId}`,
+              );
+              return yield* peerSessionEventSink.emit({
+                _tag: 'SignalingDisconnected',
+              });
+            }
+          }
+
+          yield* Effect.logError(
+            `Peer session failed: room=${session.roomId} self=${session.selfId}`,
+            Cause.prettyErrors(exit.cause),
+          );
+          return yield* peerSessionEventSink.emit({ _tag: 'SessionFailed' });
+        }
+      }),
+    ),
+    Effect.forkScoped({ startImmediately: true }),
+  );
 
   return {
     sendMessage: (message) =>
-      Queue.offerUnsafe(localCommandQueue, {
+      Queue.offerUnsafe(localInputQueue, {
         _tag: 'SendMessage',
         message,
       }),

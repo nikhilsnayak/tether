@@ -22,50 +22,16 @@ export interface DataChannelHandle {
   readonly value: unknown;
 }
 
-export type PeerRole = 'offerer' | 'answerer';
-
-export type DataChannelState =
-  | {
-      readonly _tag: 'AwaitingRemoteDataChannel';
-    }
-  | {
-      readonly _tag: 'DataChannelConnecting';
-      readonly dataChannel: DataChannelHandle;
-    }
-  | {
-      readonly _tag: 'DataChannelOpen';
-      readonly dataChannel: DataChannelHandle;
-    };
-
-/**
- * Internal handshake state. A peer connection exists after the room opens;
- * peer identity, negotiation role, and data-channel ownership become available
- * only in the variants that can validly use them.
- */
-export type PeerSessionActorState =
-  | {
-      readonly _tag: 'AwaitingRoomSession';
-    }
-  | {
-      readonly _tag: 'WaitingForPeer';
-      readonly peerConnection: PeerConnectionHandle;
-    }
-  | {
-      readonly _tag: 'PeerKnown';
-      readonly peerConnection: PeerConnectionHandle;
-      readonly peerId: PeerId;
-      readonly role: PeerRole;
-      readonly dataChannelState: DataChannelState;
-    };
-
-/** Events raised by a native platform adapter and serialized through the actor. */
-export type PlatformCommand =
+/** Events observed by a native platform adapter and serialized through the actor. */
+export type PlatformEvent =
   | {
       readonly _tag: 'RemoteDataChannel';
+      readonly peerConnection: PeerConnectionHandle;
       readonly dataChannel: DataChannelHandle;
     }
   | {
       readonly _tag: 'LocalIceCandidate';
+      readonly peerConnection: PeerConnectionHandle;
       readonly candidate: IceCandidateSignal;
     }
   | {
@@ -76,13 +42,15 @@ export type PlatformCommand =
       readonly _tag: 'DataChannelMessageReceived';
       readonly dataChannel: DataChannelHandle;
       readonly data: unknown;
-    };
+    }
+  | { readonly _tag: 'PeerConnectionFailed'; readonly peerConnection: PeerConnectionHandle }
+  | { readonly _tag: 'DataChannelClosed'; readonly dataChannel: DataChannelHandle };
 
 /**
  * Synchronous callback bridge for native event listeners. Dispatch only queues
- * the command; the actor processes it later in its serialized stream.
+ * the event; the actor processes it later in its serialized stream.
  */
-export type PlatformCommandDispatch = (command: PlatformCommand) => void;
+export type PlatformEventDispatch = (event: PlatformEvent) => void;
 
 export interface ChatMessage {
   readonly id: string;
@@ -93,16 +61,40 @@ export interface ChatMessage {
 /** Domain output emitted by the actor without assuming a UI state library. */
 export type PeerSessionEvent =
   | {
+      readonly _tag: 'SessionStarted';
+    }
+  | {
       readonly _tag: 'Connected';
       readonly peerId: PeerId;
     }
   | {
       readonly _tag: 'ChatMessageAdded';
       readonly message: ChatMessage;
+    }
+  | {
+      readonly _tag: 'SignalingDisconnected';
+    }
+  | {
+      readonly _tag: 'SessionFailed';
+    }
+  | {
+      readonly _tag: 'RoomJoinRejected';
+      readonly reason: 'room-full' | 'peer-already-joined';
+    }
+  | {
+      readonly _tag: 'PeerDeparted';
+      readonly peerId: PeerId;
     };
 
 export interface PeerSessionView {
-  readonly status: 'connecting' | 'connected';
+  readonly status:
+    | 'connecting'
+    | 'connected'
+    | 'disconnected'
+    | 'failed'
+    | 'room-full'
+    | 'peer-already-joined'
+    | 'waiting-for-peer';
   readonly messages: ReadonlyArray<ChatMessage>;
 }
 
@@ -117,9 +109,19 @@ export const reducePeerSessionView = (
   event: PeerSessionEvent,
 ): PeerSessionView => {
   switch (event._tag) {
+    case 'SessionStarted':
+      return initialPeerSessionView;
     case 'Connected':
       return { ...view, status: 'connected' };
     case 'ChatMessageAdded':
       return { ...view, messages: [...view.messages, event.message] };
+    case 'SignalingDisconnected':
+      return { ...view, status: 'disconnected' };
+    case 'SessionFailed':
+      return { ...view, status: 'failed' };
+    case 'RoomJoinRejected':
+      return { ...view, status: event.reason };
+    case 'PeerDeparted':
+      return { ...view, status: 'waiting-for-peer' };
   }
 };

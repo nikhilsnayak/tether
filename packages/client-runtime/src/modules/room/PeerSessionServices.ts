@@ -5,7 +5,7 @@ import type {
   DataChannelHandle,
   PeerConnectionHandle,
   PeerSessionEvent,
-  PlatformCommandDispatch,
+  PlatformEventDispatch,
   SessionDescription,
 } from './PeerSessionModel';
 
@@ -13,7 +13,7 @@ import type {
  * Platform adapter used by the shared actor to operate a peer connection.
  *
  * Implementations own native objects and expose them only through opaque
- * handles. Observer methods translate native callbacks into actor commands and
+ * handles. Observer methods translate native callbacks into actor events and
  * keep their listeners alive for the surrounding Effect scope.
  */
 export class PeerSessionPlatform extends Context.Service<
@@ -22,7 +22,7 @@ export class PeerSessionPlatform extends Context.Service<
     readonly acquirePeerConnection: Effect.Effect<PeerConnectionHandle, unknown, Scope.Scope>;
     readonly observePeerConnection: (
       peerConnection: PeerConnectionHandle,
-      dispatch: PlatformCommandDispatch,
+      dispatch: PlatformEventDispatch,
     ) => Effect.Effect<void, unknown, Scope.Scope>;
     readonly createDataChannel: (
       peerConnection: PeerConnectionHandle,
@@ -30,7 +30,7 @@ export class PeerSessionPlatform extends Context.Service<
     ) => Effect.Effect<DataChannelHandle, unknown>;
     readonly observeDataChannel: (
       dataChannel: DataChannelHandle,
-      dispatch: PlatformCommandDispatch,
+      dispatch: PlatformEventDispatch,
     ) => Effect.Effect<void, unknown, Scope.Scope>;
     readonly dataChannelLabel: (dataChannel: DataChannelHandle) => string;
     readonly createOffer: (
