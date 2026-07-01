@@ -266,7 +266,7 @@ describe('startPeerSession', () => {
     ),
   );
 
-  it.effect.fails('processes PeerLeft after the current data channel closes', () =>
+  it.effect('processes PeerLeft after the current data channel closes', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const roomEventQueue = yield* Queue.unbounded<{ readonly event: RoomEvent }>();
@@ -296,6 +296,11 @@ describe('startPeerSession', () => {
           dataChannel: fixture.localDataChannel,
         });
         yield* Effect.yieldNow;
+        assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), {
+          _tag: 'TransportLost',
+          peerId: bob,
+        });
+
         yield* Queue.offer(roomEventQueue, {
           event: new PeerLeftEvent({ peerId: bob }),
         });
@@ -611,7 +616,7 @@ describe('peer-session actor', () => {
     ).pipe(Effect.orDie),
   );
 
-  it.effect('fails when the current waiting peer connection fails', () =>
+  it.effect('reacquires a fresh generation when the waiting peer connection fails', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const fixture = yield* makeFixture();
@@ -625,26 +630,24 @@ describe('peer-session actor', () => {
           _tag: 'PeerConnectionFailed',
           peerConnection: stalePeerConnection,
         });
-        const error = yield* fixture
-          .actor({
-            _tag: 'PeerConnectionFailed',
-            peerConnection: fixture.peerConnection,
-          })
-          .pipe(Effect.flip);
+        yield* fixture.actor({
+          _tag: 'PeerConnectionFailed',
+          peerConnection: fixture.peerConnection,
+        });
 
-        assert.isTrue(
-          typeof error === 'object' &&
-            error !== null &&
-            '_tag' in error &&
-            error._tag === 'PeerTransportFailure' &&
-            'reason' in error &&
-            error.reason === 'peer-connection-failed',
+        // A failure while waiting stays generation-scoped: no session failure or
+        // TransportLost is emitted, and the failed connection is replaced.
+        assert.deepStrictEqual(fixture.events, []);
+        assert.deepStrictEqual(
+          fixture.operations.filter((operation) => operation === 'acquirePeerConnection').length,
+          2,
         );
+        assert.include(fixture.operations, 'closePeerConnection');
       }),
     ).pipe(Effect.orDie),
   );
 
-  it.effect('fails when the current data channel closes', () =>
+  it.effect('emits TransportLost when the current data channel closes', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const fixture = yield* makeFixture();
@@ -660,21 +663,15 @@ describe('peer-session actor', () => {
           _tag: 'DataChannelClosed',
           dataChannel: staleDataChannel,
         });
-        const error = yield* fixture
-          .actor({
-            _tag: 'DataChannelClosed',
-            dataChannel: fixture.localDataChannel,
-          })
-          .pipe(Effect.flip);
+        yield* fixture.actor({
+          _tag: 'DataChannelClosed',
+          dataChannel: fixture.localDataChannel,
+        });
 
-        assert.isTrue(
-          typeof error === 'object' &&
-            error !== null &&
-            '_tag' in error &&
-            error._tag === 'PeerTransportFailure' &&
-            'reason' in error &&
-            error.reason === 'data-channel-closed',
-        );
+        // The transport loss ends only the generation; the actor survives and
+        // emits TransportLost rather than failing the session.
+        assert.deepStrictEqual(fixture.events, [{ _tag: 'TransportLost', peerId: bob }]);
+        assert.include(fixture.operations, 'closePeerConnection');
       }),
     ).pipe(Effect.orDie),
   );

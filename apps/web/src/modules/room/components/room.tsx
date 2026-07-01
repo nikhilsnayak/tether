@@ -101,6 +101,12 @@ function peerSessionStatusPresentation(status: PeerSessionView['status']): {
         label: 'Waiting for peer',
         messagePlaceholder: 'Waiting for another peer…',
       };
+    case 'transport-lost':
+      return {
+        indicatorClassName: 'bg-amber-500',
+        label: 'Peer transport lost',
+        messagePlaceholder: 'Connection to peer lost',
+      };
   }
 }
 

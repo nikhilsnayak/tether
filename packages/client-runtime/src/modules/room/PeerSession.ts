@@ -9,7 +9,7 @@ import {
   type SessionDescriptionSignal as SessionDescriptionSignalType,
   type Signal,
 } from '@tether/contracts/modules/room';
-import { Cause, Data, Effect, Exit, Option, Queue, Scope, Stream } from 'effect';
+import { Cause, Effect, Exit, Option, Queue, Scope, Stream } from 'effect';
 
 import { AppClient } from '../../AppClient';
 import {
@@ -53,7 +53,8 @@ type PeerSessionActorState =
       readonly peerId: PeerId;
       readonly role: PeerRole;
       readonly dataChannelState: DataChannelState;
-    };
+    }
+  | { _tag: 'TransportLost'; peerId: PeerId };
 
 type PeerSessionUiCommand = {
   readonly _tag: 'SendMessage';
@@ -80,10 +81,6 @@ const requireDescription = (description: SessionDescription, type: 'offer' | 'an
   description.sdp === undefined
     ? Effect.fail(new Error(`Failed to create ${type}: SDP is undefined`))
     : Effect.succeed({ type, sdp: description.sdp } as const);
-
-class PeerTransportFailure extends Data.TaggedError('PeerTransportFailure')<{
-  readonly reason: 'peer-connection-failed' | 'data-channel-closed';
-}> {}
 
 /**
  * Builds the stateful input handler for one peer session.
@@ -258,6 +255,20 @@ export const makePeerSessionActor = Effect.fn('@tether/client-runtime/makePeerSe
     const handlePeerLeft = Effect.fn('@tether/client-runtime/handlePeerLeft')(function* (
       peerId: PeerId,
     ) {
+      if (state._tag === 'TransportLost' && peerId === state.peerId) {
+        const newGeneration = yield* acquirePeerConnectionGeneration();
+
+        state = {
+          _tag: 'WaitingForPeer',
+          generation: newGeneration,
+        };
+
+        yield* Effect.logInfo(
+          `Peer departed after transport loss; waiting for replacement: room=${session.roomId} self=${session.selfId} peer=${peerId}`,
+        );
+        return yield* eventSink.emit({ _tag: 'PeerDeparted', peerId });
+      }
+
       if (state._tag !== 'PeerKnown' || peerId !== state.peerId) {
         return yield* Effect.logDebug(
           `Ignored departure outside active pairing: room=${session.roomId} self=${session.selfId} peer=${peerId}`,
@@ -336,6 +347,7 @@ export const makePeerSessionActor = Effect.fn('@tether/client-runtime/makePeerSe
     )(function* (peerConnection: PeerConnectionHandle) {
       if (
         state._tag === 'AwaitingRoomSession' ||
+        state._tag === 'TransportLost' ||
         state.generation.peerConnection !== peerConnection
       ) {
         return yield* Effect.logDebug(
@@ -343,11 +355,27 @@ export const makePeerSessionActor = Effect.fn('@tether/client-runtime/makePeerSe
         );
       }
 
-      yield* Effect.logWarning(
-        `Peer connection failed: room=${session.roomId} self=${session.selfId}`,
-      );
+      if (state._tag === 'PeerKnown' && state.generation.peerConnection === peerConnection) {
+        yield* Scope.close(state.generation.scope, Exit.void);
 
-      return yield* new PeerTransportFailure({ reason: 'peer-connection-failed' });
+        state = {
+          _tag: 'TransportLost',
+          peerId: state.peerId,
+        };
+
+        return yield* eventSink.emit({ _tag: 'TransportLost', peerId: state.peerId });
+      }
+
+      if (state._tag === 'WaitingForPeer' && state.generation.peerConnection === peerConnection) {
+        yield* Scope.close(state.generation.scope, Exit.void);
+
+        const newGeneration = yield* acquirePeerConnectionGeneration();
+
+        state = {
+          _tag: 'WaitingForPeer',
+          generation: newGeneration,
+        };
+      }
     });
 
     const handleDataChannelClosed = Effect.fn('@tether/client-runtime/handleDataChannelClosed')(
@@ -366,7 +394,14 @@ export const makePeerSessionActor = Effect.fn('@tether/client-runtime/makePeerSe
           `Data channel closed: room=${session.roomId} self=${session.selfId}`,
         );
 
-        return yield* new PeerTransportFailure({ reason: 'data-channel-closed' });
+        yield* Scope.close(state.generation.scope, Exit.void);
+
+        state = {
+          _tag: 'TransportLost',
+          peerId: state.peerId,
+        };
+
+        yield* eventSink.emit({ _tag: 'TransportLost', peerId: state.peerId });
       },
     );
 
@@ -607,16 +642,32 @@ export const makePeerSessionActor = Effect.fn('@tether/client-runtime/makePeerSe
  * Connection/channel identity checks reject them after replacement.
  *
  *
- * TERMINAL TRANSPORT FAILURE
+ * TRANSPORT LOSS (generation-scoped, not session-scoped)
  *
- * PeerConnectionFailed(current generation)
+ * PeerConnectionFailed(current generation while PeerKnown)
  *   OR DataChannelClosed(current owned channel)
  *          |
- *          | - fail actor immediately with PeerTransportFailure
- *          | - emit SessionFailed
- *          | - close session scope and its current generation
+ *          | - close only the current generation scope
+ *          | - emit TransportLost(peerId)
+ *          v
+ * [TransportLost(peerId) + signaling still alive]
+ *          |
+ *          | PeerLeft(same peer)
+ *          | - acquire a fresh generation
+ *          | - emit PeerDeparted
+ *          v
+ * [WaitingForPeer + fresh generation]
  *
- * The same events carrying stale generation/channel handles are ignored.
+ * PeerConnectionFailed(current generation while WaitingForPeer)
+ *          |
+ *          | - close the failed generation
+ *          | - acquire a fresh generation
+ *          v
+ * [WaitingForPeer + fresh generation]
+ *
+ * The actor and signaling remain alive throughout: a lost WebRTC transport ends
+ * only its generation, never the session. The same events carrying stale
+ * generation/channel handles are ignored.
  *
  *
  * ICE EXCHANGE (independent while PeerKnown)

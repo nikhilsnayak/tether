@@ -103,6 +103,10 @@ export type PeerSessionEvent =
       readonly _tag: 'SessionFailed';
     }
   | {
+      readonly _tag: 'TransportLost';
+      readonly peerId: PeerId;
+    }
+  | {
       readonly _tag: 'RoomJoinRejected';
       readonly reason: 'room-full' | 'peer-already-joined';
     }
@@ -117,6 +121,7 @@ export interface PeerSessionView {
     | 'connected'
     | 'disconnected'
     | 'failed'
+    | 'transport-lost'
     | 'room-full'
     | 'peer-already-joined'
     | 'waiting-for-peer';
@@ -144,6 +149,8 @@ export const reducePeerSessionView = (
       return { ...view, status: 'disconnected' };
     case 'SessionFailed':
       return { ...view, status: 'failed' };
+    case 'TransportLost':
+      return { ...view, status: 'transport-lost' };
     case 'RoomJoinRejected':
       return { ...view, status: event.reason };
     case 'PeerDeparted':
