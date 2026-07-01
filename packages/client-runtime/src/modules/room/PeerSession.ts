@@ -9,7 +9,7 @@ import {
   type SessionDescriptionSignal as SessionDescriptionSignalType,
   type Signal,
 } from '@tether/contracts/modules/room';
-import { Cause, Effect, Exit, Option, Queue, Scope, Stream } from 'effect';
+import { Cause, Duration, Effect, Exit, Option, Queue, Scope, Stream } from 'effect';
 
 import { AppClient } from '../../AppClient';
 import {
@@ -61,7 +61,24 @@ type PeerSessionUiCommand = {
   readonly message: string;
 };
 
-type PeerSessionLocalInput = PlatformEvent | PeerSessionUiCommand;
+/**
+ * Internal input raised by the negotiation deadline timer. It carries the
+ * connection it was armed for so a deadline from a superseded generation is
+ * rejected by the same identity check used for stale platform callbacks.
+ */
+type PeerSessionTimerInput = {
+  readonly _tag: 'NegotiationDeadlineElapsed';
+  readonly peerConnection: PeerConnectionHandle;
+};
+
+type PeerSessionLocalInput = PlatformEvent | PeerSessionUiCommand | PeerSessionTimerInput;
+
+/**
+ * How long a peer may stay mid-negotiation (offer/answer/data-channel opening)
+ * before the actor surfaces a stall. Chosen well above a healthy handshake
+ * (typically < 5s) yet short enough to not feel indefinite.
+ */
+const NEGOTIATION_DEADLINE = Duration.seconds(20);
 
 type PeerSessionLocalInputDispatch = (input: PeerSessionLocalInput) => void;
 
@@ -144,6 +161,27 @@ export const makePeerSessionActor = Effect.fn('@tether/client-runtime/makePeerSe
       return { scope: connectionScope, peerConnection };
     });
 
+    /**
+     * Arms a one-shot negotiation deadline for a generation. The timer is not
+     * cancelled on success: it fires into the serialized input queue and the
+     * handler ignores it unless the same generation is still mid-negotiation.
+     * Forking it into the generation scope bounds its lifetime to the
+     * connection it guards.
+     */
+    const armNegotiationDeadline = (generation: PeerConnectionGeneration) =>
+      Effect.sleep(NEGOTIATION_DEADLINE).pipe(
+        Effect.andThen(
+          Effect.sync(() =>
+            dispatchLocalInput({
+              _tag: 'NegotiationDeadlineElapsed',
+              peerConnection: generation.peerConnection,
+            }),
+          ),
+        ),
+        Effect.forkScoped({ startImmediately: true }),
+        Scope.provide(generation.scope),
+      );
+
     const handleRoomSessionOpened = Effect.fn('@tether/client-runtime/handleRoomSessionOpened')(
       function* (peerId: PeerId | null) {
         if (state._tag !== 'AwaitingRoomSession') {
@@ -172,6 +210,7 @@ export const makePeerSessionActor = Effect.fn('@tether/client-runtime/makePeerSe
           .observeDataChannel(dataChannel, dispatchLocalInput)
           .pipe(Scope.provide(generation.scope));
 
+        yield* armNegotiationDeadline(generation);
         yield* createAndSendOffer(generation.peerConnection);
 
         state = {
@@ -196,9 +235,11 @@ export const makePeerSessionActor = Effect.fn('@tether/client-runtime/makePeerSe
         );
       }
 
+      const { generation } = state;
+
       state = {
         _tag: 'PeerKnown',
-        generation: state.generation,
+        generation,
         peerId,
         role: 'answerer',
         dataChannelState: { _tag: 'AwaitingRemoteDataChannel' },
@@ -206,6 +247,7 @@ export const makePeerSessionActor = Effect.fn('@tether/client-runtime/makePeerSe
       yield* Effect.logInfo(
         `Peer joined; acting as answerer: room=${session.roomId} self=${session.selfId} peer=${peerId}`,
       );
+      yield* armNegotiationDeadline(generation);
     });
 
     const handleSignal = Effect.fn('@tether/client-runtime/handleSignal')(function* (
@@ -457,6 +499,25 @@ export const makePeerSessionActor = Effect.fn('@tether/client-runtime/makePeerSe
       },
     );
 
+    const handleNegotiationDeadlineElapsed = Effect.fn(
+      '@tether/client-runtime/handleNegotiationDeadlineElapsed',
+    )(function* (peerConnection: PeerConnectionHandle) {
+      if (
+        state._tag !== 'PeerKnown' ||
+        state.generation.peerConnection !== peerConnection ||
+        state.dataChannelState._tag === 'DataChannelOpen'
+      ) {
+        return yield* Effect.logDebug(
+          `Ignored stale negotiation deadline: room=${session.roomId} self=${session.selfId}`,
+        );
+      }
+
+      yield* Effect.logWarning(
+        `Negotiation stalled: room=${session.roomId} self=${session.selfId} peer=${state.peerId}`,
+      );
+      yield* eventSink.emit({ _tag: 'NegotiationStalled', peerId: state.peerId });
+    });
+
     const handleUiSendMessage = Effect.fn('@tether/client-runtime/handleUiSendMessage')(function* (
       text: string,
     ) {
@@ -491,6 +552,8 @@ export const makePeerSessionActor = Effect.fn('@tether/client-runtime/makePeerSe
           return yield* handlePeerConnectionFailed(input.peerConnection);
         case 'DataChannelClosed':
           return yield* handleDataChannelClosed(input.dataChannel);
+        case 'NegotiationDeadlineElapsed':
+          return yield* handleNegotiationDeadlineElapsed(input.peerConnection);
         case 'SendMessage':
           return yield* handleUiSendMessage(input.message);
       }

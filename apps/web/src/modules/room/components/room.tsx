@@ -107,6 +107,12 @@ function peerSessionStatusPresentation(status: PeerSessionView['status']): {
         label: 'Peer transport lost',
         messagePlaceholder: 'Connection to peer lost',
       };
+    case 'negotiation-stalled':
+      return {
+        indicatorClassName: 'bg-amber-500',
+        label: 'Taking longer than expected',
+        messagePlaceholder: 'Still connecting — you can leave and retry',
+      };
   }
 }
 

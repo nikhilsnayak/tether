@@ -15,6 +15,7 @@ import {
   type Signal,
 } from '@tether/contracts/modules/room';
 import { Deferred, Effect, Layer, Queue, Stream } from 'effect';
+import { TestClock } from 'effect/testing';
 
 import { AppClient } from '../../AppClient';
 import { makePeerSessionActor, startPeerSession } from './PeerSession';
@@ -309,6 +310,90 @@ describe('startPeerSession', () => {
           _tag: 'PeerDeparted',
           peerId: bob,
         });
+      }),
+    ),
+  );
+
+  it.effect('emits NegotiationStalled when the data channel never opens', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const roomEventQueue = yield* Queue.unbounded<{ readonly event: RoomEvent }>();
+        const offerSent = yield* Deferred.make<void>();
+        const fixture = yield* makeFixture(
+          (() => Stream.fromQueue(roomEventQueue)) as AppClient['Service']['OpenRoomSession'],
+          ({ signal }) =>
+            Effect.gen(function* () {
+              if (signal._tag === '@tether/SessionDescriptionSignal' && signal.type === 'offer') {
+                yield* Deferred.succeed(offerSent, undefined);
+              }
+            }),
+        );
+
+        yield* startPeerSession(session).pipe(Effect.provide(fixture.dependencies));
+        assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), {
+          _tag: 'SessionStarted',
+        });
+
+        yield* Queue.offer(roomEventQueue, {
+          event: new RoomSessionOpenedEvent({ peerId: bob }),
+        });
+        // The offer is sent, so the actor is now in DataChannelConnecting. The
+        // peer never answers and no DataChannelOpened arrives; because the remote
+        // description is never set, ICE never starts and the browser never fires
+        // 'failed'. Only a negotiation deadline can surface this stall.
+        yield* Deferred.await(offerSent);
+
+        yield* TestClock.adjust('20 seconds');
+
+        assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), {
+          _tag: 'NegotiationStalled',
+          peerId: bob,
+        });
+      }),
+    ),
+  );
+
+  it.effect('does not stall once the data channel opens before the deadline', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const roomEventQueue = yield* Queue.unbounded<{ readonly event: RoomEvent }>();
+        const offerSent = yield* Deferred.make<void>();
+        const fixture = yield* makeFixture(
+          (() => Stream.fromQueue(roomEventQueue)) as AppClient['Service']['OpenRoomSession'],
+          ({ signal }) =>
+            Effect.gen(function* () {
+              if (signal._tag === '@tether/SessionDescriptionSignal' && signal.type === 'offer') {
+                yield* Deferred.succeed(offerSent, undefined);
+              }
+            }),
+        );
+
+        yield* startPeerSession(session).pipe(Effect.provide(fixture.dependencies));
+        assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), {
+          _tag: 'SessionStarted',
+        });
+
+        yield* Queue.offer(roomEventQueue, {
+          event: new RoomSessionOpenedEvent({ peerId: bob }),
+        });
+        yield* Deferred.await(offerSent);
+
+        fixture.dispatchPlatformEvent({
+          _tag: 'DataChannelOpened',
+          dataChannel: fixture.localDataChannel,
+        });
+        assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), {
+          _tag: 'Connected',
+          peerId: bob,
+        });
+
+        // The deadline is never cancelled; it still fires but the handler drops
+        // it because the channel is already open.
+        yield* TestClock.adjust('20 seconds');
+        yield* Effect.yieldNow;
+
+        const stalled = fixture.events.filter((event) => event._tag === 'NegotiationStalled');
+        assert.deepStrictEqual(stalled, []);
       }),
     ),
   );
