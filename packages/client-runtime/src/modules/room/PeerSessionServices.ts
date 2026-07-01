@@ -5,6 +5,7 @@ import type {
   DataChannelHandle,
   PeerConnectionHandle,
   PeerSessionEvent,
+  PlatformError,
   PlatformEventDispatch,
   SessionDescription,
 } from './PeerSessionModel';
@@ -19,42 +20,42 @@ import type {
 export class PeerSessionPlatform extends Context.Service<
   PeerSessionPlatform,
   {
-    readonly acquirePeerConnection: Effect.Effect<PeerConnectionHandle, unknown, Scope.Scope>;
+    readonly acquirePeerConnection: Effect.Effect<PeerConnectionHandle, PlatformError, Scope.Scope>;
     readonly observePeerConnection: (
       peerConnection: PeerConnectionHandle,
       dispatch: PlatformEventDispatch,
-    ) => Effect.Effect<void, unknown, Scope.Scope>;
+    ) => Effect.Effect<void, PlatformError, Scope.Scope>;
     readonly createDataChannel: (
       peerConnection: PeerConnectionHandle,
       label: string,
-    ) => Effect.Effect<DataChannelHandle, unknown>;
+    ) => Effect.Effect<DataChannelHandle, PlatformError>;
     readonly observeDataChannel: (
       dataChannel: DataChannelHandle,
       dispatch: PlatformEventDispatch,
-    ) => Effect.Effect<void, unknown, Scope.Scope>;
+    ) => Effect.Effect<void, PlatformError, Scope.Scope>;
     readonly dataChannelLabel: (dataChannel: DataChannelHandle) => string;
     readonly createOffer: (
       peerConnection: PeerConnectionHandle,
-    ) => Effect.Effect<SessionDescription, unknown>;
+    ) => Effect.Effect<SessionDescription, PlatformError>;
     readonly createAnswer: (
       peerConnection: PeerConnectionHandle,
-    ) => Effect.Effect<SessionDescription, unknown>;
+    ) => Effect.Effect<SessionDescription, PlatformError>;
     readonly setLocalDescription: (
       peerConnection: PeerConnectionHandle,
       description: Required<SessionDescription>,
-    ) => Effect.Effect<void, unknown>;
+    ) => Effect.Effect<void, PlatformError>;
     readonly setRemoteDescription: (
       peerConnection: PeerConnectionHandle,
       description: Required<SessionDescription>,
-    ) => Effect.Effect<void, unknown>;
+    ) => Effect.Effect<void, PlatformError>;
     readonly addIceCandidate: (
       peerConnection: PeerConnectionHandle,
       candidate: IceCandidateSignal,
-    ) => Effect.Effect<void, unknown>;
+    ) => Effect.Effect<void, PlatformError>;
     readonly sendDataChannelMessage: (
       dataChannel: DataChannelHandle,
       message: string,
-    ) => Effect.Effect<void, unknown>;
+    ) => Effect.Effect<void, PlatformError>;
   }
 >()('@tether/client-runtime/room/PeerSessionPlatform') {}
 

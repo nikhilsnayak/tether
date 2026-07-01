@@ -1,6 +1,31 @@
 import type { IceCandidateSignal, PeerId, RoomId } from '@tether/contracts/modules/room';
+import { Data, Predicate } from 'effect';
 
 export const CHAT_CHANNEL_LABEL = 'chat';
+
+/** Which WebRTC operation a {@link PlatformError} originated from. */
+export type PlatformOperation =
+  | 'acquire-peer-connection'
+  | 'create-data-channel'
+  | 'create-offer'
+  | 'create-answer'
+  | 'set-local-description'
+  | 'set-remote-description'
+  | 'add-ice-candidate'
+  | 'send-message';
+
+/**
+ * Typed failure from a {@link PeerSessionPlatform} operation. Carrying the
+ * originating `operation` lets the actor and session teardown branch on which
+ * WebRTC step failed instead of inspecting an untyped `unknown`.
+ */
+export class PlatformError extends Data.TaggedError('PlatformError')<{
+  readonly operation: PlatformOperation;
+  readonly cause: unknown;
+}> {}
+
+export const isPlatformError = (u: unknown): u is PlatformError =>
+  Predicate.isTagged(u, 'PlatformError');
 
 export interface RoomSession {
   readonly roomId: RoomId;

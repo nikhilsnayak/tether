@@ -93,7 +93,7 @@ Tailwind v4, oxlint/oxfmt.
 
 ```
 apps/
-  server/   Bun + @effect/platform-bun + Effect RPC over HTTP/NDJSON
+  server/   Bun + @effect/platform-bun + Effect RPC over WebSocket/JSON
   web/      Vite 8 + TanStack Router + Tailwind v4 + React Compiler + @effect/atom-react
   mobile/   Expo 56 + expo-router + @effect/atom-react + react-native 0.85
 packages/
@@ -137,7 +137,7 @@ A feature is a vertical slice across only the packages and apps that need it:
   the RPC error schema.
 - `apps/server/src/App.ts` exports the side-effect-free `AppLayer` =
   `Layer.mergeAll(RpcLive, HealthRoute, CorsLive)` provided with
-  `RpcServer.layerProtocolHttp({ path: '/rpc' })` + `RpcSerialization.layerNdjson`
+  `RpcServer.layerProtocolWebsocket({ path: '/rpc' })` + `RpcSerialization.layerJson`
   and is served by `apps/server/src/index.ts` on Bun. Port defaults to `8008`;
   CORS defaults to `http://localhost:5173`.
 - v0 has no DB. Rooms and subscriptions are ephemeral in-memory state.
@@ -174,11 +174,11 @@ Smallest thing that teaches the Effect signaling server **and** raw WebRTC.
      the underlying `PubSub` stay private.
    - ✅ **`Handlers.ts`** — transport adapter only: maps the domain event stream to
      RPC `{ event }` responses and delegates `SendSignal` to the service.
-   - ✅ **`Rpc.ts` / `App.ts`** — handlers, service, `/rpc` HTTP protocol, and NDJSON
-     serialization are wired into the server.
-   - ✅ **Tests** — 13 service/handler tests plus 2 real HTTP/NDJSON integration
-     tests in `apps/server/integrations/`, covering streaming, cancellation,
-     typed wire errors, capacity, duplicate peers, and membership validation.
+   - ✅ **`Rpc.ts` / `App.ts`** — handlers, service, and the `/rpc` WebSocket
+     protocol with JSON serialization are wired into the server.
+   - ✅ **Tests** — 14 service/handler tests cover streaming, cancellation,
+     typed errors, capacity, duplicate peers, ordering, and membership
+     validation through the domain service and in-memory RPC test client.
 3. 🟨 **`apps/web` — raw `RTCPeerConnection`:**
    - ✅ Deterministic offerer/answerer handshake over the signaling stream with
      Google STUN and no TURN.
@@ -238,12 +238,11 @@ messages, and callbacks from an unowned connection or data channel are logged
 and ignored. When the active peer leaves, its generation is closed before a
 fresh connection is acquired; the incumbent returns to `WaitingForPeer` and can
 accept the next `PeerJoined`. Failure of the current peer connection or closure
-of its owned data channel starts a short timer in that generation scope. A
-concurrent `PeerLeft` closes the scope and cancels the timer; otherwise expiry
-terminates the actor and projects `SessionFailed`. Once a peer is known, a
-separate generation-scoped deadline fails negotiation if the chat channel never
-opens. Events and timeout inputs carrying stale handles are ignored. Other
-RPC/platform failures also terminate the actor.
+of its owned data channel immediately terminates the actor, closes the current
+generation, and projects `SessionFailed`. Events carrying stale connection or
+channel handles are ignored. There is currently no negotiation deadline, so a
+handshake that neither succeeds nor produces a terminal platform event remains
+in the connecting state. Other RPC/platform failures also terminate the actor.
 
 **Done = two browser tabs (or two laptops) on a private 1:1 video/audio call.**
 
@@ -261,24 +260,24 @@ RPC/platform failures also terminate the actor.
 
 WebRTC signaling needs the server to **push** the other peer's offer/answer/ICE
 unsolicited. **Decision: stay entirely in the `@effect/rpc` world over the
-existing HTTP NDJSON protocol — no WebSocket.**
+WebSocket protocol with JSON serialization.**
 
 - `OpenRoomSession` is a **streaming RPC** (`stream: true`): the first event
   acknowledges that membership is active and provides the existing peer, then
-  the server pushes `RoomEvent`s for the life of the connection (SSE-equivalent
-  over HTTP/ndjson). The held-open stream **is** both the room-session lifetime
-  and realtime channel.
-- `SendSignal` is a separate **unary RPC** for messages going up.
-- Proven by the HTTP integration suite: server→client streaming, cancellation,
-  and typed errors work over `layerProtocolHttp` + `layerNdjson`. No WebSocket or
-  custom protocol layer is needed.
+  the server pushes `RoomEvent`s for the life of the stream. The held-open stream
+  **is** both the room-session lifetime and realtime server→client channel.
+- `SendSignal` is a separate **unary RPC** multiplexed over the same WebSocket
+  for messages going up.
+- The server uses `RpcServer.layerProtocolWebsocket` and
+  `RpcSerialization.layerJson`; clients use the matching socket protocol and
+  JSON serialization layers.
 
 **Consequences this shaped:**
 
-- `OpenRoomSession` (a stream) and `SendSignal` (a separate request) are
-  **independent HTTP calls with no session glue**, so the client must
-  **self-identify in every message** (`selfId`) — that's why the client mints its
-  own `PeerId`.
+- `OpenRoomSession` and `SendSignal` remain independent RPC operations even
+  though they share a socket. The transport connection is not bound to an
+  authenticated room identity, so every request **self-identifies** with
+  `selfId` — that's why the client mints its own `PeerId`.
 - **Echo:** a `PubSub` broadcasts to all subscribers including the sender, so
   `RoomService` filters each subscriber's own events from its domain stream.
 - **Identity boundary:** protocol membership is enforced, but `selfId` is still
@@ -296,8 +295,8 @@ existing HTTP NDJSON protocol — no WebSocket.**
 - This project (`tether`): `/home/nikhils/.personal/tether` (own git repo). Copied
   from the starter; package scope renamed `@turborepo-effect-starter/*` →
   `@tether/*`, and the example slices were removed. **Current state:** room
-  contracts, scoped server service, RPC handlers, HTTP/NDJSON wiring, typed
-  errors, unit tests, and integration tests are complete and typecheck clean.
+  contracts, scoped server service, RPC handlers, WebSocket/JSON wiring, typed
+  errors, and service/handler unit tests are complete and typecheck clean.
   The web client now completes signaling, ICE exchange, and text chat over a
   WebRTC data channel. **Next:** add camera and microphone tracks.
 - Source template (reference only): `/home/nikhils/.personal/turborepo-effect-starter`.

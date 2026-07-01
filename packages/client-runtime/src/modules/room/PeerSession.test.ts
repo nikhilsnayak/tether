@@ -11,9 +11,10 @@ import {
   RoomSessionOpenedEvent,
   SessionDescriptionSignal,
   SignalReceivedEvent,
+  type RoomEvent,
   type Signal,
 } from '@tether/contracts/modules/room';
-import { Effect, Layer, Queue, Stream } from 'effect';
+import { Deferred, Effect, Layer, Queue, Stream } from 'effect';
 
 import { AppClient } from '../../AppClient';
 import { makePeerSessionActor, startPeerSession } from './PeerSession';
@@ -23,6 +24,8 @@ import {
   type DataChannelHandle,
   type PeerConnectionHandle,
   type PeerSessionEvent,
+  type PlatformEvent,
+  type PlatformEventDispatch,
   type RoomSession,
 } from './PeerSessionModel';
 import { PeerSessionEventSink, PeerSessionPlatform } from './PeerSessionServices';
@@ -65,6 +68,7 @@ const makeFixture = Effect.fn('makeFixture')(function* (
   const signals: Array<Signal> = [];
   const events: Array<PeerSessionEvent> = [];
   const eventQueue = yield* Queue.unbounded<PeerSessionEvent>();
+  let platformEventDispatch: PlatformEventDispatch | undefined;
 
   const platform = PeerSessionPlatform.of({
     acquirePeerConnection: Effect.acquireRelease(
@@ -74,9 +78,12 @@ const makeFixture = Effect.fn('makeFixture')(function* (
       }),
       () => Effect.sync(() => operations.push('closePeerConnection')),
     ),
-    observePeerConnection: () =>
+    observePeerConnection: (_, dispatch) =>
       Effect.acquireRelease(
-        Effect.sync(() => operations.push('observePeerConnection')),
+        Effect.sync(() => {
+          platformEventDispatch = dispatch;
+          operations.push('observePeerConnection');
+        }),
         () => Effect.sync(() => operations.push('unobservePeerConnection')),
       ),
     createDataChannel: (_, label) =>
@@ -155,6 +162,12 @@ const makeFixture = Effect.fn('makeFixture')(function* (
   return {
     actor,
     dependencies,
+    dispatchPlatformEvent: (event: PlatformEvent) => {
+      if (platformEventDispatch === undefined) {
+        throw new Error('Peer connection is not being observed');
+      }
+      platformEventDispatch(event);
+    },
     eventQueue,
     events,
     localDataChannel,
@@ -166,17 +179,20 @@ const makeFixture = Effect.fn('makeFixture')(function* (
 });
 
 describe('startPeerSession', () => {
-  it.effect('emits SignalingDisconnected when the room stream ends normally', () =>
+  it.effect('disconnects and rejects new commands when the room stream ends normally', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const fixture = yield* makeFixture();
 
-        yield* startPeerSession(session).pipe(Effect.provide(fixture.dependencies));
+        const peerSession = yield* startPeerSession(session).pipe(
+          Effect.provide(fixture.dependencies),
+        );
         const started = yield* Queue.take(fixture.eventQueue);
         const event = yield* Queue.take(fixture.eventQueue);
 
         assert.deepStrictEqual(started, { _tag: 'SessionStarted' });
         assert.deepStrictEqual(event, { _tag: 'SignalingDisconnected' });
+        assert.isFalse(peerSession.sendMessage('too late'));
       }),
     ),
   );
@@ -246,6 +262,48 @@ describe('startPeerSession', () => {
 
         assert.deepStrictEqual(started, { _tag: 'SessionStarted' });
         assert.deepStrictEqual(event, { _tag: 'SignalingDisconnected' });
+      }),
+    ),
+  );
+
+  it.effect.fails('processes PeerLeft after the current data channel closes', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const roomEventQueue = yield* Queue.unbounded<{ readonly event: RoomEvent }>();
+        const offerSent = yield* Deferred.make<void>();
+        const fixture = yield* makeFixture(
+          (() => Stream.fromQueue(roomEventQueue)) as AppClient['Service']['OpenRoomSession'],
+          ({ signal }) =>
+            Effect.gen(function* () {
+              if (signal._tag === '@tether/SessionDescriptionSignal' && signal.type === 'offer') {
+                yield* Deferred.succeed(offerSent, undefined);
+              }
+            }),
+        );
+
+        yield* startPeerSession(session).pipe(Effect.provide(fixture.dependencies));
+        assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), {
+          _tag: 'SessionStarted',
+        });
+
+        yield* Queue.offer(roomEventQueue, {
+          event: new RoomSessionOpenedEvent({ peerId: bob }),
+        });
+        yield* Deferred.await(offerSent);
+
+        fixture.dispatchPlatformEvent({
+          _tag: 'DataChannelClosed',
+          dataChannel: fixture.localDataChannel,
+        });
+        yield* Effect.yieldNow;
+        yield* Queue.offer(roomEventQueue, {
+          event: new PeerLeftEvent({ peerId: bob }),
+        });
+
+        assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), {
+          _tag: 'PeerDeparted',
+          peerId: bob,
+        });
       }),
     ),
   );

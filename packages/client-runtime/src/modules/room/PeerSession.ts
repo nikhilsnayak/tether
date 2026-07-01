@@ -14,6 +14,7 @@ import { Cause, Data, Effect, Exit, Option, Queue, Scope, Stream } from 'effect'
 import { AppClient } from '../../AppClient';
 import {
   CHAT_CHANNEL_LABEL,
+  isPlatformError,
   type ChatMessage,
   type DataChannelHandle,
   type PeerConnectionHandle,
@@ -668,6 +669,7 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
   });
 
   yield* Effect.scoped(actorLoop).pipe(
+    Effect.ensuring(Queue.shutdown(localInputQueue)),
     Effect.onExit(
       Effect.fnUntraced(function* (exit) {
         if (Exit.isSuccess(exit)) {
@@ -710,6 +712,14 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
               return yield* peerSessionEventSink.emit({
                 _tag: 'SignalingDisconnected',
               });
+            }
+
+            if (isPlatformError(error)) {
+              yield* Effect.logError(
+                `Peer session failed during ${error.operation}: room=${session.roomId} self=${session.selfId}`,
+                error.cause,
+              );
+              return yield* peerSessionEventSink.emit({ _tag: 'SessionFailed' });
             }
           }
 

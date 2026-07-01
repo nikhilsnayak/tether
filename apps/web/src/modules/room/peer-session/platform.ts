@@ -7,6 +7,7 @@
  */
 import {
   PeerSessionPlatform,
+  PlatformError,
   type DataChannelHandle,
   type PeerConnectionHandle,
   type PlatformEventDispatch,
@@ -20,11 +21,14 @@ const dataChannelValue = (handle: DataChannelHandle) => handle.value as RTCDataC
 /** Owns the native connection for exactly as long as the session scope lives. */
 const acquirePeerConnection = Effect.acquireRelease(
   Effect.gen(function* () {
-    const peerConnection: PeerConnectionHandle = {
-      value: new RTCPeerConnection({
-        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+    const peerConnection: PeerConnectionHandle = yield* Effect.try({
+      try: () => ({
+        value: new RTCPeerConnection({
+          iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+        }),
       }),
-    };
+      catch: (cause) => new PlatformError({ operation: 'acquire-peer-connection', cause }),
+    });
     yield* Effect.logInfo('Peer connection acquired');
     return peerConnection;
   }),
@@ -151,32 +155,48 @@ const webPeerSessionPlatform = PeerSessionPlatform.of({
   acquirePeerConnection,
   observePeerConnection,
   createDataChannel: (peerConnection, label) =>
-    Effect.sync(() => ({ value: peerConnectionValue(peerConnection).createDataChannel(label) })),
+    Effect.try({
+      try: () => ({ value: peerConnectionValue(peerConnection).createDataChannel(label) }),
+      catch: (cause) => new PlatformError({ operation: 'create-data-channel', cause }),
+    }),
   observeDataChannel,
   dataChannelLabel: (dataChannel) => dataChannelValue(dataChannel).label,
   createOffer: (peerConnection) =>
-    Effect.tryPromise(() => peerConnectionValue(peerConnection).createOffer()).pipe(
-      Effect.map(({ sdp }) => ({ type: 'offer' as const, sdp })),
-    ),
+    Effect.tryPromise({
+      try: () => peerConnectionValue(peerConnection).createOffer(),
+      catch: (cause) => new PlatformError({ operation: 'create-offer', cause }),
+    }).pipe(Effect.map(({ sdp }) => ({ type: 'offer' as const, sdp }))),
   createAnswer: (peerConnection) =>
-    Effect.tryPromise(() => peerConnectionValue(peerConnection).createAnswer()).pipe(
-      Effect.map(({ sdp }) => ({ type: 'answer' as const, sdp })),
-    ),
+    Effect.tryPromise({
+      try: () => peerConnectionValue(peerConnection).createAnswer(),
+      catch: (cause) => new PlatformError({ operation: 'create-answer', cause }),
+    }).pipe(Effect.map(({ sdp }) => ({ type: 'answer' as const, sdp }))),
   setLocalDescription: (peerConnection, description) =>
-    Effect.tryPromise(() => peerConnectionValue(peerConnection).setLocalDescription(description)),
+    Effect.tryPromise({
+      try: () => peerConnectionValue(peerConnection).setLocalDescription(description),
+      catch: (cause) => new PlatformError({ operation: 'set-local-description', cause }),
+    }),
   setRemoteDescription: (peerConnection, description) =>
-    Effect.tryPromise(() => peerConnectionValue(peerConnection).setRemoteDescription(description)),
+    Effect.tryPromise({
+      try: () => peerConnectionValue(peerConnection).setRemoteDescription(description),
+      catch: (cause) => new PlatformError({ operation: 'set-remote-description', cause }),
+    }),
   addIceCandidate: (peerConnection, candidate) =>
-    Effect.tryPromise(() =>
-      peerConnectionValue(peerConnection).addIceCandidate({
-        candidate: candidate.candidate,
-        sdpMid: candidate.sdpMid,
-        sdpMLineIndex: candidate.sdpMLineIndex,
-        usernameFragment: candidate.usernameFragment,
-      }),
-    ),
+    Effect.tryPromise({
+      try: () =>
+        peerConnectionValue(peerConnection).addIceCandidate({
+          candidate: candidate.candidate,
+          sdpMid: candidate.sdpMid,
+          sdpMLineIndex: candidate.sdpMLineIndex,
+          usernameFragment: candidate.usernameFragment,
+        }),
+      catch: (cause) => new PlatformError({ operation: 'add-ice-candidate', cause }),
+    }),
   sendDataChannelMessage: (dataChannel, message) =>
-    Effect.sync(() => dataChannelValue(dataChannel).send(message)),
+    Effect.try({
+      try: () => dataChannelValue(dataChannel).send(message),
+      catch: (cause) => new PlatformError({ operation: 'send-message', cause }),
+    }),
 });
 
 export const webPeerSessionPlatformLayer = Layer.succeed(
