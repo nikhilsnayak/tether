@@ -69,7 +69,9 @@ export type PlatformEvent =
       readonly data: unknown;
     }
   | { readonly _tag: 'PeerConnectionFailed'; readonly peerConnection: PeerConnectionHandle }
-  | { readonly _tag: 'DataChannelClosed'; readonly dataChannel: DataChannelHandle };
+  | { readonly _tag: 'DataChannelClosed'; readonly dataChannel: DataChannelHandle }
+  | { readonly _tag: 'PeerConnectionInterrupted'; readonly peerConnection: PeerConnectionHandle }
+  | { readonly _tag: 'PeerConnectionRestored'; readonly peerConnection: PeerConnectionHandle };
 
 /**
  * Synchronous callback bridge for native event listeners. Dispatch only queues
@@ -111,6 +113,14 @@ export type PeerSessionEvent =
       readonly peerId: PeerId;
     }
   | {
+      readonly _tag: 'PeerInterrupted';
+      readonly peerId: PeerId;
+    }
+  | {
+      readonly _tag: 'PeerRestored';
+      readonly peerId: PeerId;
+    }
+  | {
       readonly _tag: 'RoomJoinRejected';
       readonly reason: 'room-full' | 'peer-already-joined';
     }
@@ -123,6 +133,7 @@ export interface PeerSessionView {
   readonly status:
     | 'connecting'
     | 'connected'
+    | 'reconnecting'
     | 'disconnected'
     | 'failed'
     | 'transport-lost'
@@ -158,6 +169,10 @@ export const reducePeerSessionView = (
       return { ...view, status: 'transport-lost' };
     case 'NegotiationStalled':
       return { ...view, status: 'negotiation-stalled' };
+    case 'PeerInterrupted':
+      return { ...view, status: 'reconnecting' };
+    case 'PeerRestored':
+      return { ...view, status: 'connected' };
     case 'RoomJoinRejected':
       return { ...view, status: event.reason };
     case 'PeerDeparted':

@@ -447,6 +447,44 @@ export const makePeerSessionActor = Effect.fn('@tether/client-runtime/makePeerSe
       },
     );
 
+    const handlePeerConnectionInterrupted = Effect.fn(
+      '@tether/client-runtime/handlePeerConnectionInterrupted',
+    )(function* (peerConnection: PeerConnectionHandle) {
+      if (
+        state._tag !== 'PeerKnown' ||
+        state.generation.peerConnection !== peerConnection ||
+        state.dataChannelState._tag !== 'DataChannelOpen'
+      ) {
+        return yield* Effect.logDebug(
+          `Ignored interruption outside an open connection: room=${session.roomId} self=${session.selfId}`,
+        );
+      }
+
+      yield* Effect.logWarning(
+        `Peer connection interrupted: room=${session.roomId} self=${session.selfId} peer=${state.peerId}`,
+      );
+      yield* eventSink.emit({ _tag: 'PeerInterrupted', peerId: state.peerId });
+    });
+
+    const handlePeerConnectionRestored = Effect.fn(
+      '@tether/client-runtime/handlePeerConnectionRestored',
+    )(function* (peerConnection: PeerConnectionHandle) {
+      if (
+        state._tag !== 'PeerKnown' ||
+        state.generation.peerConnection !== peerConnection ||
+        state.dataChannelState._tag !== 'DataChannelOpen'
+      ) {
+        return yield* Effect.logDebug(
+          `Ignored restoration outside an open connection: room=${session.roomId} self=${session.selfId}`,
+        );
+      }
+
+      yield* Effect.logInfo(
+        `Peer connection restored: room=${session.roomId} self=${session.selfId} peer=${state.peerId}`,
+      );
+      yield* eventSink.emit({ _tag: 'PeerRestored', peerId: state.peerId });
+    });
+
     const handleDataChannelOpened = Effect.fn('@tether/client-runtime/handleDataChannelOpened')(
       function* (dataChannel: DataChannelHandle) {
         if (
@@ -552,6 +590,10 @@ export const makePeerSessionActor = Effect.fn('@tether/client-runtime/makePeerSe
           return yield* handlePeerConnectionFailed(input.peerConnection);
         case 'DataChannelClosed':
           return yield* handleDataChannelClosed(input.dataChannel);
+        case 'PeerConnectionInterrupted':
+          return yield* handlePeerConnectionInterrupted(input.peerConnection);
+        case 'PeerConnectionRestored':
+          return yield* handlePeerConnectionRestored(input.peerConnection);
         case 'NegotiationDeadlineElapsed':
           return yield* handleNegotiationDeadlineElapsed(input.peerConnection);
         case 'SendMessage':

@@ -732,6 +732,59 @@ describe('peer-session actor', () => {
     ).pipe(Effect.orDie),
   );
 
+  it.effect('emits PeerInterrupted and PeerRestored around a transient disconnection', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture();
+
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new RoomSessionOpenedEvent({ peerId: bob }),
+        });
+        yield* fixture.actor({
+          _tag: 'DataChannelOpened',
+          dataChannel: fixture.localDataChannel,
+        });
+
+        yield* fixture.actor({
+          _tag: 'PeerConnectionInterrupted',
+          peerConnection: fixture.peerConnection,
+        });
+        yield* fixture.actor({
+          _tag: 'PeerConnectionRestored',
+          peerConnection: fixture.peerConnection,
+        });
+
+        assert.deepStrictEqual(fixture.events, [
+          { _tag: 'Connected', peerId: bob },
+          { _tag: 'PeerInterrupted', peerId: bob },
+          { _tag: 'PeerRestored', peerId: bob },
+        ]);
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('ignores a disconnection before the data channel is open', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture();
+
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new RoomSessionOpenedEvent({ peerId: bob }),
+        });
+        // Still in DataChannelConnecting — a connectivity blip here is covered
+        // by negotiation/transport handling, not the reconnecting projection.
+        yield* fixture.actor({
+          _tag: 'PeerConnectionInterrupted',
+          peerConnection: fixture.peerConnection,
+        });
+
+        assert.deepStrictEqual(fixture.events, []);
+      }),
+    ).pipe(Effect.orDie),
+  );
+
   it.effect('emits TransportLost when the current data channel closes', () =>
     Effect.scoped(
       Effect.gen(function* () {

@@ -68,12 +68,32 @@ const observePeerConnection = Effect.fn('@tether/web/observePeerConnection')(fun
     });
   };
 
+  // Tracks whether ICE connectivity has degraded so a return to 'connected' is
+  // reported as a restoration rather than the initial connect.
+  let interrupted = false;
   const handleConnectionStateChange = () => {
-    if (peerConnection.connectionState === 'failed') {
-      dispatch({
-        _tag: 'PeerConnectionFailed',
-        peerConnection: peerConnectionHandle,
-      });
+    switch (peerConnection.connectionState) {
+      case 'failed':
+        dispatch({
+          _tag: 'PeerConnectionFailed',
+          peerConnection: peerConnectionHandle,
+        });
+        return;
+      case 'disconnected':
+        interrupted = true;
+        dispatch({
+          _tag: 'PeerConnectionInterrupted',
+          peerConnection: peerConnectionHandle,
+        });
+        return;
+      case 'connected':
+        if (!interrupted) return;
+        interrupted = false;
+        dispatch({
+          _tag: 'PeerConnectionRestored',
+          peerConnection: peerConnectionHandle,
+        });
+        return;
     }
   };
 

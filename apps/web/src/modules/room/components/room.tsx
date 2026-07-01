@@ -113,6 +113,12 @@ function peerSessionStatusPresentation(status: PeerSessionView['status']): {
         label: 'Taking longer than expected',
         messagePlaceholder: 'Still connecting — you can leave and retry',
       };
+    case 'reconnecting':
+      return {
+        indicatorClassName: 'animate-pulse bg-amber-400',
+        label: 'Reconnecting',
+        messagePlaceholder: 'Connection interrupted — reconnecting…',
+      };
   }
 }
 
