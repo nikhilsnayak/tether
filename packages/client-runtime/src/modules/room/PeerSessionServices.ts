@@ -3,6 +3,7 @@ import { Context, Effect, type Scope } from 'effect';
 
 import type {
   DataChannelHandle,
+  MediaStreamHandle,
   PeerConnectionHandle,
   PeerSessionEvent,
   PlatformError,
@@ -21,6 +22,7 @@ export class PeerSessionPlatform extends Context.Service<
   PeerSessionPlatform,
   {
     readonly acquirePeerConnection: Effect.Effect<PeerConnectionHandle, PlatformError, Scope.Scope>;
+    readonly acquireLocalMedia: Effect.Effect<MediaStreamHandle, PlatformError, Scope.Scope>;
     readonly observePeerConnection: (
       peerConnection: PeerConnectionHandle,
       dispatch: PlatformEventDispatch,

@@ -6,6 +6,7 @@ export const CHAT_CHANNEL_LABEL = 'chat';
 /** Which WebRTC operation a {@link PlatformError} originated from. */
 export type PlatformOperation =
   | 'acquire-peer-connection'
+  | 'acquire-local-media'
   | 'create-data-channel'
   | 'create-offer'
   | 'create-answer'
@@ -44,6 +45,11 @@ export interface PeerConnectionHandle {
 
 /** Platform-owned data channel hidden from the shared actor. */
 export interface DataChannelHandle {
+  readonly value: unknown;
+}
+
+/** Platform-owned local media stream (camera + microphone) hidden from the actor. */
+export interface MediaStreamHandle {
   readonly value: unknown;
 }
 
@@ -89,6 +95,10 @@ export interface ChatMessage {
 export type PeerSessionEvent =
   | {
       readonly _tag: 'SessionStarted';
+    }
+  | {
+      readonly _tag: 'LocalStreamReady';
+      readonly stream: MediaStreamHandle;
     }
   | {
       readonly _tag: 'Connected';
@@ -157,6 +167,10 @@ export const reducePeerSessionView = (
   switch (event._tag) {
     case 'SessionStarted':
       return initialPeerSessionView;
+    case 'LocalStreamReady':
+      // The live media handle is projected into a dedicated atom by the
+      // platform UI layer; it is not part of the serializable view.
+      return view;
     case 'Connected':
       return { ...view, status: 'connected' };
     case 'ChatMessageAdded':

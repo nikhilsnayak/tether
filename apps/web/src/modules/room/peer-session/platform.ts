@@ -9,6 +9,7 @@ import {
   PeerSessionPlatform,
   PlatformError,
   type DataChannelHandle,
+  type MediaStreamHandle,
   type PeerConnectionHandle,
   type PlatformEventDispatch,
 } from '@tether/client-runtime/modules/room';
@@ -17,6 +18,24 @@ import { Effect, Layer } from 'effect';
 
 const peerConnectionValue = (handle: PeerConnectionHandle) => handle.value as RTCPeerConnection;
 const dataChannelValue = (handle: DataChannelHandle) => handle.value as RTCDataChannel;
+const mediaStreamValue = (handle: MediaStreamHandle) => handle.value as MediaStream;
+
+/** Owns the local camera + microphone for as long as the session scope lives. */
+const acquireLocalMedia = Effect.acquireRelease(
+  Effect.tryPromise({
+    try: async (): Promise<MediaStreamHandle> => ({
+      value: await navigator.mediaDevices.getUserMedia({ video: true, audio: true }),
+    }),
+    catch: (cause) => new PlatformError({ operation: 'acquire-local-media', cause }),
+  }).pipe(Effect.tap(() => Effect.logInfo('Local media acquired'))),
+  (handle) =>
+    Effect.gen(function* () {
+      for (const track of mediaStreamValue(handle).getTracks()) {
+        track.stop();
+      }
+      yield* Effect.logInfo('Local media released');
+    }),
+);
 
 /** Owns the native connection for exactly as long as the session scope lives. */
 const acquirePeerConnection = Effect.acquireRelease(
@@ -173,6 +192,7 @@ const observeDataChannel = Effect.fn('@tether/web/observeDataChannel')(function*
 
 const webPeerSessionPlatform = PeerSessionPlatform.of({
   acquirePeerConnection,
+  acquireLocalMedia,
   observePeerConnection,
   createDataChannel: (peerConnection, label) =>
     Effect.try({

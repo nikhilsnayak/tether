@@ -793,6 +793,7 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
   session: RoomSession,
 ) {
   const client = yield* AppClient;
+  const platform = yield* PeerSessionPlatform;
   const peerSessionEventSink = yield* PeerSessionEventSink;
   const localInputQueue = yield* Queue.unbounded<PeerSessionLocalInput>();
   const dispatchLocalInput: PeerSessionLocalInputDispatch = (input) => {
@@ -815,6 +816,11 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
     Effect.logInfo(`Peer session stopped: room=${session.roomId} self=${session.selfId}`),
   );
   yield* peerSessionEventSink.emit({ _tag: 'SessionStarted' });
+
+  // Local camera + microphone are acquired for the whole session (they outlive
+  // any single peer connection) and released when the session scope closes.
+  const localStream = yield* platform.acquireLocalMedia;
+  yield* peerSessionEventSink.emit({ _tag: 'LocalStreamReady', stream: localStream });
 
   const actorLoop = Effect.gen(function* () {
     const inputHandler = yield* makePeerSessionActor(session, dispatchLocalInput);

@@ -1,128 +1,149 @@
 import { useAtomValue } from '@effect/atom-react';
-import { CatchBoundary } from '@tanstack/react-router';
 import type { PeerSessionView, RoomSession } from '@tether/client-runtime/modules/room';
-import { PeerId, RoomId } from '@tether/contracts/modules/room';
-import { Suspense, type FormEvent, useState } from 'react';
+import { Avatar, AvatarFallback } from '@tether/ui/components/avatar';
+import { Badge } from '@tether/ui/components/badge';
+import { Button } from '@tether/ui/components/button';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@tether/ui/components/card';
+import { Input } from '@tether/ui/components/input';
+import { ScrollArea } from '@tether/ui/components/scroll-area';
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from '@tether/ui/components/sheet';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@tether/ui/components/tooltip';
+import { cn } from '@tether/ui/lib/utils';
+import {
+  MessageSquare,
+  Mic,
+  MicOff,
+  PhoneOff,
+  SendHorizontal,
+  User,
+  Video,
+  VideoOff,
+} from 'lucide-react';
+import { type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react';
 
 import { usePeerConnection } from '../hooks/use-peer-connection';
-import { peerSessionViewAtom } from '../peer-session/view';
+import { peerLocalStreamAtom, peerSessionViewAtom } from '../peer-session/view';
 
-export function RoomConfigurationScreen() {
-  const [session, setSession] = useState<RoomSession | null>(null);
-
-  return (
-    <div className='flex flex-col gap-4'>
-      <h2 className='text-lg font-semibold'>Room</h2>
-      {!session ? (
-        <button
-          className='rounded-md bg-blue-500 px-4 py-2 text-white'
-          onClick={() =>
-            setSession({
-              roomId: RoomId.make('demo-room'),
-              selfId: PeerId.make(Date.now().toString()),
-            })
-          }
-        >
-          Join Room
-        </button>
-      ) : (
-        <CatchBoundary
-          errorComponent={PeerSessionError}
-          getResetKey={() => `${session.roomId}:${session.selfId}`}
-        >
-          <Suspense fallback={<PeerSessionLoading />}>
-            <RoomSessionScreen onLeaveRoom={() => setSession(null)} session={session} />
-          </Suspense>
-        </CatchBoundary>
-      )}
-    </div>
-  );
+export function PeerSessionLoading() {
+  return <p className='text-muted-foreground text-sm'>Starting peer session…</p>;
 }
 
-function PeerSessionLoading() {
-  return <p className='text-sm text-slate-600'>Starting peer session…</p>;
-}
-
-function PeerSessionError({ error }: { error: unknown }) {
+export function PeerSessionError({ error }: { error: unknown }) {
   const message = error instanceof Error ? error.message : 'Unknown peer-session failure';
 
   return (
-    <div className='rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800'>
-      Peer session failed: {message}
-    </div>
+    <Card className='border-destructive/40'>
+      <CardHeader>
+        <CardTitle className='text-destructive'>Peer session failed</CardTitle>
+        <CardDescription>{message}</CardDescription>
+      </CardHeader>
+    </Card>
   );
 }
+
+const ERROR_STATUSES = new Set<PeerSessionView['status']>([
+  'room-full',
+  'peer-already-joined',
+  'disconnected',
+  'failed',
+]);
 
 function peerSessionStatusPresentation(status: PeerSessionView['status']): {
   readonly indicatorClassName: string;
   readonly label: string;
-  readonly messagePlaceholder: string;
+  readonly hint: string;
 } {
   switch (status) {
     case 'connecting':
       return {
         indicatorClassName: 'animate-pulse bg-amber-400',
         label: 'Connecting',
-        messagePlaceholder: 'Waiting for peer…',
+        hint: 'Establishing a secure connection…',
       };
     case 'connected':
       return {
         indicatorClassName: 'bg-emerald-500',
         label: 'Connected',
-        messagePlaceholder: 'Write a message',
-      };
-    case 'disconnected':
-      return {
-        indicatorClassName: 'bg-slate-400',
-        label: 'Signaling disconnected',
-        messagePlaceholder: 'Signaling disconnected',
-      };
-    case 'failed':
-      return {
-        indicatorClassName: 'bg-red-500',
-        label: 'Session failed',
-        messagePlaceholder: 'Session failed',
-      };
-    case 'room-full':
-      return {
-        indicatorClassName: 'bg-red-500',
-        label: 'Room is full',
-        messagePlaceholder: 'This room already has two peers',
-      };
-    case 'peer-already-joined':
-      return {
-        indicatorClassName: 'bg-red-500',
-        label: 'Peer already joined',
-        messagePlaceholder: 'This peer identity is already active',
-      };
-    case 'waiting-for-peer':
-      return {
-        indicatorClassName: 'animate-pulse bg-amber-400',
-        label: 'Waiting for peer',
-        messagePlaceholder: 'Waiting for another peer…',
-      };
-    case 'transport-lost':
-      return {
-        indicatorClassName: 'bg-amber-500',
-        label: 'Peer transport lost',
-        messagePlaceholder: 'Connection to peer lost',
-      };
-    case 'negotiation-stalled':
-      return {
-        indicatorClassName: 'bg-amber-500',
-        label: 'Taking longer than expected',
-        messagePlaceholder: 'Still connecting — you can leave and retry',
+        hint: 'You are connected.',
       };
     case 'reconnecting':
       return {
         indicatorClassName: 'animate-pulse bg-amber-400',
         label: 'Reconnecting',
-        messagePlaceholder: 'Connection interrupted — reconnecting…',
+        hint: 'Connection interrupted — trying to recover…',
+      };
+    case 'transport-lost':
+      return {
+        indicatorClassName: 'bg-amber-500',
+        label: 'Peer transport lost',
+        hint: 'The connection dropped. Waiting to recover, or leave to retry.',
+      };
+    case 'waiting-for-peer':
+      return {
+        indicatorClassName: 'animate-pulse bg-amber-400',
+        label: 'Waiting for peer',
+        hint: 'Share this room to invite someone.',
+      };
+    case 'negotiation-stalled':
+      return {
+        indicatorClassName: 'bg-amber-500',
+        label: 'Taking longer than expected',
+        hint: 'Still connecting. You can leave and retry.',
+      };
+    case 'disconnected':
+      return {
+        indicatorClassName: 'bg-slate-400',
+        label: 'Signaling disconnected',
+        hint: 'The signaling connection was lost.',
+      };
+    case 'failed':
+      return {
+        indicatorClassName: 'bg-red-500',
+        label: 'Session failed',
+        hint: 'Something went wrong with the connection.',
+      };
+    case 'room-full':
+      return {
+        indicatorClassName: 'bg-red-500',
+        label: 'Room is full',
+        hint: 'This room already has two people.',
+      };
+    case 'peer-already-joined':
+      return {
+        indicatorClassName: 'bg-red-500',
+        label: 'Already joined',
+        hint: 'This identity is already active in the room.',
       };
   }
 }
 
-function RoomSessionScreen({
+function initials(id: string) {
+  return (
+    id
+      .replace(/[^a-z0-9]/gi, '')
+      .slice(0, 2)
+      .toUpperCase() || '··'
+  );
+}
+
+export function RoomSessionScreen({
   onLeaveRoom,
   session,
 }: {
@@ -133,96 +154,249 @@ function RoomSessionScreen({
     input: { roomId: session.roomId, selfId: session.selfId },
   });
   const view = useAtomValue(peerSessionViewAtom);
-  const status = peerSessionStatusPresentation(view.status);
+  const localStream = useAtomValue(peerLocalStreamAtom);
   const [draft, setDraft] = useState('');
+  const [chatOpen, setChatOpen] = useState(false);
+  const [micOn, setMicOn] = useState(true);
+  const [camOn, setCamOn] = useState(true);
+
+  useEffect(() => {
+    for (const track of localStream?.getAudioTracks() ?? []) {
+      track.enabled = micOn;
+    }
+  }, [localStream, micOn]);
+
+  useEffect(() => {
+    for (const track of localStream?.getVideoTracks() ?? []) {
+      track.enabled = camOn;
+    }
+  }, [localStream, camOn]);
+
+  const presentation = peerSessionStatusPresentation(view.status);
+  const isConnected = view.status === 'connected';
+
+  if (ERROR_STATUSES.has(view.status)) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>{presentation.label}</CardTitle>
+          <CardDescription>{presentation.hint}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button variant='outline' onClick={onLeaveRoom}>
+            Back to room setup
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     const message = draft.trim();
-    if (message.length === 0 || view.status !== 'connected') {
+    if (message.length === 0 || !isConnected) {
       return;
     }
-
     if (sendMessage(message)) {
       setDraft('');
     }
   };
 
   return (
-    <main className='mx-auto flex min-h-screen w-full max-w-2xl flex-col gap-4 p-4 sm:p-8'>
-      <header className='flex items-start justify-between gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm'>
-        <div>
-          <h1 className='text-lg font-semibold text-slate-900'>Room {session.roomId}</h1>
-          <p className='mt-1 text-xs text-slate-500'>You are {session.selfId}</p>
-        </div>
-        <div className='flex items-center gap-2 text-sm text-slate-600'>
-          <span className={`size-2.5 rounded-full ${status.indicatorClassName}`} />
-          {status.label}
-        </div>
-      </header>
-
-      <section className='flex min-h-96 flex-1 flex-col rounded-xl border border-slate-200 bg-slate-50 p-4 shadow-sm'>
-        {view.messages.length === 0 ? (
-          <div className='m-auto text-center'>
-            <p className='text-sm font-medium text-slate-700'>No messages yet</p>
-            <p className='mt-1 text-xs text-slate-500'>Messages from your peer will appear here.</p>
+    <TooltipProvider delay={200}>
+      <div className='fixed inset-0 z-40 flex flex-col bg-neutral-950 text-neutral-50'>
+        <div className='relative flex flex-1 items-center justify-center overflow-hidden'>
+          {/* Remote peer stage — remote video is wired in the next chunk. */}
+          <div className='flex flex-col items-center gap-4 px-6 text-center'>
+            <Avatar size='lg' className='size-24'>
+              <AvatarFallback className='bg-neutral-800 text-neutral-300'>
+                <User className='size-10' />
+              </AvatarFallback>
+            </Avatar>
+            <div className='space-y-1'>
+              <p className='text-lg font-medium'>{presentation.label}</p>
+              <p className='text-sm text-neutral-400'>{presentation.hint}</p>
+            </div>
           </div>
-        ) : (
-          <ol className='flex flex-col gap-3' aria-label='Chat messages'>
-            {view.messages.map((message) => (
-              <li
-                key={message.id}
-                className={`flex ${message.sender === 'self' ? 'justify-end' : 'justify-start'}`}
-              >
-                <div
-                  className={`max-w-[80%] rounded-2xl px-4 py-2 text-sm shadow-sm ${
-                    message.sender === 'self'
-                      ? 'rounded-br-md bg-blue-600 text-white'
-                      : 'rounded-bl-md border border-slate-200 bg-white text-slate-900'
-                  }`}
-                >
-                  <p className='mb-1 text-[10px] font-medium tracking-wide uppercase opacity-70'>
-                    {message.sender}
-                  </p>
-                  <p className='wrap-break-word whitespace-pre-wrap'>{message.text}</p>
-                </div>
-              </li>
-            ))}
-          </ol>
-        )}
-      </section>
 
-      {view.status === 'room-full' ||
-      view.status === 'peer-already-joined' ||
-      view.status === 'disconnected' ||
-      view.status === 'failed' ? (
-        <button
-          className='self-start rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50'
-          onClick={onLeaveRoom}
-          type='button'
-        >
-          Back to room setup
-        </button>
-      ) : (
-        <form className='flex gap-2' onSubmit={handleSubmit}>
-          <input
-            aria-label='Message'
-            className='min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100'
-            disabled={view.status !== 'connected'}
-            onChange={(event) => setDraft(event.target.value)}
-            placeholder={status.messagePlaceholder}
-            value={draft}
-          />
-          <button
-            className='rounded-lg bg-blue-600 px-5 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300'
-            disabled={view.status !== 'connected' || draft.trim().length === 0}
-            type='submit'
+          <div className='absolute inset-x-0 top-0 flex items-center justify-between p-4'>
+            <div className='flex items-center gap-2 rounded-full bg-black/40 px-3 py-1.5 backdrop-blur-sm'>
+              <span className={cn('size-2 rounded-full', presentation.indicatorClassName)} />
+              <span className='text-xs font-medium'>{presentation.label}</span>
+            </div>
+            <Badge variant='secondary' className='bg-black/40 text-neutral-200 backdrop-blur-sm'>
+              Room {session.roomId}
+            </Badge>
+          </div>
+
+          <div className='absolute right-4 bottom-4 aspect-video w-40 overflow-hidden rounded-xl border border-white/10 bg-neutral-900 shadow-lg sm:w-56'>
+            <LocalVideoTile localStream={localStream} camOn={camOn} selfId={session.selfId} />
+          </div>
+        </div>
+
+        <div className='flex items-center justify-center gap-3 border-t border-white/5 bg-neutral-950/80 p-4 backdrop-blur-sm'>
+          <ControlButton
+            label={micOn ? 'Mute microphone' : 'Unmute microphone'}
+            tone={micOn ? 'neutral' : 'danger'}
+            onClick={() => setMicOn((on) => !on)}
           >
-            Send
-          </button>
-        </form>
+            {micOn ? <Mic /> : <MicOff />}
+          </ControlButton>
+          <ControlButton
+            label={camOn ? 'Turn camera off' : 'Turn camera on'}
+            tone={camOn ? 'neutral' : 'danger'}
+            onClick={() => setCamOn((on) => !on)}
+          >
+            {camOn ? <Video /> : <VideoOff />}
+          </ControlButton>
+          <ControlButton label='Leave call' tone='danger' onClick={onLeaveRoom}>
+            <PhoneOff />
+          </ControlButton>
+          <ControlButton label='Open chat' tone='neutral' onClick={() => setChatOpen(true)}>
+            <MessageSquare />
+          </ControlButton>
+        </div>
+      </div>
+
+      <Sheet open={chatOpen} onOpenChange={setChatOpen}>
+        <SheetContent side='right' className='flex w-full flex-col gap-0 p-0 sm:max-w-md'>
+          <SheetHeader className='border-b'>
+            <SheetTitle>Chat</SheetTitle>
+            <SheetDescription>Messages are sent over the peer data channel.</SheetDescription>
+          </SheetHeader>
+
+          <ScrollArea className='flex-1'>
+            <div className='p-4'>
+              {view.messages.length === 0 ? (
+                <p className='text-muted-foreground mt-8 text-center text-sm'>
+                  No messages yet. Say hello once you are connected.
+                </p>
+              ) : (
+                <ol className='flex flex-col gap-3' aria-label='Chat messages'>
+                  {view.messages.map((message) => (
+                    <li
+                      key={message.id}
+                      className={cn(
+                        'flex',
+                        message.sender === 'self' ? 'justify-end' : 'justify-start',
+                      )}
+                    >
+                      <div
+                        className={cn(
+                          'max-w-[80%] rounded-2xl px-4 py-2 text-sm',
+                          message.sender === 'self'
+                            ? 'rounded-br-md bg-primary text-primary-foreground'
+                            : 'rounded-bl-md bg-muted text-foreground',
+                        )}
+                      >
+                        <p className='wrap-break-word whitespace-pre-wrap'>{message.text}</p>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </div>
+          </ScrollArea>
+
+          <form className='flex gap-2 border-t p-4' onSubmit={handleSubmit}>
+            <Input
+              aria-label='Message'
+              disabled={!isConnected}
+              onChange={(event) => setDraft(event.target.value)}
+              placeholder={isConnected ? 'Write a message' : 'Connect to chat…'}
+              value={draft}
+            />
+            <Button
+              aria-label='Send message'
+              disabled={!isConnected || draft.trim().length === 0}
+              size='icon'
+              type='submit'
+            >
+              <SendHorizontal />
+            </Button>
+          </form>
+        </SheetContent>
+      </Sheet>
+    </TooltipProvider>
+  );
+}
+
+/** Self-preview of the local camera. The live stream stays out of React state. */
+function LocalVideoTile({
+  localStream,
+  camOn,
+  selfId,
+}: {
+  readonly localStream: MediaStream | null;
+  readonly camOn: boolean;
+  readonly selfId: string;
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (video === null) {
+      return;
+    }
+    video.srcObject = localStream;
+  }, [localStream]);
+
+  return (
+    <>
+      <video
+        ref={videoRef}
+        autoPlay
+        muted
+        playsInline
+        className={cn('size-full -scale-x-100 object-cover', !camOn && 'invisible')}
+      />
+      {!camOn && (
+        <div className='absolute inset-0 flex items-center justify-center bg-neutral-900'>
+          <Avatar>
+            <AvatarFallback className='bg-neutral-800 text-neutral-300'>
+              {initials(selfId)}
+            </AvatarFallback>
+          </Avatar>
+        </div>
       )}
-    </main>
+      <span className='absolute bottom-1 left-2 rounded bg-black/50 px-1.5 py-0.5 text-[10px] font-medium'>
+        You
+      </span>
+    </>
+  );
+}
+
+function ControlButton({
+  label,
+  tone,
+  onClick,
+  children,
+}: {
+  readonly label: string;
+  readonly tone: 'neutral' | 'danger';
+  readonly onClick: () => void;
+  readonly children: ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            aria-label={label}
+            variant='secondary'
+            size='icon-lg'
+            onClick={onClick}
+            className={cn(
+              'size-12 rounded-full',
+              tone === 'danger' && 'bg-destructive text-white hover:bg-destructive/90',
+            )}
+          />
+        }
+      >
+        {children}
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   );
 }

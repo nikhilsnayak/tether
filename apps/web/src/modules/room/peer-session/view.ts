@@ -8,11 +8,19 @@ import {
 import { Effect, Layer } from 'effect';
 import { Atom, AtomRegistry } from 'effect/unstable/reactivity';
 
-/** Read model rendered by the room UI. */
-export const peerSessionViewAtom = Atom.make<PeerSessionView>(initialPeerSessionView);
+// keepAlive: the sink writes these atoms before the suspended UI subscribes;
+// without it those early writes (e.g. the offerer's instant Connected) are lost.
+export const peerSessionViewAtom = Atom.make<PeerSessionView>(initialPeerSessionView).pipe(
+  Atom.keepAlive,
+);
+
+/** Live local media, kept out of the serializable view; unwrapped to MediaStream here. */
+export const peerLocalStreamAtom = Atom.make<MediaStream | null>(null).pipe(Atom.keepAlive);
 
 const emitPeerSessionEvent = (event: PeerSessionEvent) =>
-  Atom.update(peerSessionViewAtom, (view) => reducePeerSessionView(view, event));
+  event._tag === 'LocalStreamReady'
+    ? Atom.update(peerLocalStreamAtom, () => event.stream.value as MediaStream)
+    : Atom.update(peerSessionViewAtom, (view) => reducePeerSessionView(view, event));
 
 /**
  * Adapts actor output events into the registry used by the React-facing atom

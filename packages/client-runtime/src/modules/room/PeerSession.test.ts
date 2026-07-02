@@ -23,6 +23,7 @@ import {
   initialPeerSessionView,
   reducePeerSessionView,
   type DataChannelHandle,
+  type MediaStreamHandle,
   type PeerConnectionHandle,
   type PeerSessionEvent,
   type PlatformEvent,
@@ -65,6 +66,7 @@ const makeFixture = Effect.fn('makeFixture')(function* (
   const localDataChannel: DataChannelHandle = {
     value: { label: 'chat' } satisfies TestDataChannel,
   };
+  const localMediaStream: MediaStreamHandle = { value: { id: 'local-media' } };
   const operations: Array<string> = [];
   const signals: Array<Signal> = [];
   const events: Array<PeerSessionEvent> = [];
@@ -78,6 +80,13 @@ const makeFixture = Effect.fn('makeFixture')(function* (
         return peerConnections[nextPeerConnection++] ?? makePeerConnection();
       }),
       () => Effect.sync(() => operations.push('closePeerConnection')),
+    ),
+    acquireLocalMedia: Effect.acquireRelease(
+      Effect.sync(() => {
+        operations.push('acquireLocalMedia');
+        return localMediaStream;
+      }),
+      () => Effect.sync(() => operations.push('releaseLocalMedia')),
     ),
     observePeerConnection: (_, dispatch) =>
       Effect.acquireRelease(
@@ -172,6 +181,7 @@ const makeFixture = Effect.fn('makeFixture')(function* (
     eventQueue,
     events,
     localDataChannel,
+    localMediaStream,
     operations,
     peerConnection,
     peerConnections,
@@ -180,6 +190,23 @@ const makeFixture = Effect.fn('makeFixture')(function* (
 });
 
 describe('startPeerSession', () => {
+  it.effect('acquires local media and emits LocalStreamReady on session start', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture();
+
+        yield* startPeerSession(session).pipe(Effect.provide(fixture.dependencies));
+
+        const localStreamReady = fixture.events.filter(
+          (event) => event._tag === 'LocalStreamReady',
+        );
+        assert.deepStrictEqual(localStreamReady, [
+          { _tag: 'LocalStreamReady', stream: fixture.localMediaStream },
+        ]);
+      }),
+    ),
+  );
+
   it.effect('disconnects and rejects new commands when the room stream ends normally', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -189,9 +216,11 @@ describe('startPeerSession', () => {
           Effect.provide(fixture.dependencies),
         );
         const started = yield* Queue.take(fixture.eventQueue);
+        const localStream = yield* Queue.take(fixture.eventQueue);
         const event = yield* Queue.take(fixture.eventQueue);
 
         assert.deepStrictEqual(started, { _tag: 'SessionStarted' });
+        assert.strictEqual(localStream._tag, 'LocalStreamReady');
         assert.deepStrictEqual(event, { _tag: 'SignalingDisconnected' });
         assert.isFalse(peerSession.sendMessage('too late'));
       }),
@@ -208,9 +237,11 @@ describe('startPeerSession', () => {
 
         yield* startPeerSession(session).pipe(Effect.provide(fixture.dependencies));
         const started = yield* Queue.take(fixture.eventQueue);
+        const localStream = yield* Queue.take(fixture.eventQueue);
         const event = yield* Queue.take(fixture.eventQueue);
 
         assert.deepStrictEqual(started, { _tag: 'SessionStarted' });
+        assert.strictEqual(localStream._tag, 'LocalStreamReady');
         assert.deepStrictEqual(event, {
           _tag: 'RoomJoinRejected',
           reason: 'room-full',
@@ -232,9 +263,11 @@ describe('startPeerSession', () => {
 
         yield* startPeerSession(session).pipe(Effect.provide(fixture.dependencies));
         const started = yield* Queue.take(fixture.eventQueue);
+        const localStream = yield* Queue.take(fixture.eventQueue);
         const event = yield* Queue.take(fixture.eventQueue);
 
         assert.deepStrictEqual(started, { _tag: 'SessionStarted' });
+        assert.strictEqual(localStream._tag, 'LocalStreamReady');
         assert.deepStrictEqual(event, {
           _tag: 'RoomJoinRejected',
           reason: 'peer-already-joined',
@@ -259,9 +292,11 @@ describe('startPeerSession', () => {
 
         yield* startPeerSession(session).pipe(Effect.provide(fixture.dependencies));
         const started = yield* Queue.take(fixture.eventQueue);
+        const localStream = yield* Queue.take(fixture.eventQueue);
         const event = yield* Queue.take(fixture.eventQueue);
 
         assert.deepStrictEqual(started, { _tag: 'SessionStarted' });
+        assert.strictEqual(localStream._tag, 'LocalStreamReady');
         assert.deepStrictEqual(event, { _tag: 'SignalingDisconnected' });
       }),
     ),
@@ -286,6 +321,7 @@ describe('startPeerSession', () => {
         assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), {
           _tag: 'SessionStarted',
         });
+        assert.strictEqual((yield* Queue.take(fixture.eventQueue))._tag, 'LocalStreamReady');
 
         yield* Queue.offer(roomEventQueue, {
           event: new RoomSessionOpenedEvent({ peerId: bob }),
@@ -333,6 +369,7 @@ describe('startPeerSession', () => {
         assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), {
           _tag: 'SessionStarted',
         });
+        assert.strictEqual((yield* Queue.take(fixture.eventQueue))._tag, 'LocalStreamReady');
 
         yield* Queue.offer(roomEventQueue, {
           event: new RoomSessionOpenedEvent({ peerId: bob }),
@@ -372,6 +409,7 @@ describe('startPeerSession', () => {
         assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), {
           _tag: 'SessionStarted',
         });
+        assert.strictEqual((yield* Queue.take(fixture.eventQueue))._tag, 'LocalStreamReady');
 
         yield* Queue.offer(roomEventQueue, {
           event: new RoomSessionOpenedEvent({ peerId: bob }),
