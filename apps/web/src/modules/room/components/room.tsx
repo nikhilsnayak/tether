@@ -33,7 +33,17 @@ import {
   VideoOff,
   X,
 } from 'lucide-react';
-import { type ReactNode, type SubmitEvent, useEffect, useRef, useState } from 'react';
+import { motion, useMotionValue, animate } from 'motion/react';
+import {
+  type ReactNode,
+  type RefObject,
+  type SubmitEvent,
+  useEffect,
+  useEffectEvent,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 
 import { Wordmark } from '@/components/logo';
 import { useViewportAspectRatio } from '@/hooks/use-viewport-aspect-ratio';
@@ -63,24 +73,22 @@ function PeerSessionStatusScreen({
   readonly action?: ReactNode;
 }) {
   return (
-    <div className='fixed inset-0 z-40 flex flex-col items-center justify-center gap-6 bg-neutral-950 px-6 text-center text-neutral-50'>
+    <div className='relative z-40 grid content-center justify-items-center gap-6 px-6 text-center'>
       <div className='absolute top-4 left-4 flex items-center gap-3'>
-        <Wordmark className='text-neutral-100' />
-        <div className='flex items-center gap-2 border-l border-white/15 pl-3'>
+        <Wordmark />
+        <div className='border-border flex items-center gap-2 border-l pl-3'>
           <span className={cn('size-2 rounded-full', indicatorClassName)} />
           <span className='text-xs font-medium'>{pillLabel}</span>
         </div>
       </div>
 
-      <div className='flex flex-col items-center gap-4'>
-        <Avatar size='lg' className='size-24'>
-          <AvatarFallback className={cn('bg-neutral-800 text-neutral-300', iconClassName)}>
-            {icon}
-          </AvatarFallback>
+      <div className='grid justify-items-center gap-4'>
+        <Avatar size='lg'>
+          <AvatarFallback className={iconClassName}>{icon}</AvatarFallback>
         </Avatar>
         <div className='space-y-1'>
           <p className='text-lg font-medium'>{label}</p>
-          <p className='max-w-sm text-sm text-neutral-400'>{hint}</p>
+          <p className='text-muted-foreground max-w-sm text-sm'>{hint}</p>
         </div>
       </div>
 
@@ -92,7 +100,7 @@ function PeerSessionStatusScreen({
 export function PeerSessionLoading() {
   return (
     <PeerSessionStatusScreen
-      indicatorClassName='animate-pulse bg-amber-400'
+      indicatorClassName='animate-pulse bg-warning'
       pillLabel='Starting'
       icon={<LoaderCircle className='size-9 animate-spin' />}
       label='Starting peer session…'
@@ -112,7 +120,7 @@ export function PeerSessionError({
 
   return (
     <PeerSessionStatusScreen
-      indicatorClassName='bg-red-500'
+      indicatorClassName='bg-destructive'
       pillLabel='Failed'
       icon={<AlertTriangle className='size-9' />}
       iconClassName='bg-destructive/15 text-destructive'
@@ -142,61 +150,61 @@ function peerSessionStatusPresentation(status: PeerSessionView['status']): {
   switch (status) {
     case 'connecting':
       return {
-        indicatorClassName: 'animate-pulse bg-amber-400',
+        indicatorClassName: 'animate-pulse bg-warning',
         label: 'Connecting',
         hint: 'Establishing a secure connection…',
       };
     case 'connected':
       return {
-        indicatorClassName: 'bg-emerald-400',
+        indicatorClassName: 'bg-success',
         label: 'Connected',
         hint: 'You are connected.',
       };
     case 'reconnecting':
       return {
-        indicatorClassName: 'animate-pulse bg-amber-400',
+        indicatorClassName: 'animate-pulse bg-warning',
         label: 'Reconnecting',
         hint: 'Connection interrupted — trying to recover…',
       };
     case 'transport-lost':
       return {
-        indicatorClassName: 'bg-amber-500',
+        indicatorClassName: 'bg-warning',
         label: 'Peer transport lost',
         hint: 'The connection dropped. Waiting to recover, or leave to retry.',
       };
     case 'waiting-for-peer':
       return {
-        indicatorClassName: 'animate-pulse bg-amber-400',
+        indicatorClassName: 'animate-pulse bg-warning',
         label: 'Waiting for peer',
         hint: 'Share this room to invite someone.',
       };
     case 'negotiation-stalled':
       return {
-        indicatorClassName: 'bg-amber-500',
+        indicatorClassName: 'bg-warning',
         label: 'Taking longer than expected',
         hint: 'Still connecting. You can leave and retry.',
       };
     case 'disconnected':
       return {
-        indicatorClassName: 'bg-slate-400',
+        indicatorClassName: 'bg-muted-foreground',
         label: 'Signaling disconnected',
         hint: 'The signaling connection was lost.',
       };
     case 'failed':
       return {
-        indicatorClassName: 'bg-red-500',
+        indicatorClassName: 'bg-destructive',
         label: 'Session failed',
         hint: 'Something went wrong with the connection.',
       };
     case 'room-full':
       return {
-        indicatorClassName: 'bg-red-500',
+        indicatorClassName: 'bg-destructive',
         label: 'Room is full',
         hint: 'This room already has two people.',
       };
     case 'peer-already-joined':
       return {
-        indicatorClassName: 'bg-red-500',
+        indicatorClassName: 'bg-destructive',
         label: 'Already joined',
         hint: 'This identity is already active in the room.',
       };
@@ -230,6 +238,10 @@ export function RoomSessionScreen({
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
   const deviceAspectRatio = useViewportAspectRatio();
+  const stageRef = useRef<HTMLDivElement>(null);
+  const [readCount, setReadCount] = useState(view.messages.length);
+  const messageCount = view.messages.length;
+  const hasUnread = !chatOpen && messageCount > readCount;
 
   const presentation = peerSessionStatusPresentation(view.status);
   const isConnected = view.status === 'connected';
@@ -287,46 +299,41 @@ export function RoomSessionScreen({
 
   return (
     <TooltipProvider delay={200}>
-      <div className='fixed inset-0 z-40 flex flex-col bg-neutral-950 text-neutral-50'>
-        <div className='relative flex flex-1 items-center justify-center overflow-hidden'>
+      <div className='relative z-40 grid grid-rows-[1fr_auto]'>
+        <div ref={stageRef} className='relative flex items-center justify-center overflow-hidden'>
           {remoteStream ? (
             <RemoteVideoTile stream={remoteStream} />
           ) : (
-            <div className='flex flex-col items-center gap-4 px-6 text-center'>
-              <Avatar size='lg' className='size-24'>
-                <AvatarFallback className='bg-neutral-800 text-neutral-300'>
+            <div className='grid justify-items-center gap-4 px-6 text-center'>
+              <Avatar size='lg'>
+                <AvatarFallback>
                   <User className='size-10' />
                 </AvatarFallback>
               </Avatar>
               <div className='space-y-1'>
                 <p className='text-lg font-medium'>{presentation.label}</p>
-                <p className='text-sm text-neutral-400'>{presentation.hint}</p>
+                <p className='text-muted-foreground text-sm'>{presentation.hint}</p>
               </div>
             </div>
           )}
 
-          <div className='absolute inset-x-0 top-0 flex items-center justify-between p-4'>
+          <div className='absolute inset-x-0 top-0 flex items-center justify-between bg-linear-to-b from-black/60 to-transparent p-4 pb-10'>
             <div className='flex items-center gap-3'>
-              <Wordmark className='text-neutral-100' />
-              <div className='flex items-center gap-2 rounded-md border border-white/10 bg-neutral-950/80 px-3 py-1.5'>
+              <Wordmark className='drop-shadow-md' />
+              <div className='border-border bg-background/70 flex items-center gap-2 rounded-md border px-3 py-1.5 backdrop-blur-sm'>
                 <span className={cn('size-2 rounded-full', presentation.indicatorClassName)} />
                 <span className='text-xs font-medium'>{presentation.label}</span>
               </div>
             </div>
-            <Badge variant='secondary' className='rounded-md bg-neutral-950/80 text-neutral-300'>
-              Room {session.roomId}
-            </Badge>
+            <Badge variant='secondary'>Room {session.roomId}</Badge>
           </div>
 
-          <div
-            className='absolute right-4 bottom-4 w-[clamp(7rem,30vw,9rem)] overflow-hidden rounded-md border border-white/15 bg-neutral-900 landscape:w-[clamp(14rem,24vw,20rem)]'
-            style={{ aspectRatio: deviceAspectRatio }}
-          >
+          <SelfVideoTile boundaryRef={stageRef} aspectRatio={deviceAspectRatio}>
             <LocalVideoTile localStream={localStream} camOn={camOn} selfId={session.selfId} />
-          </div>
+          </SelfVideoTile>
         </div>
 
-        <div className='flex items-center justify-center gap-3 border-t border-white/10 bg-neutral-950 p-4'>
+        <div className='border-border flex items-center justify-center gap-3 border-t p-4'>
           <ControlButton
             label={micOn ? 'Mute microphone' : 'Unmute microphone'}
             tone={micOn ? 'neutral' : 'danger'}
@@ -344,7 +351,12 @@ export function RoomSessionScreen({
           <ControlButton label='Leave call' tone='danger' onClick={handleLeave}>
             <PhoneOff />
           </ControlButton>
-          <ControlButton label='Open chat' tone='neutral' onClick={() => setChatOpen(true)}>
+          <ControlButton
+            label={hasUnread ? 'Open chat (unread messages)' : 'Open chat'}
+            tone='neutral'
+            indicator={hasUnread}
+            onClick={() => setChatOpen(true)}
+          >
             <MessageSquare />
           </ControlButton>
         </div>
@@ -353,7 +365,12 @@ export function RoomSessionScreen({
       <Drawer
         direction={deviceAspectRatio < 1 ? 'bottom' : 'right'}
         open={chatOpen}
-        onOpenChange={setChatOpen}
+        onOpenChange={(open) => {
+          setChatOpen(open);
+          if (!open) {
+            setReadCount(messageCount);
+          }
+        }}
       >
         <DrawerContent>
           <DrawerHeader className='relative border-b pr-14'>
@@ -380,7 +397,7 @@ export function RoomSessionScreen({
                   No messages yet. Say hello once you are connected.
                 </p>
               ) : (
-                <ol className='flex flex-col gap-3' aria-label='Chat messages'>
+                <ol className='space-y-3' aria-label='Chat messages'>
                   {view.messages.map((message) => (
                     <li
                       key={message.id}
@@ -393,7 +410,7 @@ export function RoomSessionScreen({
                         className={cn(
                           'max-w-[80%] rounded-2xl px-4 py-2 text-sm',
                           message.sender === 'self'
-                            ? 'rounded-br-md bg-neutral-900 text-neutral-100'
+                            ? 'rounded-br-md bg-primary text-primary-foreground'
                             : 'rounded-bl-md bg-muted text-foreground',
                         )}
                       >
@@ -448,8 +465,91 @@ function RemoteVideoTile({ stream }: { readonly stream: MediaStream }) {
       aria-label='Remote video'
       autoPlay
       playsInline
-      className='size-full max-w-5xl bg-black object-cover'
+      className='size-full max-w-5xl object-cover'
     />
+  );
+}
+
+type TileCorner = 'tl' | 'tr' | 'bl' | 'br';
+
+const TILE_MARGIN = 16;
+const TILE_SNAP = { type: 'spring', stiffness: 500, damping: 40 } as const;
+
+/** Self-preview that snaps to the nearest stage corner on release. */
+function SelfVideoTile({
+  boundaryRef,
+  aspectRatio,
+  children,
+}: {
+  readonly boundaryRef: RefObject<HTMLDivElement | null>;
+  readonly aspectRatio: number;
+  readonly children: ReactNode;
+}) {
+  const tileRef = useRef<HTMLDivElement>(null);
+  const cornerRef = useRef<TileCorner>('br');
+  const x = useMotionValue(0);
+  const y = useMotionValue(0);
+
+  const cornerOffset = (corner: TileCorner) => {
+    const tile = tileRef.current;
+    // offsetParent, not boundaryRef: the ancestor ref isn't attached yet during the mount layout effect.
+    const boundary = tile?.offsetParent as HTMLElement | null;
+    if (tile === null || boundary === null) {
+      return { x: 0, y: 0 };
+    }
+    const maxX = boundary.clientWidth - tile.offsetWidth - TILE_MARGIN;
+    const maxY = boundary.clientHeight - tile.offsetHeight - TILE_MARGIN;
+    return {
+      x: corner === 'tl' || corner === 'bl' ? TILE_MARGIN : maxX,
+      y: corner === 'tl' || corner === 'tr' ? TILE_MARGIN : maxY,
+    };
+  };
+
+  const onResize = useEffectEvent(() => {
+    const offset = cornerOffset(cornerRef.current);
+    x.set(offset.x);
+    y.set(offset.y);
+  });
+
+  useLayoutEffect(() => {
+    onResize();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  const snapToNearestCorner = () => {
+    const tile = tileRef.current;
+    const boundary = tile?.offsetParent as HTMLElement | null;
+    if (tile === null || boundary === null) {
+      return;
+    }
+    const stage = boundary.getBoundingClientRect();
+    const rect = tile.getBoundingClientRect();
+    const centerX = rect.left - stage.left + rect.width / 2;
+    const centerY = rect.top - stage.top + rect.height / 2;
+    const corner = `${centerY < stage.height / 2 ? 't' : 'b'}${
+      centerX < stage.width / 2 ? 'l' : 'r'
+    }` as TileCorner;
+    cornerRef.current = corner;
+    const offset = cornerOffset(corner);
+    void animate(x, offset.x, TILE_SNAP);
+    void animate(y, offset.y, TILE_SNAP);
+  };
+
+  return (
+    <motion.div
+      ref={tileRef}
+      drag
+      dragConstraints={boundaryRef}
+      dragElastic={0.08}
+      dragMomentum={false}
+      onDragEnd={snapToNearestCorner}
+      whileDrag={{ scale: 1.04 }}
+      style={{ x, y, aspectRatio }}
+      className='border-border bg-card absolute top-0 left-0 w-[clamp(7rem,30vw,9rem)] cursor-grab touch-none overflow-hidden rounded-md border shadow-lg active:cursor-grabbing landscape:w-[clamp(14rem,24vw,20rem)]'
+    >
+      {children}
+    </motion.div>
   );
 }
 
@@ -484,15 +584,13 @@ function LocalVideoTile({
         className={cn('size-full -scale-x-100 object-cover', !camOn && 'invisible')}
       />
       {!camOn && (
-        <div className='absolute inset-0 flex items-center justify-center bg-neutral-900'>
+        <div className='bg-card absolute inset-0 flex items-center justify-center'>
           <Avatar>
-            <AvatarFallback className='bg-neutral-800 text-neutral-300'>
-              {initials(selfId)}
-            </AvatarFallback>
+            <AvatarFallback>{initials(selfId)}</AvatarFallback>
           </Avatar>
         </div>
       )}
-      <span className='absolute bottom-1 left-2 rounded bg-black/50 px-1.5 py-0.5 text-[10px] font-medium'>
+      <span className='bg-background/50 absolute bottom-1 left-2 rounded px-1.5 py-0.5 text-[10px] font-medium'>
         You
       </span>
     </>
@@ -503,11 +601,13 @@ function ControlButton({
   label,
   tone,
   onClick,
+  indicator = false,
   children,
 }: {
   readonly label: string;
   readonly tone: 'neutral' | 'danger';
   readonly onClick: () => void;
+  readonly indicator?: boolean;
   readonly children: ReactNode;
 }) {
   return (
@@ -516,17 +616,17 @@ function ControlButton({
         render={
           <Button
             aria-label={label}
-            variant='secondary'
+            variant={tone === 'danger' ? 'destructive' : 'secondary'}
             size='icon-lg'
             onClick={onClick}
-            className={cn(
-              'size-12 rounded-full',
-              tone === 'danger' && 'bg-destructive text-white hover:bg-destructive/90',
-            )}
+            className='relative'
           />
         }
       >
         {children}
+        {indicator && (
+          <span className='bg-primary ring-background absolute top-1 right-1 size-2.5 rounded-full ring-2' />
+        )}
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>

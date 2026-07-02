@@ -31,42 +31,39 @@ function HomePage() {
   };
 
   return (
-    <div className='flex min-h-svh flex-col bg-neutral-950 text-neutral-100'>
+    <div className='grid grid-rows-[auto_1fr_auto]'>
       <header className='mx-auto flex w-full max-w-5xl items-center justify-between px-6 py-6'>
-        <Wordmark className='text-neutral-100' />
-        <span className='text-xs tracking-wide text-neutral-500'>1:1 video</span>
+        <Wordmark />
+        <span className='text-muted-foreground text-xs tracking-wide'>1:1 video</span>
       </header>
 
-      <main className='mx-auto flex w-full max-w-5xl flex-1 items-center px-6 py-16'>
+      <main className='mx-auto flex w-full max-w-5xl items-center px-6 py-16'>
         <div className='w-full max-w-xl'>
-          <p className='mb-3 text-xs font-medium tracking-widest text-neutral-500 uppercase'>
+          <p className='text-muted-foreground mb-3 text-xs font-medium tracking-widest uppercase'>
             Peer-to-peer
           </p>
           <h1 className='max-w-lg text-3xl leading-tight font-medium tracking-tight sm:text-4xl'>
             Start a private video call.
           </h1>
-          <p className='mt-4 max-w-md text-sm leading-6 text-neutral-400'>
+          <p className='text-muted-foreground mt-4 max-w-md text-sm leading-6'>
             Create a room and send the code to one other person. No account or installation.
           </p>
 
-          <div className='mt-12 border-y border-white/15'>
+          <div className='border-border mt-12 border-y'>
             <section className='flex items-center justify-between gap-6 py-6'>
               <div>
                 <h2 className='text-sm font-medium'>New call</h2>
-                <p className='mt-1 text-sm text-neutral-500'>Create a new room code.</p>
+                <p className='text-muted-foreground mt-1 text-sm'>Create a new room code.</p>
               </div>
-              <Button
-                className='rounded-md bg-neutral-100 px-5 text-neutral-950 hover:bg-white'
-                onClick={() => enterRoom(generateRoomId(), true)}
-              >
-                Create room
-              </Button>
+              <Button onClick={() => enterRoom(generateRoomId(), true)}>Create room</Button>
             </section>
 
-            <section className='border-t border-white/15 py-6'>
+            <section className='border-border border-t py-6'>
               <div className='mb-4'>
                 <h2 className='text-sm font-medium'>Join a call</h2>
-                <p className='mt-1 text-sm text-neutral-500'>Enter a room code you received.</p>
+                <p className='text-muted-foreground mt-1 text-sm'>
+                  Enter a room code you received.
+                </p>
               </div>
               <form className='flex max-w-md gap-2' onSubmit={handleJoin}>
                 <Input
@@ -75,14 +72,8 @@ function HomePage() {
                   onChange={(event) => setCode(event.target.value)}
                   placeholder='Room code'
                   value={code}
-                  className='h-10 rounded-md border-white/15 bg-transparent placeholder:text-neutral-600 focus-visible:ring-white/25'
                 />
-                <Button
-                  type='submit'
-                  variant='secondary'
-                  disabled={code.trim().length === 0}
-                  className='h-10 rounded-md border border-white/15 bg-transparent px-5 text-neutral-100 hover:bg-white/10'
-                >
+                <Button type='submit' variant='outline' disabled={code.trim().length === 0}>
                   Join
                 </Button>
               </form>
@@ -91,7 +82,7 @@ function HomePage() {
         </div>
       </main>
 
-      <footer className='mx-auto w-full max-w-5xl px-6 py-6 text-xs text-neutral-600'>
+      <footer className='text-muted-foreground mx-auto w-full max-w-5xl px-6 py-6 text-xs'>
         Calls connect directly between participants.
       </footer>
     </div>

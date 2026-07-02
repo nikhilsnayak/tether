@@ -27,6 +27,7 @@
     "babel-plugin-react-compiler": "^1.0.0",
     "effect": "catalog:",
     "lucide-react": "catalog:",
+    "motion": "^12.42.2",
     "react": "catalog:",
     "react-dom": "catalog:",
     "typescript": "catalog:",
