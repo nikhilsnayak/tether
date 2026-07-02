@@ -2,9 +2,14 @@ import { expect, test } from '@playwright/test';
 
 test('web app loads', async ({ page }) => {
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Tether', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'New meeting' })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Start a private video call.', exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'New call', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create room', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Join a call', exact: true })).toBeVisible();
   await expect(page.getByRole('textbox', { name: 'Room code' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Join', exact: true })).toBeDisabled();
 });
 
 test('web app opens a signaling session', async ({ page }) => {

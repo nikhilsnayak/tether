@@ -66,7 +66,14 @@ test('complete room flow', async ({ browser, page }, testInfo) => {
   try {
     await test.step('host creates a meeting', async () => {
       await page.goto('/');
-      await page.getByRole('button', { name: 'New meeting' }).click();
+      await page.getByRole('button', { name: 'Create room', exact: true }).click();
+      await expect(page).toHaveURL(/\/room\/[a-z]{3}-[a-z]{4}-[a-z]{3}\?invite=true$/);
+      await expect(page.getByRole('heading', { name: 'Your room is ready' })).toBeVisible();
+      await expect(page.getByRole('textbox', { name: 'Room invite link' })).toHaveValue(
+        /\/room\/[a-z]{3}-[a-z]{4}-[a-z]{3}$/,
+      );
+      await expect(page.getByRole('button', { name: 'Copy room link' })).toBeVisible();
+      await page.getByRole('button', { name: 'Close' }).click();
       await expect(page).toHaveURL(/\/room\/[a-z]{3}-[a-z]{4}-[a-z]{3}$/);
       await expectWaitingForPeer(page);
     });

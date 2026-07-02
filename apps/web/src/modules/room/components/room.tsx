@@ -33,6 +33,8 @@ import {
 } from 'lucide-react';
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react';
 
+import { Wordmark } from '@/components/logo';
+
 import { usePeerConnection } from '../hooks/use-peer-connection';
 import {
   peerLocalStreamAtom,
@@ -59,9 +61,12 @@ function PeerSessionStatusScreen({
 }) {
   return (
     <div className='fixed inset-0 z-40 flex flex-col items-center justify-center gap-6 bg-neutral-950 px-6 text-center text-neutral-50'>
-      <div className='absolute top-4 left-4 flex items-center gap-2 rounded-full bg-black/40 px-3 py-1.5 backdrop-blur-sm'>
-        <span className={cn('size-2 rounded-full', indicatorClassName)} />
-        <span className='text-xs font-medium'>{pillLabel}</span>
+      <div className='absolute top-4 left-4 flex items-center gap-3'>
+        <Wordmark className='text-neutral-100' />
+        <div className='flex items-center gap-2 border-l border-white/15 pl-3'>
+          <span className={cn('size-2 rounded-full', indicatorClassName)} />
+          <span className='text-xs font-medium'>{pillLabel}</span>
+        </div>
       </div>
 
       <div className='flex flex-col items-center gap-4'>
@@ -140,7 +145,7 @@ function peerSessionStatusPresentation(status: PeerSessionView['status']): {
       };
     case 'connected':
       return {
-        indicatorClassName: 'bg-emerald-500',
+        indicatorClassName: 'bg-emerald-400',
         label: 'Connected',
         hint: 'You are connected.',
       };
@@ -291,21 +296,24 @@ export function RoomSessionScreen({
           )}
 
           <div className='absolute inset-x-0 top-0 flex items-center justify-between p-4'>
-            <div className='flex items-center gap-2 rounded-full bg-black/40 px-3 py-1.5 backdrop-blur-sm'>
-              <span className={cn('size-2 rounded-full', presentation.indicatorClassName)} />
-              <span className='text-xs font-medium'>{presentation.label}</span>
+            <div className='flex items-center gap-3'>
+              <Wordmark className='text-neutral-100' />
+              <div className='flex items-center gap-2 rounded-md border border-white/10 bg-neutral-950/80 px-3 py-1.5'>
+                <span className={cn('size-2 rounded-full', presentation.indicatorClassName)} />
+                <span className='text-xs font-medium'>{presentation.label}</span>
+              </div>
             </div>
-            <Badge variant='secondary' className='bg-black/40 text-neutral-200 backdrop-blur-sm'>
+            <Badge variant='secondary' className='rounded-md bg-neutral-950/80 text-neutral-300'>
               Room {session.roomId}
             </Badge>
           </div>
 
-          <div className='absolute right-4 bottom-4 aspect-video w-40 overflow-hidden rounded-xl border border-white/10 bg-neutral-900 shadow-lg sm:w-56'>
+          <div className='absolute right-4 bottom-4 aspect-video w-40 overflow-hidden rounded-md border border-white/15 bg-neutral-900 sm:w-56'>
             <LocalVideoTile localStream={localStream} camOn={camOn} selfId={session.selfId} />
           </div>
         </div>
 
-        <div className='flex items-center justify-center gap-3 border-t border-white/5 bg-neutral-950/80 p-4 backdrop-blur-sm'>
+        <div className='flex items-center justify-center gap-3 border-t border-white/10 bg-neutral-950 p-4'>
           <ControlButton
             label={micOn ? 'Mute microphone' : 'Unmute microphone'}
             tone={micOn ? 'neutral' : 'danger'}
@@ -356,7 +364,7 @@ export function RoomSessionScreen({
                         className={cn(
                           'max-w-[80%] rounded-2xl px-4 py-2 text-sm',
                           message.sender === 'self'
-                            ? 'rounded-br-md bg-primary text-primary-foreground'
+                            ? 'rounded-br-md bg-neutral-900 text-neutral-100'
                             : 'rounded-bl-md bg-muted text-foreground',
                         )}
                       >
