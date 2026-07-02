@@ -13,7 +13,7 @@ import {
   SessionDescriptionSignal,
   SignalReceivedEvent,
 } from '@tether/contracts/modules/room';
-import { Effect, Fiber, Layer, Stream } from 'effect';
+import { Deferred, Effect, Fiber, Layer, Stream } from 'effect';
 import { RpcTest } from 'effect/unstable/rpc';
 
 import { RoomHandlers } from './Handlers';
@@ -43,6 +43,33 @@ describe('RoomHandlers', () => {
       const aliceEvents = yield* Fiber.join(aliceFiber);
 
       assert.deepStrictEqual(bobEvents, [{ event: new RoomSessionOpenedEvent({ peerId: alice }) }]);
+      assert.deepStrictEqual(aliceEvents, [
+        { event: new RoomSessionOpenedEvent({ peerId: null }) },
+        { event: new PeerJoinedEvent({ peerId: bob }) },
+        { event: new PeerLeftEvent({ peerId: bob }) },
+      ]);
+    }),
+  );
+
+  it.effect('explicitly leaves through the RPC', () =>
+    Effect.gen(function* () {
+      const client = yield* makeClient;
+      const bobOpened = yield* Deferred.make<void>();
+      const aliceFiber = yield* client
+        .OpenRoomSession({ roomId, selfId: alice })
+        .pipe(Stream.take(3), Stream.runCollect, Effect.forkChild({ startImmediately: true }));
+      const bobFiber = yield* client.OpenRoomSession({ roomId, selfId: bob }).pipe(
+        Stream.tap(() => Deferred.succeed(bobOpened, undefined)),
+        Stream.runDrain,
+        Effect.forkChild({ startImmediately: true }),
+      );
+
+      yield* Deferred.await(bobOpened);
+      yield* client.LeaveRoom({ roomId, selfId: bob });
+
+      const aliceEvents = yield* Fiber.join(aliceFiber);
+      yield* Fiber.interrupt(bobFiber);
+
       assert.deepStrictEqual(aliceEvents, [
         { event: new RoomSessionOpenedEvent({ peerId: null }) },
         { event: new PeerJoinedEvent({ peerId: bob }) },

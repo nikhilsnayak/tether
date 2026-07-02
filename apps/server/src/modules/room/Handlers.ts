@@ -13,6 +13,9 @@ export const RoomHandlers = RoomRpcs.toLayer(
 
         return events.pipe(Stream.map((event) => ({ event })));
       }, Stream.unwrap),
+      LeaveRoom: Effect.fnUntraced(function* ({ roomId, selfId }) {
+        yield* room.leave(roomId, selfId);
+      }),
       SendSignal: Effect.fnUntraced(function* ({ roomId, selfId, signal }) {
         yield* room.sendSignal(roomId, selfId, signal);
       }),

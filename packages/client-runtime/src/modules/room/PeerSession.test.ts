@@ -142,6 +142,10 @@ const makeFixture = Effect.fn('makeFixture')(function* (
     Layer.succeed(
       AppClient,
       AppClient.of({
+        LeaveRoom: () =>
+          Effect.sync(() => {
+            operations.push('leaveRoom');
+          }),
         OpenRoomSession: openRoomSession,
         SendSignal:
           sendSignal ??
@@ -206,6 +210,24 @@ describe('startPeerSession', () => {
         assert.deepStrictEqual(localStreamReady, [
           { _tag: 'LocalStreamReady', stream: fixture.localMediaStream },
         ]);
+      }),
+    ),
+  );
+
+  it.effect('explicitly leaves the room at most once', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture();
+        const peerSession = yield* startPeerSession(session).pipe(
+          Effect.provide(fixture.dependencies),
+        );
+
+        yield* Effect.promise(() => Promise.all([peerSession.leave(), peerSession.leave()]));
+
+        assert.lengthOf(
+          fixture.operations.filter((operation) => operation === 'leaveRoom'),
+          1,
+        );
       }),
     ),
   );

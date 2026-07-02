@@ -33,6 +33,10 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
             return [undefined, newRegistry];
           }
 
+          if (!ctx.members.includes(selfId)) {
+            return [undefined, newRegistry];
+          }
+
           ctx.members = ctx.members.filter((member) => member !== selfId);
 
           yield* PubSub.publish(ctx.pubsub, new PeerLeftEvent({ peerId: selfId }));
@@ -115,7 +119,7 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
       );
     });
 
-    return { openSession, sendSignal };
+    return { openSession, sendSignal, leave };
   }),
 }) {
   static readonly layer = Layer.effect(this, this.make);

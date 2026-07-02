@@ -150,9 +150,10 @@ A new `room` (signaling) feature-slice. **No DB, no adapter, no sync engine.**
 Smallest thing that teaches the Effect signaling server **and** raw WebRTC.
 
 1. ✅ **`contracts` — signaling protocol** (`packages/contracts/src/modules/room/`):
-   - Two RPCs: `OpenRoomSession { selfId, roomId }` (**streaming** → acknowledges
-     the session and pushes `RoomEvent`s) and
-     `SendSignal { selfId, roomId, signal }` (unary, with membership validation).
+   - Three RPCs: `OpenRoomSession { selfId, roomId }` (**streaming** → acknowledges
+     the session and pushes `RoomEvent`s),
+     `SendSignal { selfId, roomId, signal }` (unary, with membership validation),
+     and idempotent `LeaveRoom { selfId, roomId }` (unary).
    - `RoomEvent` union: `RoomSessionOpenedEvent { peerId: PeerId | null }`,
      `PeerJoinedEvent { peerId }`, `PeerLeftEvent { peerId }`, and
      `SignalReceivedEvent { peerId, signal }`.
@@ -170,13 +171,14 @@ Smallest thing that teaches the Effect signaling server **and** raw WebRTC.
      returns a complete `Stream<RoomEvent>` beginning with
      `RoomSessionOpenedEvent` followed by live events. `Effect.acquireRelease`
      owns disconnect cleanup, publishes `PeerLeft`, and GCs empty rooms.
-     `sendSignal` atomically validates membership before publishing. `leave` and
-     the underlying `PubSub` stay private.
+     `sendSignal` atomically validates membership before publishing. `leave` is
+     also exposed through `LeaveRoom` so deliberate UI departures do not depend
+     on transport cancellation; repeated cleanup is safe.
    - ✅ **`Handlers.ts`** — transport adapter only: maps the domain event stream to
-     RPC `{ event }` responses and delegates `SendSignal` to the service.
+     RPC `{ event }` responses and delegates `SendSignal` and `LeaveRoom` to the service.
    - ✅ **`Rpc.ts` / `App.ts`** — handlers, service, and the `/rpc` WebSocket
      protocol with JSON serialization are wired into the server.
-   - ✅ **Tests** — 14 service/handler tests cover streaming, cancellation,
+   - ✅ **Tests** — 16 service/handler tests cover streaming, explicit leave, cancellation,
      typed errors, capacity, duplicate peers, ordering, and membership
      validation through the domain service and in-memory RPC test client.
 3. 🟨 **`apps/web` — raw `RTCPeerConnection`:**
@@ -268,13 +270,15 @@ WebSocket protocol with JSON serialization.**
   **is** both the room-session lifetime and realtime server→client channel.
 - `SendSignal` is a separate **unary RPC** multiplexed over the same WebSocket
   for messages going up.
+- `LeaveRoom` is an idempotent **unary RPC** used before deliberate navigation;
+  stream cancellation remains the fallback for abrupt disconnects.
 - The server uses `RpcServer.layerProtocolWebsocket` and
   `RpcSerialization.layerJson`; clients use the matching socket protocol and
   JSON serialization layers.
 
 **Consequences this shaped:**
 
-- `OpenRoomSession` and `SendSignal` remain independent RPC operations even
+- `OpenRoomSession`, `SendSignal`, and `LeaveRoom` remain independent RPC operations even
   though they share a socket. The transport connection is not bound to an
   authenticated room identity, so every request **self-identifies** with
   `selfId` — that's why the client mints its own `PeerId`.

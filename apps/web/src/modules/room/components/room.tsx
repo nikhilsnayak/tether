@@ -154,7 +154,7 @@ export function RoomSessionScreen({
   readonly onLeaveRoom: () => void;
   readonly session: RoomSession;
 }) {
-  const { sendMessage } = usePeerConnection({
+  const { leave, sendMessage } = usePeerConnection({
     input: { roomId: session.roomId, selfId: session.selfId },
   });
   const view = useAtomValue(peerSessionViewAtom);
@@ -179,6 +179,9 @@ export function RoomSessionScreen({
 
   const presentation = peerSessionStatusPresentation(view.status);
   const isConnected = view.status === 'connected';
+  const handleLeave = () => {
+    void leave().then(onLeaveRoom, onLeaveRoom);
+  };
 
   if (ERROR_STATUSES.has(view.status)) {
     return (
@@ -258,7 +261,7 @@ export function RoomSessionScreen({
           >
             {camOn ? <Video /> : <VideoOff />}
           </ControlButton>
-          <ControlButton label='Leave call' tone='danger' onClick={onLeaveRoom}>
+          <ControlButton label='Leave call' tone='danger' onClick={handleLeave}>
             <PhoneOff />
           </ControlButton>
           <ControlButton label='Open chat' tone='neutral' onClick={() => setChatOpen(true)}>
@@ -344,7 +347,13 @@ function RemoteVideoTile({ stream }: { readonly stream: MediaStream }) {
 
   return (
     // oxlint-disable-next-line jsx-a11y/media-has-caption -- live call has no captions
-    <video ref={videoRef} autoPlay playsInline className='size-full bg-black object-contain' />
+    <video
+      ref={videoRef}
+      aria-label='Remote video'
+      autoPlay
+      playsInline
+      className='size-full bg-black object-contain'
+    />
   );
 }
 
@@ -372,6 +381,7 @@ function LocalVideoTile({
     <>
       <video
         ref={videoRef}
+        aria-label='Local video preview'
         autoPlay
         muted
         playsInline

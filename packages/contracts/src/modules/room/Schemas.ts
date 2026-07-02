@@ -98,6 +98,11 @@ export const OpenRoomSessionSuccess = Schema.Struct({
 
 export const OpenRoomSessionError = Schema.Union([RoomFull, PeerAlreadyJoined]);
 
+export const LeaveRoomPayload = Schema.Struct({
+  selfId: PeerId,
+  roomId: RoomId,
+});
+
 export const SendSignalPayload = Schema.Struct({
   selfId: PeerId,
   roomId: RoomId,

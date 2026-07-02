@@ -811,6 +811,8 @@ export const makePeerSessionActor = Effect.fn('@tether/client-runtime/makePeerSe
 export interface PeerSession {
   /** Enqueues a chat command; `true` means queued, not remotely delivered. */
   readonly sendMessage: (message: string) => boolean;
+  /** Explicitly releases room membership before the client tears down its transport. */
+  readonly leave: () => Promise<void>;
 }
 
 export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSession')(function* (
@@ -920,11 +922,17 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
     Effect.forkScoped({ startImmediately: true }),
   );
 
+  let leavePromise: Promise<void> | undefined;
+
   return {
     sendMessage: (message) =>
       Queue.offerUnsafe(localInputQueue, {
         _tag: 'SendMessage',
         message,
       }),
+    leave: () => {
+      leavePromise ??= Effect.runPromise(client.LeaveRoom(session));
+      return leavePromise;
+    },
   } satisfies PeerSession;
 });

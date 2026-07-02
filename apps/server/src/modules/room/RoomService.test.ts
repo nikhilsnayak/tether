@@ -79,6 +79,30 @@ describe('RoomService', () => {
     ),
   );
 
+  it.effect('explicitly leaves once and releases room capacity', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const room = yield* RoomService;
+        const aliceEvents = yield* room.openSession(roomId, alice);
+        yield* room.openSession(roomId, bob);
+
+        yield* room.leave(roomId, bob);
+        yield* room.leave(roomId, bob);
+
+        const received = yield* aliceEvents.pipe(Stream.take(3), Stream.runCollect);
+        assert.deepStrictEqual(received, [
+          new RoomSessionOpenedEvent({ peerId: null }),
+          new PeerJoinedEvent({ peerId: bob }),
+          new PeerLeftEvent({ peerId: bob }),
+        ]);
+
+        const replacement = yield* room.openSession(roomId, charlie);
+        const replacementEvents = yield* replacement.pipe(Stream.take(1), Stream.runCollect);
+        assert.deepStrictEqual(replacementEvents, [new RoomSessionOpenedEvent({ peerId: alice })]);
+      }),
+    ),
+  );
+
   it.effect('rejects a duplicate peer before checking room capacity', () =>
     withRoomService(
       Effect.gen(function* () {

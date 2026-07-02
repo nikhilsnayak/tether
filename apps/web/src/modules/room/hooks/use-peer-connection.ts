@@ -6,5 +6,5 @@ import { peerSessionAtom } from '../peer-session/atoms';
 export function usePeerConnection({ input }: { input: RoomSession }) {
   const session = useAtomSuspense(peerSessionAtom(input));
 
-  return { sendMessage: session.value.sendMessage };
+  return { leave: session.value.leave, sendMessage: session.value.sendMessage };
 }
