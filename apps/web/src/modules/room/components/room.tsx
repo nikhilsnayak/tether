@@ -3,13 +3,6 @@ import type { PeerSessionView, RoomSession } from '@tether/client-runtime/module
 import { Avatar, AvatarFallback } from '@tether/ui/components/avatar';
 import { Badge } from '@tether/ui/components/badge';
 import { Button } from '@tether/ui/components/button';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@tether/ui/components/card';
 import { Input } from '@tether/ui/components/input';
 import { ScrollArea } from '@tether/ui/components/scroll-area';
 import {
@@ -27,6 +20,8 @@ import {
 } from '@tether/ui/components/tooltip';
 import { cn } from '@tether/ui/lib/utils';
 import {
+  AlertTriangle,
+  LoaderCircle,
   MessageSquare,
   Mic,
   MicOff,
@@ -45,20 +40,82 @@ import {
   peerSessionViewAtom,
 } from '../peer-session/view';
 
-export function PeerSessionLoading() {
-  return <p className='text-muted-foreground text-sm'>Starting peer session…</p>;
+function PeerSessionStatusScreen({
+  indicatorClassName,
+  pillLabel,
+  icon,
+  iconClassName,
+  label,
+  hint,
+  action,
+}: {
+  readonly indicatorClassName: string;
+  readonly pillLabel: string;
+  readonly icon: ReactNode;
+  readonly iconClassName?: string;
+  readonly label: string;
+  readonly hint: string;
+  readonly action?: ReactNode;
+}) {
+  return (
+    <div className='fixed inset-0 z-40 flex flex-col items-center justify-center gap-6 bg-neutral-950 px-6 text-center text-neutral-50'>
+      <div className='absolute top-4 left-4 flex items-center gap-2 rounded-full bg-black/40 px-3 py-1.5 backdrop-blur-sm'>
+        <span className={cn('size-2 rounded-full', indicatorClassName)} />
+        <span className='text-xs font-medium'>{pillLabel}</span>
+      </div>
+
+      <div className='flex flex-col items-center gap-4'>
+        <Avatar size='lg' className='size-24'>
+          <AvatarFallback className={cn('bg-neutral-800 text-neutral-300', iconClassName)}>
+            {icon}
+          </AvatarFallback>
+        </Avatar>
+        <div className='space-y-1'>
+          <p className='text-lg font-medium'>{label}</p>
+          <p className='max-w-sm text-sm text-neutral-400'>{hint}</p>
+        </div>
+      </div>
+
+      {action}
+    </div>
+  );
 }
 
-export function PeerSessionError({ error }: { error: unknown }) {
+export function PeerSessionLoading() {
+  return (
+    <PeerSessionStatusScreen
+      indicatorClassName='animate-pulse bg-amber-400'
+      pillLabel='Starting'
+      icon={<LoaderCircle className='size-9 animate-spin' />}
+      label='Starting peer session…'
+      hint='Setting up your connection.'
+    />
+  );
+}
+
+export function PeerSessionError({
+  error,
+  reset,
+}: {
+  readonly error: unknown;
+  readonly reset: () => void;
+}) {
   const message = error instanceof Error ? error.message : 'Unknown peer-session failure';
 
   return (
-    <Card className='border-destructive/40'>
-      <CardHeader>
-        <CardTitle className='text-destructive'>Peer session failed</CardTitle>
-        <CardDescription>{message}</CardDescription>
-      </CardHeader>
-    </Card>
+    <PeerSessionStatusScreen
+      indicatorClassName='bg-red-500'
+      pillLabel='Failed'
+      icon={<AlertTriangle className='size-9' />}
+      iconClassName='bg-destructive/15 text-destructive'
+      label='Peer session failed'
+      hint={message}
+      action={
+        <Button variant='secondary' onClick={reset}>
+          Try again
+        </Button>
+      }
+    />
   );
 }
 
@@ -185,17 +242,19 @@ export function RoomSessionScreen({
 
   if (ERROR_STATUSES.has(view.status)) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>{presentation.label}</CardTitle>
-          <CardDescription>{presentation.hint}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Button variant='outline' onClick={onLeaveRoom}>
+      <PeerSessionStatusScreen
+        indicatorClassName={presentation.indicatorClassName}
+        pillLabel={presentation.label}
+        icon={<AlertTriangle className='size-9' />}
+        iconClassName='bg-destructive/15 text-destructive'
+        label={presentation.label}
+        hint={presentation.hint}
+        action={
+          <Button variant='secondary' onClick={onLeaveRoom}>
             Back to room setup
           </Button>
-        </CardContent>
-      </Card>
+        }
+      />
     );
   }
 

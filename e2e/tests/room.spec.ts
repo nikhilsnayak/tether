@@ -123,7 +123,7 @@ test('complete room flow', async ({ browser, page }, testInfo) => {
 
     await test.step('a third peer is rejected while the room is full', async () => {
       await joinRoom(replacementPage, roomId);
-      await expect(replacementPage.getByText('Room is full', { exact: true })).toBeVisible();
+      await expect(replacementPage.getByText('Room is full', { exact: true }).first()).toBeVisible();
       await replacementPage.getByRole('button', { name: 'Back to room setup' }).click();
       await expect(replacementPage).toHaveURL('/');
     });
