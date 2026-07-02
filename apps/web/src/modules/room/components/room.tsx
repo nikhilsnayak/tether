@@ -3,15 +3,16 @@ import type { PeerSessionView, RoomSession } from '@tether/client-runtime/module
 import { Avatar, AvatarFallback } from '@tether/ui/components/avatar';
 import { Badge } from '@tether/ui/components/badge';
 import { Button } from '@tether/ui/components/button';
+import {
+  Drawer,
+  DrawerClose,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+} from '@tether/ui/components/drawer';
 import { Input } from '@tether/ui/components/input';
 import { ScrollArea } from '@tether/ui/components/scroll-area';
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from '@tether/ui/components/sheet';
 import {
   Tooltip,
   TooltipContent,
@@ -30,10 +31,12 @@ import {
   User,
   Video,
   VideoOff,
+  X,
 } from 'lucide-react';
-import { type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react';
+import { type ReactNode, type SubmitEvent, useEffect, useRef, useState } from 'react';
 
 import { Wordmark } from '@/components/logo';
+import { useViewportAspectRatio } from '@/hooks/use-viewport-aspect-ratio';
 
 import { usePeerConnection } from '../hooks/use-peer-connection';
 import {
@@ -226,23 +229,30 @@ export function RoomSessionScreen({
   const [chatOpen, setChatOpen] = useState(false);
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
-
-  useEffect(() => {
-    for (const track of localStream?.getAudioTracks() ?? []) {
-      track.enabled = micOn;
-    }
-  }, [localStream, micOn]);
-
-  useEffect(() => {
-    for (const track of localStream?.getVideoTracks() ?? []) {
-      track.enabled = camOn;
-    }
-  }, [localStream, camOn]);
+  const deviceAspectRatio = useViewportAspectRatio();
 
   const presentation = peerSessionStatusPresentation(view.status);
   const isConnected = view.status === 'connected';
   const handleLeave = () => {
     void leave().then(onLeaveRoom, onLeaveRoom);
+  };
+  const handleMicToggle = () => {
+    const enabled = !micOn;
+
+    for (const track of localStream?.getAudioTracks() ?? []) {
+      track.enabled = enabled;
+    }
+
+    setMicOn(enabled);
+  };
+  const handleCameraToggle = () => {
+    const enabled = !camOn;
+
+    for (const track of localStream?.getVideoTracks() ?? []) {
+      track.enabled = enabled;
+    }
+
+    setCamOn(enabled);
   };
 
   if (ERROR_STATUSES.has(view.status)) {
@@ -263,7 +273,7 @@ export function RoomSessionScreen({
     );
   }
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     const message = draft.trim();
@@ -308,7 +318,10 @@ export function RoomSessionScreen({
             </Badge>
           </div>
 
-          <div className='absolute right-4 bottom-4 aspect-video w-40 overflow-hidden rounded-md border border-white/15 bg-neutral-900 sm:w-56'>
+          <div
+            className='absolute right-4 bottom-4 w-[clamp(7rem,30vw,9rem)] overflow-hidden rounded-md border border-white/15 bg-neutral-900 landscape:w-[clamp(14rem,24vw,20rem)]'
+            style={{ aspectRatio: deviceAspectRatio }}
+          >
             <LocalVideoTile localStream={localStream} camOn={camOn} selfId={session.selfId} />
           </div>
         </div>
@@ -317,14 +330,14 @@ export function RoomSessionScreen({
           <ControlButton
             label={micOn ? 'Mute microphone' : 'Unmute microphone'}
             tone={micOn ? 'neutral' : 'danger'}
-            onClick={() => setMicOn((on) => !on)}
+            onClick={handleMicToggle}
           >
             {micOn ? <Mic /> : <MicOff />}
           </ControlButton>
           <ControlButton
             label={camOn ? 'Turn camera off' : 'Turn camera on'}
             tone={camOn ? 'neutral' : 'danger'}
-            onClick={() => setCamOn((on) => !on)}
+            onClick={handleCameraToggle}
           >
             {camOn ? <Video /> : <VideoOff />}
           </ControlButton>
@@ -337,12 +350,28 @@ export function RoomSessionScreen({
         </div>
       </div>
 
-      <Sheet open={chatOpen} onOpenChange={setChatOpen}>
-        <SheetContent side='right' className='flex w-full flex-col gap-0 p-0 sm:max-w-md'>
-          <SheetHeader className='border-b'>
-            <SheetTitle>Chat</SheetTitle>
-            <SheetDescription>Messages are sent over the peer data channel.</SheetDescription>
-          </SheetHeader>
+      <Drawer
+        direction={deviceAspectRatio < 1 ? 'bottom' : 'right'}
+        open={chatOpen}
+        onOpenChange={setChatOpen}
+      >
+        <DrawerContent>
+          <DrawerHeader className='relative border-b pr-14'>
+            <DrawerTitle>Chat</DrawerTitle>
+            <DrawerDescription>Messages are sent over the peer data channel.</DrawerDescription>
+            <DrawerClose
+              render={
+                <Button
+                  aria-label='Close chat'
+                  variant='ghost'
+                  size='icon-sm'
+                  className='absolute top-3 right-3'
+                />
+              }
+            >
+              <X />
+            </DrawerClose>
+          </DrawerHeader>
 
           <ScrollArea className='flex-1'>
             <div className='p-4'>
@@ -394,8 +423,8 @@ export function RoomSessionScreen({
               <SendHorizontal />
             </Button>
           </form>
-        </SheetContent>
-      </Sheet>
+        </DrawerContent>
+      </Drawer>
     </TooltipProvider>
   );
 }
@@ -419,7 +448,7 @@ function RemoteVideoTile({ stream }: { readonly stream: MediaStream }) {
       aria-label='Remote video'
       autoPlay
       playsInline
-      className='size-full bg-black object-contain'
+      className='size-full max-w-5xl bg-black object-cover'
     />
   );
 }
