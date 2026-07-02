@@ -11,14 +11,18 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from '@tether/ui/components/drawer';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@tether/ui/components/dropdown-menu';
 import { Input } from '@tether/ui/components/input';
 import { ScrollArea } from '@tether/ui/components/scroll-area';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@tether/ui/components/tooltip';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@tether/ui/components/tooltip';
 import { cn } from '@tether/ui/lib/utils';
 import {
   AlertTriangle,
@@ -31,6 +35,8 @@ import {
   User,
   Video,
   VideoOff,
+  Volume2,
+  VolumeX,
   X,
 } from 'lucide-react';
 import { motion, useMotionValue, animate } from 'motion/react';
@@ -237,11 +243,36 @@ export function RoomSessionScreen({
   const [chatOpen, setChatOpen] = useState(false);
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
+  const [audioOutputs, setAudioOutputs] = useState<readonly MediaDeviceInfo[]>([]);
+  const [sinkId, setSinkId] = useState('');
+  const [speakerOn, setSpeakerOn] = useState(true);
   const deviceAspectRatio = useViewportAspectRatio();
   const stageRef = useRef<HTMLDivElement>(null);
   const [readCount, setReadCount] = useState(view.messages.length);
   const messageCount = view.messages.length;
   const hasUnread = !chatOpen && messageCount > readCount;
+
+  // Labels are only populated once mic permission is granted, so re-enumerate
+  // when the local stream arrives and on any device hot-plug.
+  useEffect(() => {
+    const refresh = () => {
+      void navigator.mediaDevices.enumerateDevices().then((devices) => {
+        setAudioOutputs(devices.filter((device) => device.kind === 'audiooutput'));
+      });
+    };
+    refresh();
+    navigator.mediaDevices.addEventListener('devicechange', refresh);
+    return () => navigator.mediaDevices.removeEventListener('devicechange', refresh);
+  }, [localStream]);
+
+  const handleAudioOutputChange = (value: string) => {
+    if (value === SPEAKER_OFF) {
+      setSpeakerOn(false);
+      return;
+    }
+    setSpeakerOn(true);
+    setSinkId(value);
+  };
 
   const presentation = peerSessionStatusPresentation(view.status);
   const isConnected = view.status === 'connected';
@@ -298,11 +329,11 @@ export function RoomSessionScreen({
   };
 
   return (
-    <TooltipProvider delay={200}>
-      <div className='relative z-40 grid grid-rows-[1fr_auto]'>
+    <>
+      <div className='relative z-40 grid h-svh grid-rows-[minmax(0,1fr)_auto]'>
         <div ref={stageRef} className='relative flex items-center justify-center overflow-hidden'>
           {remoteStream ? (
-            <RemoteVideoTile stream={remoteStream} />
+            <RemoteVideoTile stream={remoteStream} sinkId={sinkId} muted={!speakerOn} />
           ) : (
             <div className='grid justify-items-center gap-4 px-6 text-center'>
               <Avatar size='lg'>
@@ -348,6 +379,12 @@ export function RoomSessionScreen({
           >
             {camOn ? <Video /> : <VideoOff />}
           </ControlButton>
+          <SpeakerControl
+            outputs={audioOutputs}
+            sinkId={sinkId}
+            speakerOn={speakerOn}
+            onChange={handleAudioOutputChange}
+          />
           <ControlButton label='Leave call' tone='danger' onClick={handleLeave}>
             <PhoneOff />
           </ControlButton>
@@ -442,12 +479,19 @@ export function RoomSessionScreen({
           </form>
         </DrawerContent>
       </Drawer>
-    </TooltipProvider>
+    </>
   );
 }
 
-/** Remote peer's camera + mic. Not muted (we want their audio) and not mirrored. */
-function RemoteVideoTile({ stream }: { readonly stream: MediaStream }) {
+function RemoteVideoTile({
+  stream,
+  sinkId,
+  muted,
+}: {
+  readonly stream: MediaStream;
+  readonly sinkId: string;
+  readonly muted: boolean;
+}) {
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
@@ -458,15 +502,80 @@ function RemoteVideoTile({ stream }: { readonly stream: MediaStream }) {
     video.srcObject = stream;
   }, [stream]);
 
+  useEffect(() => {
+    const video = videoRef.current;
+    if (video === null || sinkId === '' || typeof video.setSinkId !== 'function') {
+      return;
+    }
+    void video.setSinkId(sinkId).catch(() => {});
+  }, [sinkId]);
+
   return (
     // oxlint-disable-next-line jsx-a11y/media-has-caption -- live call has no captions
     <video
       ref={videoRef}
       aria-label='Remote video'
       autoPlay
+      muted={muted}
       playsInline
       className='size-full max-w-5xl object-cover'
     />
+  );
+}
+
+const SPEAKER_OFF = '__off__';
+
+function SpeakerControl({
+  outputs,
+  sinkId,
+  speakerOn,
+  onChange,
+}: {
+  readonly outputs: readonly MediaDeviceInfo[];
+  readonly sinkId: string;
+  readonly speakerOn: boolean;
+  readonly onChange: (value: string) => void;
+}) {
+  return (
+    <DropdownMenu>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  aria-label='Audio output'
+                  variant={speakerOn ? 'secondary' : 'destructive'}
+                  size='icon-lg'
+                />
+              }
+            />
+          }
+        >
+          {speakerOn ? <Volume2 /> : <VolumeX />}
+        </TooltipTrigger>
+        <TooltipContent>Audio output</TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent side='top' align='center' className='max-w-(--available-width)'>
+        <DropdownMenuRadioGroup
+          value={speakerOn ? sinkId || 'default' : SPEAKER_OFF}
+          onValueChange={onChange}
+        >
+          <DropdownMenuLabel>Audio output</DropdownMenuLabel>
+          {outputs.map((device, index) => (
+            <DropdownMenuRadioItem
+              key={device.deviceId}
+              value={device.deviceId || 'default'}
+              className='whitespace-nowrap'
+            >
+              {device.label || `Speaker ${index + 1}`}
+            </DropdownMenuRadioItem>
+          ))}
+          <DropdownMenuSeparator />
+          <DropdownMenuRadioItem value={SPEAKER_OFF}>Off</DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
