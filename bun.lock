@@ -72,6 +72,16 @@
         "vite": "^8.1.0",
       },
     },
+    "e2e": {
+      "name": "e2e",
+      "version": "0.0.1",
+      "dependencies": {
+        "@playwright/test": "^1.56.0",
+        "@tether/contracts": "workspace:*",
+        "@types/node": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
     "packages/client-runtime": {
       "name": "@tether/client-runtime",
       "version": "0.0.0",
@@ -610,6 +620,8 @@
 
     "@oxlint/binding-win32-x64-msvc": ["@oxlint/binding-win32-x64-msvc@1.71.0", "", { "os": "win32", "cpu": "x64" }, "sha512-D2kyEIPHk/G/wiZLnwTVC/sVst+T/lKldVOjAFpgTIBUAOlry72e5OiapDbDBF4LfJLkN5ypJb/8Eu6yJzkveQ=="],
 
+    "@playwright/test": ["@playwright/test@1.61.1", "", { "dependencies": { "playwright": "1.61.1" }, "bin": { "playwright": "cli.js" } }, "sha512-8nKv6+0RJSL9FE4jYOEGXnPeM/Hg12qZpmqzZjRh3qM0Y7c3z1mrOTfFLids72RDQYVh9WpLEfR5WdpNX4fkig=="],
+
     "@radix-ui/primitive": ["@radix-ui/primitive@1.1.4", "", {}, "sha512-7AdCK9PQyiljKoBDbN8OuctCbd/esdwZPQ8RtOE3SsyQtUpiPb+ND75q0jEhC1m1ecBI0MFNeLJvwIh9iKHRcQ=="],
 
     "@radix-ui/react-collection": ["@radix-ui/react-collection@1.1.10", "", { "dependencies": { "@radix-ui/react-compose-refs": "1.1.3", "@radix-ui/react-context": "1.1.4", "@radix-ui/react-primitive": "2.1.6", "@radix-ui/react-slot": "1.3.0" }, "peerDependencies": { "@types/react": "*", "@types/react-dom": "*", "react": "^16.8 || ^17.0 || ^18.0 || ^19.0 || ^19.0.0-rc", "react-dom": "^16.8 || ^17.0 || ^18.0 || ^19.0 || ^19.0.0-rc" }, "optionalPeers": ["@types/react", "@types/react-dom"] }, "sha512-IVVz4EvBcKjrzKgof714qDnz/SzQAkLA2Emh5edlHbgcE6fNd3Un6CJLlaYcnm8N4JmAtzQgse4dOKxcD2yc9g=="],
@@ -1099,6 +1111,8 @@
     "dotenv": ["dotenv@17.4.2", "", {}, "sha512-nI4U3TottKAcAD9LLud4Cb7b2QztQMUEfHbvhTH09bqXTxnSie8WnjPALV/WMCrJZ6UV/qHJ6L03OqO3LcdYZw=="],
 
     "dunder-proto": ["dunder-proto@1.0.1", "", { "dependencies": { "call-bind-apply-helpers": "^1.0.1", "es-errors": "^1.3.0", "gopd": "^1.2.0" } }, "sha512-KIN/nDJBQRcXw0MLVhZE9iQHmG68qAVIBg9CqmUYjmQIhgij9U5MFvrqkUL5FbtyyzZuOeOt0zdeRe4UY7ct+A=="],
+
+    "e2e": ["e2e@workspace:e2e"],
 
     "eciesjs": ["eciesjs@0.4.18", "", { "dependencies": { "@ecies/ciphers": "^0.2.5", "@noble/ciphers": "^1.3.0", "@noble/curves": "^1.9.7", "@noble/hashes": "^1.8.0" } }, "sha512-wG99Zcfcys9fZux7Cft8BAX/YrOJLJSZ3jyYPfhZHqN2E+Ffx+QXBDsv3gubEgPtV6dTzJMSQUwk1H98/t/0wQ=="],
 
@@ -1607,6 +1621,10 @@
     "pkce-challenge": ["pkce-challenge@5.0.1", "", {}, "sha512-wQ0b/W4Fr01qtpHlqSqspcj3EhBvimsdh0KlHhH8HRZnMsEa0ea2fTULOXOS9ccQr3om+GcGRk4e+isrZWV8qQ=="],
 
     "pkg-up": ["pkg-up@3.1.0", "", { "dependencies": { "find-up": "^3.0.0" } }, "sha512-nDywThFk1i4BQK4twPQ6TA4RT8bDY96yeuCVBWL3ePARCiEKDRSrNGbFIgUJpLp+XeIR65v8ra7WuJOFUBtkMA=="],
+
+    "playwright": ["playwright@1.61.1", "", { "dependencies": { "playwright-core": "1.61.1" }, "optionalDependencies": { "fsevents": "2.3.2" }, "bin": { "playwright": "cli.js" } }, "sha512-DWnY5o3YbLWK4GovuAVwpqL+1VwGNdUGrRr++8j8PtQQzvAVZUIMjKQ90fY689sEJZJBbZVw1rXaOKSTitkzPQ=="],
+
+    "playwright-core": ["playwright-core@1.61.1", "", { "bin": { "playwright-core": "cli.js" } }, "sha512-h7Qlt6m4REp25qvIdvbDtVmD4LqVXfpRxhORv9L0jzETM05p4fuPJ3dKyuSXQxDSbXnmS79HAgi9589lGSpLkg=="],
 
     "plist": ["plist@3.1.1", "", { "dependencies": { "@xmldom/xmldom": "^0.9.10", "base64-js": "^1.5.1", "xmlbuilder": "^15.1.1" } }, "sha512-ZIfcLJC+7E7FBFnDxm9MPmt7D+DidyQ26lewieO75AdhA2ayMtsJSES0iWzqJQbcVRSrTufQoy0DR94xHue0oA=="],
 
@@ -2191,6 +2209,8 @@
     "oxc-parser/@oxc-project/types": ["@oxc-project/types@0.120.0", "", {}, "sha512-k1YNu55DuvAip/MGE1FTsIuU3FUCn6v/ujG9V7Nq5Df/kX2CWb13hhwD0lmJGMGqE+bE1MXvv9SZVnMzEXlWcg=="],
 
     "path-scurry/lru-cache": ["lru-cache@11.5.1", "", {}, "sha512-RPimw/7aMdv2oqRrxKwvZXcPfwBrn/JZ2xYcY9Hus/6LaS3VOAKVWKWgNLCFSiOm1ESXinjsDlidVU7JlnCN2A=="],
+
+    "playwright/fsevents": ["fsevents@2.3.2", "", { "os": "darwin" }, "sha512-xiqMQR4xAeHTuB9uWm+fFRcIOgKBMiOBP+eXiyT7jsgVCq1bkVygt00oASowB7EdtpOHaaPgKt812P9ab+DDKA=="],
 
     "plist/@xmldom/xmldom": ["@xmldom/xmldom@0.9.10", "", {}, "sha512-A9gOqLdi6cV4ibazAjcQufGj0B1y/vDqYrcuP6d/6x8P27gRS8643Dj9o1dEKtB6O7fwxb2FgBmJS2mX7gpvdw=="],
 

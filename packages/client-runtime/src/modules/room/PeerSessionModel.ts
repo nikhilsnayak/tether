@@ -111,6 +111,9 @@ export type PeerSessionEvent =
       readonly stream: MediaStreamHandle;
     }
   | {
+      readonly _tag: 'WaitingForPeer';
+    }
+  | {
       readonly _tag: 'Connected';
       readonly peerId: PeerId;
     }
@@ -182,6 +185,8 @@ export const reducePeerSessionView = (
       // Live media handles are projected into dedicated atoms by the platform
       // UI layer; they are not part of the serializable view.
       return view;
+    case 'WaitingForPeer':
+      return { ...view, status: 'waiting-for-peer' };
     case 'Connected':
       return { ...view, status: 'connected' };
     case 'ChatMessageAdded':

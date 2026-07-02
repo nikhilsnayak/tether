@@ -210,6 +210,28 @@ describe('startPeerSession', () => {
     ),
   );
 
+  it.effect('emits WaitingForPeer when the room opens without another peer', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture((() =>
+          Stream.make({
+            event: new RoomSessionOpenedEvent({ peerId: null }),
+          })) as AppClient['Service']['OpenRoomSession']);
+
+        yield* startPeerSession(session).pipe(Effect.provide(fixture.dependencies));
+
+        assert.deepStrictEqual((yield* Queue.take(fixture.eventQueue))._tag, 'SessionStarted');
+        assert.deepStrictEqual((yield* Queue.take(fixture.eventQueue))._tag, 'LocalStreamReady');
+        assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), {
+          _tag: 'WaitingForPeer',
+        });
+        assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), {
+          _tag: 'SignalingDisconnected',
+        });
+      }),
+    ),
+  );
+
   it.effect('disconnects and rejects new commands when the room stream ends normally', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -515,7 +537,10 @@ describe('peer-session actor', () => {
           'sendSignal:answer:answer-sdp',
           'observeDataChannel:chat',
         ]);
-        assert.deepStrictEqual(fixture.events, [{ _tag: 'Connected', peerId: bob }]);
+        assert.deepStrictEqual(fixture.events, [
+          { _tag: 'WaitingForPeer' },
+          { _tag: 'Connected', peerId: bob },
+        ]);
       }),
     ).pipe(Effect.orDie),
   );
@@ -765,9 +790,9 @@ describe('peer-session actor', () => {
           peerConnection: fixture.peerConnection,
         });
 
-        // A failure while waiting stays generation-scoped: no session failure or
-        // TransportLost is emitted, and the failed connection is replaced.
-        assert.deepStrictEqual(fixture.events, []);
+        // A failure while waiting stays generation-scoped: no failure event is
+        // emitted after the initial waiting state, and the connection is replaced.
+        assert.deepStrictEqual(fixture.events, [{ _tag: 'WaitingForPeer' }]);
         assert.deepStrictEqual(
           fixture.operations.filter((operation) => operation === 'acquirePeerConnection').length,
           2,
@@ -904,7 +929,10 @@ describe('reducePeerSessionView', () => {
   });
 
   it('projects actor events into UI state', () => {
-    const connected = reducePeerSessionView(initialPeerSessionView, {
+    const waiting = reducePeerSessionView(initialPeerSessionView, {
+      _tag: 'WaitingForPeer',
+    });
+    const connected = reducePeerSessionView(waiting, {
       _tag: 'Connected',
       peerId: bob,
     });

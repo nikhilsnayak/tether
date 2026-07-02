@@ -203,6 +203,7 @@ export const makePeerSessionActor = Effect.fn('@tether/client-runtime/makePeerSe
 
         if (peerId === null) {
           state = { _tag: 'WaitingForPeer', generation };
+          yield* eventSink.emit({ _tag: 'WaitingForPeer' });
           yield* Effect.logInfo(
             `Room session opened; waiting for peer: room=${session.roomId} self=${session.selfId}`,
           );
