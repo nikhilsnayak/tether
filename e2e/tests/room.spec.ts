@@ -1,10 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
-const expectConnected = (page: Page) =>
-  expect(page.getByText('Connected', { exact: true }).first()).toBeVisible();
-
-const expectWaitingForPeer = (page: Page) =>
-  expect(page.getByText('Share this room to invite someone.')).toBeVisible();
+import { expectConnected, expectWaitingForPeer, joinRoom } from './helpers';
 
 const expectMessage = (page: Page, message: string) =>
   expect(page.getByRole('list', { name: 'Chat messages' }).getByText(message)).toBeVisible();
@@ -13,13 +9,6 @@ const sendMessage = async (page: Page, message: string) => {
   const input = page.getByRole('textbox', { name: 'Message' });
   await input.fill(message);
   await input.press('Enter');
-};
-
-const joinRoom = async (page: Page, roomId: string) => {
-  await page.goto('/');
-  await page.getByRole('textbox', { name: 'Room code' }).fill(roomId);
-  await page.getByRole('button', { name: 'Join', exact: true }).click();
-  await expect(page).toHaveURL(new RegExp(`/room/${roomId}$`));
 };
 
 const trackKinds = (page: Page, selector: string) =>
