@@ -4,6 +4,7 @@
   "type": "module",
   "module": "index.ts",
   "scripts": {
+    "build": "bun build --compile --target bun-linux-x64 --minify --sourcemap --outfile dist/server src/index.ts",
     "dev": "bun run --watch src/index.ts",
     "start": "bun run src/index.ts",
     "test": "vitest run src",
