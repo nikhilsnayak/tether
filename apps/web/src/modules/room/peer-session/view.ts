@@ -17,10 +17,26 @@ export const peerSessionViewAtom = Atom.make<PeerSessionView>(initialPeerSession
 /** Live local media, kept out of the serializable view; unwrapped to MediaStream here. */
 export const peerLocalStreamAtom = Atom.make<MediaStream | null>(null).pipe(Atom.keepAlive);
 
-const emitPeerSessionEvent = (event: PeerSessionEvent) =>
-  event._tag === 'LocalStreamReady'
-    ? Atom.update(peerLocalStreamAtom, () => event.stream.value as MediaStream)
-    : Atom.update(peerSessionViewAtom, (view) => reducePeerSessionView(view, event));
+/** Live remote media; cleared when the peer's transport ends. */
+export const peerRemoteStreamAtom = Atom.make<MediaStream | null>(null).pipe(Atom.keepAlive);
+
+const emitPeerSessionEvent = (event: PeerSessionEvent) => {
+  switch (event._tag) {
+    case 'LocalStreamReady':
+      return Atom.update(peerLocalStreamAtom, () => event.stream.value as MediaStream);
+    case 'RemoteStreamReady':
+      return Atom.update(peerRemoteStreamAtom, () => event.stream.value as MediaStream);
+    case 'PeerDeparted':
+    case 'TransportLost':
+      return Atom.update(peerRemoteStreamAtom, () => null).pipe(
+        Effect.andThen(
+          Atom.update(peerSessionViewAtom, (view) => reducePeerSessionView(view, event)),
+        ),
+      );
+    default:
+      return Atom.update(peerSessionViewAtom, (view) => reducePeerSessionView(view, event));
+  }
+};
 
 /**
  * Adapts actor output events into the registry used by the React-facing atom

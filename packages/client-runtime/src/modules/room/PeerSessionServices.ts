@@ -23,6 +23,10 @@ export class PeerSessionPlatform extends Context.Service<
   {
     readonly acquirePeerConnection: Effect.Effect<PeerConnectionHandle, PlatformError, Scope.Scope>;
     readonly acquireLocalMedia: Effect.Effect<MediaStreamHandle, PlatformError, Scope.Scope>;
+    readonly addLocalTracks: (
+      peerConnection: PeerConnectionHandle,
+      localStream: MediaStreamHandle,
+    ) => Effect.Effect<void, PlatformError>;
     readonly observePeerConnection: (
       peerConnection: PeerConnectionHandle,
       dispatch: PlatformEventDispatch,

@@ -7,6 +7,7 @@ export const CHAT_CHANNEL_LABEL = 'chat';
 export type PlatformOperation =
   | 'acquire-peer-connection'
   | 'acquire-local-media'
+  | 'add-local-tracks'
   | 'create-data-channel'
   | 'create-offer'
   | 'create-answer'
@@ -77,7 +78,12 @@ export type PlatformEvent =
   | { readonly _tag: 'PeerConnectionFailed'; readonly peerConnection: PeerConnectionHandle }
   | { readonly _tag: 'DataChannelClosed'; readonly dataChannel: DataChannelHandle }
   | { readonly _tag: 'PeerConnectionInterrupted'; readonly peerConnection: PeerConnectionHandle }
-  | { readonly _tag: 'PeerConnectionRestored'; readonly peerConnection: PeerConnectionHandle };
+  | { readonly _tag: 'PeerConnectionRestored'; readonly peerConnection: PeerConnectionHandle }
+  | {
+      readonly _tag: 'RemoteTrackReceived';
+      readonly peerConnection: PeerConnectionHandle;
+      readonly stream: MediaStreamHandle;
+    };
 
 /**
  * Synchronous callback bridge for native event listeners. Dispatch only queues
@@ -98,6 +104,10 @@ export type PeerSessionEvent =
     }
   | {
       readonly _tag: 'LocalStreamReady';
+      readonly stream: MediaStreamHandle;
+    }
+  | {
+      readonly _tag: 'RemoteStreamReady';
       readonly stream: MediaStreamHandle;
     }
   | {
@@ -168,8 +178,9 @@ export const reducePeerSessionView = (
     case 'SessionStarted':
       return initialPeerSessionView;
     case 'LocalStreamReady':
-      // The live media handle is projected into a dedicated atom by the
-      // platform UI layer; it is not part of the serializable view.
+    case 'RemoteStreamReady':
+      // Live media handles are projected into dedicated atoms by the platform
+      // UI layer; they are not part of the serializable view.
       return view;
     case 'Connected':
       return { ...view, status: 'connected' };

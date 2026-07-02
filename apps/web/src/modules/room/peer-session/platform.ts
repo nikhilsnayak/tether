@@ -87,6 +87,17 @@ const observePeerConnection = Effect.fn('@tether/web/observePeerConnection')(fun
     });
   };
 
+  const handleTrack = (event: RTCTrackEvent) => {
+    const stream = event.streams[0];
+    if (stream === undefined) return;
+
+    dispatch({
+      _tag: 'RemoteTrackReceived',
+      peerConnection: peerConnectionHandle,
+      stream: { value: stream },
+    });
+  };
+
   // Tracks whether ICE connectivity has degraded so a return to 'connected' is
   // reported as a restoration rather than the initial connect.
   let interrupted = false;
@@ -120,6 +131,7 @@ const observePeerConnection = Effect.fn('@tether/web/observePeerConnection')(fun
     Effect.gen(function* () {
       peerConnection.addEventListener('icecandidate', handleIceCandidate);
       peerConnection.addEventListener('datachannel', handleDataChannel);
+      peerConnection.addEventListener('track', handleTrack);
       peerConnection.addEventListener('connectionstatechange', handleConnectionStateChange);
       yield* Effect.logInfo('Peer connection listeners attached');
     }),
@@ -127,6 +139,7 @@ const observePeerConnection = Effect.fn('@tether/web/observePeerConnection')(fun
       Effect.gen(function* () {
         peerConnection.removeEventListener('icecandidate', handleIceCandidate);
         peerConnection.removeEventListener('datachannel', handleDataChannel);
+        peerConnection.removeEventListener('track', handleTrack);
         peerConnection.removeEventListener('connectionstatechange', handleConnectionStateChange);
         yield* Effect.logInfo('Peer connection listeners detached');
       }),
@@ -193,6 +206,16 @@ const observeDataChannel = Effect.fn('@tether/web/observeDataChannel')(function*
 const webPeerSessionPlatform = PeerSessionPlatform.of({
   acquirePeerConnection,
   acquireLocalMedia,
+  addLocalTracks: (peerConnection, localStream) =>
+    Effect.try({
+      try: () => {
+        const stream = mediaStreamValue(localStream);
+        for (const track of stream.getTracks()) {
+          peerConnectionValue(peerConnection).addTrack(track, stream);
+        }
+      },
+      catch: (cause) => new PlatformError({ operation: 'add-local-tracks', cause }),
+    }),
   observePeerConnection,
   createDataChannel: (peerConnection, label) =>
     Effect.try({

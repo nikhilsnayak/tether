@@ -17,6 +17,7 @@ import {
   isPlatformError,
   type ChatMessage,
   type DataChannelHandle,
+  type MediaStreamHandle,
   type PeerConnectionHandle,
   type PlatformEvent,
   type RoomSession,
@@ -109,7 +110,11 @@ const requireDescription = (description: SessionDescription, type: 'offer' | 'an
  * production, while tests can drive the handler directly.
  */
 export const makePeerSessionActor = Effect.fn('@tether/client-runtime/makePeerSessionActor')(
-  function* (session: RoomSession, dispatchLocalInput: PeerSessionLocalInputDispatch) {
+  function* (
+    session: RoomSession,
+    localStream: MediaStreamHandle,
+    dispatchLocalInput: PeerSessionLocalInputDispatch,
+  ) {
     const client = yield* AppClient;
     const platform = yield* PeerSessionPlatform;
     const eventSink = yield* PeerSessionEventSink;
@@ -157,6 +162,10 @@ export const makePeerSessionActor = Effect.fn('@tether/client-runtime/makePeerSe
       yield* platform
         .observePeerConnection(peerConnection, dispatchLocalInput)
         .pipe(Scope.provide(connectionScope));
+
+      // Attach local camera/mic before any offer/answer so a single
+      // negotiation carries the media; remote tracks arrive via observation.
+      yield* platform.addLocalTracks(peerConnection, localStream);
 
       return { scope: connectionScope, peerConnection };
     });
@@ -373,6 +382,18 @@ export const makePeerSessionActor = Effect.fn('@tether/client-runtime/makePeerSe
       },
     );
 
+    const handleRemoteTrack = Effect.fn('@tether/client-runtime/handleRemoteTrack')(function* (
+      peerConnection: PeerConnectionHandle,
+      stream: MediaStreamHandle,
+    ) {
+      if (state._tag !== 'PeerKnown' || state.generation.peerConnection !== peerConnection) {
+        return yield* Effect.logDebug(
+          `Ignored remote track from unowned peer connection: room=${session.roomId} self=${session.selfId}`,
+        );
+      }
+      yield* eventSink.emit({ _tag: 'RemoteStreamReady', stream });
+    });
+
     const handleLocalIceCandidate = Effect.fn('@tether/client-runtime/handleLocalIceCandidate')(
       function* (peerConnection: PeerConnectionHandle, candidate: IceCandidateSignal) {
         if (state._tag !== 'PeerKnown' || state.generation.peerConnection !== peerConnection) {
@@ -582,6 +603,8 @@ export const makePeerSessionActor = Effect.fn('@tether/client-runtime/makePeerSe
           return yield* handleRemoteDataChannel(input.peerConnection, input.dataChannel);
         case 'LocalIceCandidate':
           return yield* handleLocalIceCandidate(input.peerConnection, input.candidate);
+        case 'RemoteTrackReceived':
+          return yield* handleRemoteTrack(input.peerConnection, input.stream);
         case 'DataChannelOpened':
           return yield* handleDataChannelOpened(input.dataChannel);
         case 'DataChannelMessageReceived':
@@ -823,7 +846,7 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
   yield* peerSessionEventSink.emit({ _tag: 'LocalStreamReady', stream: localStream });
 
   const actorLoop = Effect.gen(function* () {
-    const inputHandler = yield* makePeerSessionActor(session, dispatchLocalInput);
+    const inputHandler = yield* makePeerSessionActor(session, localStream, dispatchLocalInput);
 
     return yield* Stream.merge(roomInputStream, localInputStream, {
       haltStrategy: 'left',

@@ -96,6 +96,7 @@ const makeFixture = Effect.fn('makeFixture')(function* (
         }),
         () => Effect.sync(() => operations.push('unobservePeerConnection')),
       ),
+    addLocalTracks: () => Effect.sync(() => operations.push('addLocalTracks')),
     createDataChannel: (_, label) =>
       Effect.sync(() => {
         operations.push(`createDataChannel:${label}`);
@@ -167,7 +168,9 @@ const makeFixture = Effect.fn('makeFixture')(function* (
     ),
   );
 
-  const actor = yield* makePeerSessionActor(session, () => {}).pipe(Effect.provide(dependencies));
+  const actor = yield* makePeerSessionActor(session, localMediaStream, () => {}).pipe(
+    Effect.provide(dependencies),
+  );
 
   return {
     actor,
@@ -462,6 +465,7 @@ describe('peer-session actor', () => {
         assert.deepStrictEqual(fixture.operations, [
           'acquirePeerConnection',
           'observePeerConnection',
+          'addLocalTracks',
           'createDataChannel:chat',
           'observeDataChannel:chat',
           'createOffer',
@@ -504,6 +508,7 @@ describe('peer-session actor', () => {
         assert.deepStrictEqual(fixture.operations, [
           'acquirePeerConnection',
           'observePeerConnection',
+          'addLocalTracks',
           'setRemoteDescription:offer:remote-offer',
           'createAnswer',
           'setLocalDescription:answer:answer-sdp',
@@ -615,6 +620,7 @@ describe('peer-session actor', () => {
         assert.deepStrictEqual(fixture.operations, [
           'acquirePeerConnection',
           'observePeerConnection',
+          'addLocalTracks',
           'createDataChannel:chat',
           'observeDataChannel:chat',
           'createOffer',
@@ -625,6 +631,7 @@ describe('peer-session actor', () => {
           'closePeerConnection',
           'acquirePeerConnection',
           'observePeerConnection',
+          'addLocalTracks',
         ]);
         assert.deepStrictEqual(fixture.events, [{ _tag: 'PeerDeparted', peerId: bob }]);
 
@@ -848,6 +855,36 @@ describe('peer-session actor', () => {
         // emits TransportLost rather than failing the session.
         assert.deepStrictEqual(fixture.events, [{ _tag: 'TransportLost', peerId: bob }]);
         assert.include(fixture.operations, 'closePeerConnection');
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('emits RemoteStreamReady for the owned connection and ignores stale tracks', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture();
+        const remoteStream: MediaStreamHandle = { value: { id: 'remote-media' } };
+        const staleStream: MediaStreamHandle = { value: { id: 'stale-media' } };
+        const stalePeerConnection: PeerConnectionHandle = { value: { id: 'stale' } };
+
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new RoomSessionOpenedEvent({ peerId: bob }),
+        });
+        yield* fixture.actor({
+          _tag: 'RemoteTrackReceived',
+          peerConnection: stalePeerConnection,
+          stream: staleStream,
+        });
+        yield* fixture.actor({
+          _tag: 'RemoteTrackReceived',
+          peerConnection: fixture.peerConnection,
+          stream: remoteStream,
+        });
+
+        assert.deepStrictEqual(fixture.events, [
+          { _tag: 'RemoteStreamReady', stream: remoteStream },
+        ]);
       }),
     ).pipe(Effect.orDie),
   );

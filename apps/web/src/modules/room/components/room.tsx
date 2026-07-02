@@ -39,7 +39,11 @@ import {
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react';
 
 import { usePeerConnection } from '../hooks/use-peer-connection';
-import { peerLocalStreamAtom, peerSessionViewAtom } from '../peer-session/view';
+import {
+  peerLocalStreamAtom,
+  peerRemoteStreamAtom,
+  peerSessionViewAtom,
+} from '../peer-session/view';
 
 export function PeerSessionLoading() {
   return <p className='text-muted-foreground text-sm'>Starting peer session…</p>;
@@ -155,6 +159,7 @@ export function RoomSessionScreen({
   });
   const view = useAtomValue(peerSessionViewAtom);
   const localStream = useAtomValue(peerLocalStreamAtom);
+  const remoteStream = useAtomValue(peerRemoteStreamAtom);
   const [draft, setDraft] = useState('');
   const [chatOpen, setChatOpen] = useState(false);
   const [micOn, setMicOn] = useState(true);
@@ -207,18 +212,21 @@ export function RoomSessionScreen({
     <TooltipProvider delay={200}>
       <div className='fixed inset-0 z-40 flex flex-col bg-neutral-950 text-neutral-50'>
         <div className='relative flex flex-1 items-center justify-center overflow-hidden'>
-          {/* Remote peer stage — remote video is wired in the next chunk. */}
-          <div className='flex flex-col items-center gap-4 px-6 text-center'>
-            <Avatar size='lg' className='size-24'>
-              <AvatarFallback className='bg-neutral-800 text-neutral-300'>
-                <User className='size-10' />
-              </AvatarFallback>
-            </Avatar>
-            <div className='space-y-1'>
-              <p className='text-lg font-medium'>{presentation.label}</p>
-              <p className='text-sm text-neutral-400'>{presentation.hint}</p>
+          {remoteStream ? (
+            <RemoteVideoTile stream={remoteStream} />
+          ) : (
+            <div className='flex flex-col items-center gap-4 px-6 text-center'>
+              <Avatar size='lg' className='size-24'>
+                <AvatarFallback className='bg-neutral-800 text-neutral-300'>
+                  <User className='size-10' />
+                </AvatarFallback>
+              </Avatar>
+              <div className='space-y-1'>
+                <p className='text-lg font-medium'>{presentation.label}</p>
+                <p className='text-sm text-neutral-400'>{presentation.hint}</p>
+              </div>
             </div>
-          </div>
+          )}
 
           <div className='absolute inset-x-0 top-0 flex items-center justify-between p-4'>
             <div className='flex items-center gap-2 rounded-full bg-black/40 px-3 py-1.5 backdrop-blur-sm'>
@@ -319,6 +327,24 @@ export function RoomSessionScreen({
         </SheetContent>
       </Sheet>
     </TooltipProvider>
+  );
+}
+
+/** Remote peer's camera + mic. Not muted (we want their audio) and not mirrored. */
+function RemoteVideoTile({ stream }: { readonly stream: MediaStream }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (video === null) {
+      return;
+    }
+    video.srcObject = stream;
+  }, [stream]);
+
+  return (
+    // oxlint-disable-next-line jsx-a11y/media-has-caption -- live call has no captions
+    <video ref={videoRef} autoPlay playsInline className='size-full bg-black object-contain' />
   );
 }
 
