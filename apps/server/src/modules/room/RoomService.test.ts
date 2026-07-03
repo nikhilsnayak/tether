@@ -11,7 +11,7 @@ import {
   SessionDescriptionSignal,
   SignalReceivedEvent,
 } from '@tether/contracts/modules/room';
-import { Effect, Exit, Stream } from 'effect';
+import { Effect, Exit, Scope, Stream } from 'effect';
 
 import { RoomService } from './RoomService';
 
@@ -22,6 +22,11 @@ const charlie = PeerId.make('charlie');
 
 const withRoomService = <A, E, R>(effect: Effect.Effect<A, E, R | RoomService>) =>
   effect.pipe(Effect.provide(RoomService.layerTest));
+
+const requireOpenedEvent = (event: unknown): RoomSessionOpenedEvent => {
+  assert.instanceOf(event, RoomSessionOpenedEvent);
+  return event as RoomSessionOpenedEvent;
+};
 
 describe('RoomService', () => {
   it.effect('returns the existing peer and rejects a third member', () =>
@@ -34,12 +39,19 @@ describe('RoomService', () => {
         const error = yield* room.openSession(roomId, charlie).pipe(Effect.flip);
         const firstEvents = yield* first.pipe(Stream.take(2), Stream.runCollect);
         const secondEvents = yield* second.pipe(Stream.take(1), Stream.runCollect);
+        const firstOpened = requireOpenedEvent(firstEvents[0]);
+        const secondOpened = requireOpenedEvent(secondEvents[0]);
 
         assert.deepStrictEqual(firstEvents, [
-          new RoomSessionOpenedEvent({ peerId: null }),
+          new RoomSessionOpenedEvent({ peerId: null, sessionToken: firstOpened.sessionToken }),
           new PeerJoinedEvent({ peerId: bob }),
         ]);
-        assert.deepStrictEqual(secondEvents, [new RoomSessionOpenedEvent({ peerId: alice })]);
+        assert.deepStrictEqual(secondEvents, [
+          new RoomSessionOpenedEvent({
+            peerId: alice,
+            sessionToken: secondOpened.sessionToken,
+          }),
+        ]);
         assert.instanceOf(error, RoomFull);
         assert.strictEqual(error.roomId, roomId);
       }),
@@ -69,9 +81,10 @@ describe('RoomService', () => {
         const events = yield* room.openSession(roomId, alice);
         yield* Effect.scoped(room.openSession(roomId, bob));
         const received = yield* events.pipe(Stream.take(3), Stream.runCollect);
+        const opened = requireOpenedEvent(received[0]);
 
         assert.deepStrictEqual(received, [
-          new RoomSessionOpenedEvent({ peerId: null }),
+          new RoomSessionOpenedEvent({ peerId: null, sessionToken: opened.sessionToken }),
           new PeerJoinedEvent({ peerId: bob }),
           new PeerLeftEvent({ peerId: bob }),
         ]);
@@ -84,21 +97,31 @@ describe('RoomService', () => {
       Effect.gen(function* () {
         const room = yield* RoomService;
         const aliceEvents = yield* room.openSession(roomId, alice);
-        yield* room.openSession(roomId, bob);
+        const bobEvents = yield* room.openSession(roomId, bob);
+        const bobOpened = requireOpenedEvent(
+          (yield* bobEvents.pipe(Stream.take(1), Stream.runCollect))[0],
+        );
 
-        yield* room.leave(roomId, bob);
-        yield* room.leave(roomId, bob);
+        yield* room.leave(roomId, bob, bobOpened.sessionToken);
+        yield* room.leave(roomId, bob, bobOpened.sessionToken);
 
         const received = yield* aliceEvents.pipe(Stream.take(3), Stream.runCollect);
+        const aliceOpened = requireOpenedEvent(received[0]);
         assert.deepStrictEqual(received, [
-          new RoomSessionOpenedEvent({ peerId: null }),
+          new RoomSessionOpenedEvent({ peerId: null, sessionToken: aliceOpened.sessionToken }),
           new PeerJoinedEvent({ peerId: bob }),
           new PeerLeftEvent({ peerId: bob }),
         ]);
 
         const replacement = yield* room.openSession(roomId, charlie);
         const replacementEvents = yield* replacement.pipe(Stream.take(1), Stream.runCollect);
-        assert.deepStrictEqual(replacementEvents, [new RoomSessionOpenedEvent({ peerId: alice })]);
+        const replacementOpened = requireOpenedEvent(replacementEvents[0]);
+        assert.deepStrictEqual(replacementEvents, [
+          new RoomSessionOpenedEvent({
+            peerId: alice,
+            sessionToken: replacementOpened.sessionToken,
+          }),
+        ]);
       }),
     ),
   );
@@ -124,17 +147,21 @@ describe('RoomService', () => {
       Effect.gen(function* () {
         const room = yield* RoomService;
         const events = yield* room.openSession(roomId, alice);
-        yield* room.openSession(roomId, bob);
+        const bobEvents = yield* room.openSession(roomId, bob);
+        const bobOpened = requireOpenedEvent(
+          (yield* bobEvents.pipe(Stream.take(1), Stream.runCollect))[0],
+        );
         const event = new SignalReceivedEvent({
           peerId: bob,
           signal: new SessionDescriptionSignal({ type: 'offer', sdp: 'test-offer' }),
         });
 
-        yield* room.sendSignal(roomId, bob, event.signal);
+        yield* room.sendSignal(roomId, bob, bobOpened.sessionToken, event.signal);
         const received = yield* events.pipe(Stream.take(3), Stream.runCollect);
+        const opened = requireOpenedEvent(received[0]);
 
         assert.deepStrictEqual(received, [
-          new RoomSessionOpenedEvent({ peerId: null }),
+          new RoomSessionOpenedEvent({ peerId: null, sessionToken: opened.sessionToken }),
           new PeerJoinedEvent({ peerId: bob }),
           event,
         ]);
@@ -147,18 +174,24 @@ describe('RoomService', () => {
       Effect.gen(function* () {
         const room = yield* RoomService;
         const aliceEvents = yield* room.openSession(roomId, alice);
-        yield* room.openSession(roomId, bob);
+        const bobEvents = yield* room.openSession(roomId, bob);
+        const bobOpened = requireOpenedEvent(
+          (yield* bobEvents.pipe(Stream.take(1), Stream.runCollect))[0],
+        );
 
         const signals = ['one', 'two', 'three'].map(
           (sdp) => new SessionDescriptionSignal({ type: 'offer' as const, sdp }),
         );
 
-        yield* Effect.forEach(signals, (signal) => room.sendSignal(roomId, bob, signal));
+        yield* Effect.forEach(signals, (signal) =>
+          room.sendSignal(roomId, bob, bobOpened.sessionToken, signal),
+        );
 
         const received = yield* aliceEvents.pipe(Stream.take(5), Stream.runCollect);
+        const opened = requireOpenedEvent(received[0]);
 
         assert.deepStrictEqual(received, [
-          new RoomSessionOpenedEvent({ peerId: null }),
+          new RoomSessionOpenedEvent({ peerId: null, sessionToken: opened.sessionToken }),
           new PeerJoinedEvent({ peerId: bob }),
           ...signals.map((signal) => new SignalReceivedEvent({ peerId: bob, signal })),
         ]);
@@ -170,18 +203,124 @@ describe('RoomService', () => {
     withRoomService(
       Effect.gen(function* () {
         const room = yield* RoomService;
-        yield* room.openSession(roomId, alice);
+        const aliceEvents = yield* room.openSession(roomId, alice);
+        const aliceOpened = requireOpenedEvent(
+          (yield* aliceEvents.pipe(Stream.take(1), Stream.runCollect))[0],
+        );
         const bobEvents = yield* room.openSession(roomId, bob);
 
         const signal = new SignalReceivedEvent({
           peerId: alice,
           signal: new SessionDescriptionSignal({ type: 'offer', sdp: 'immediate-offer' }),
         });
-        yield* room.sendSignal(roomId, alice, signal.signal);
+        yield* room.sendSignal(roomId, alice, aliceOpened.sessionToken, signal.signal);
 
         const received = yield* bobEvents.pipe(Stream.take(2), Stream.runCollect);
+        const bobOpened = requireOpenedEvent(received[0]);
 
-        assert.deepStrictEqual(received, [new RoomSessionOpenedEvent({ peerId: alice }), signal]);
+        assert.deepStrictEqual(received, [
+          new RoomSessionOpenedEvent({ peerId: alice, sessionToken: bobOpened.sessionToken }),
+          signal,
+        ]);
+      }),
+    ),
+  );
+
+  it.effect('rejects an attempt to kick a member with another member token', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const room = yield* RoomService;
+        const aliceEvents = yield* room.openSession(roomId, alice);
+        const aliceOpened = requireOpenedEvent(
+          (yield* aliceEvents.pipe(Stream.take(1), Stream.runCollect))[0],
+        );
+        const bobEvents = yield* room.openSession(roomId, bob);
+        const bobOpened = requireOpenedEvent(
+          (yield* bobEvents.pipe(Stream.take(1), Stream.runCollect))[0],
+        );
+        const signal = new SessionDescriptionSignal({
+          type: 'offer',
+          sdp: 'still-a-member',
+        });
+
+        yield* room.leave(roomId, alice, bobOpened.sessionToken);
+        yield* room.sendSignal(roomId, alice, aliceOpened.sessionToken, signal);
+
+        const received = yield* bobEvents.pipe(Stream.take(2), Stream.runCollect);
+        assert.deepStrictEqual(received, [
+          new RoomSessionOpenedEvent({
+            peerId: alice,
+            sessionToken: bobOpened.sessionToken,
+          }),
+          new SignalReceivedEvent({ peerId: alice, signal }),
+        ]);
+      }),
+    ),
+  );
+
+  it.effect('rejects forged signals while accepting the member token', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const room = yield* RoomService;
+        const aliceEvents = yield* room.openSession(roomId, alice);
+        const aliceOpened = requireOpenedEvent(
+          (yield* aliceEvents.pipe(Stream.take(1), Stream.runCollect))[0],
+        );
+        const signal = new SessionDescriptionSignal({ type: 'offer', sdp: 'authenticated' });
+
+        const error = yield* room
+          .sendSignal(roomId, alice, 'wrong-session-token', signal)
+          .pipe(Effect.flip);
+        yield* room.sendSignal(roomId, alice, aliceOpened.sessionToken, signal);
+
+        assert.instanceOf(error, PeerNotInRoom);
+        assert.strictEqual(error.roomId, roomId);
+        assert.strictEqual(error.peerId, alice);
+      }),
+    ),
+  );
+
+  it.effect('removes a member when its session scope closes', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const room = yield* RoomService;
+        const sessionScope = yield* Scope.make();
+        const events = yield* room.openSession(roomId, alice).pipe(Scope.provide(sessionScope));
+        const opened = requireOpenedEvent(
+          (yield* events.pipe(Stream.take(1), Stream.runCollect))[0],
+        );
+
+        yield* Scope.close(sessionScope, Exit.void);
+
+        const error = yield* room
+          .sendSignal(
+            roomId,
+            alice,
+            opened.sessionToken,
+            new SessionDescriptionSignal({ type: 'offer', sdp: 'after-close' }),
+          )
+          .pipe(Effect.flip);
+        assert.instanceOf(error, PeerNotInRoom);
+      }),
+    ),
+  );
+
+  it.effect('issues distinct non-empty tokens to each member', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const room = yield* RoomService;
+        const aliceEvents = yield* room.openSession(roomId, alice);
+        const bobEvents = yield* room.openSession(roomId, bob);
+        const aliceOpened = requireOpenedEvent(
+          (yield* aliceEvents.pipe(Stream.take(1), Stream.runCollect))[0],
+        );
+        const bobOpened = requireOpenedEvent(
+          (yield* bobEvents.pipe(Stream.take(1), Stream.runCollect))[0],
+        );
+
+        assert.isNotEmpty(aliceOpened.sessionToken);
+        assert.isNotEmpty(bobOpened.sessionToken);
+        assert.notStrictEqual(aliceOpened.sessionToken, bobOpened.sessionToken);
       }),
     ),
   );
@@ -196,6 +335,7 @@ describe('RoomService', () => {
           .sendSignal(
             roomId,
             alice,
+            'invalid-session-token',
             new SessionDescriptionSignal({ type: 'offer', sdp: 'missing-room' }),
           )
           .pipe(Effect.flip);

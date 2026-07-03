@@ -13,15 +13,17 @@ import {
 } from '@tether/contracts/modules/room';
 import { Context, Effect, Layer, PubSub, Stream, SynchronizedRef } from 'effect';
 
-type Registry = Map<RoomId, { members: PeerId[]; pubsub: PubSub.PubSub<RoomEvent> }>;
+type Member = { readonly peerId: PeerId; readonly sessionToken: string };
+type Registry = Map<RoomId, { members: Member[]; pubsub: PubSub.PubSub<RoomEvent> }>;
 
 export class RoomService extends Context.Service<RoomService>()('@tether/RoomService', {
   make: Effect.gen(function* () {
     const registryRef = yield* SynchronizedRef.make<Registry>(new Map());
 
-    const leave = Effect.fn('@tether/RoomService.leave')(function* (
+    const removeMember = Effect.fnUntraced(function* (
       roomId: RoomId,
       selfId: PeerId,
+      sessionToken?: string,
     ) {
       yield* SynchronizedRef.modifyEffect(
         registryRef,
@@ -33,11 +35,20 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
             return [undefined, newRegistry];
           }
 
-          if (!ctx.members.includes(selfId)) {
+          const member = ctx.members.find((member) => member.peerId === selfId);
+
+          if (member === undefined) {
             return [undefined, newRegistry];
           }
 
-          ctx.members = ctx.members.filter((member) => member !== selfId);
+          if (sessionToken !== undefined && member.sessionToken !== sessionToken) {
+            yield* Effect.logWarning('Leave rejected').pipe(
+              Effect.annotateLogs('reason', 'invalid-session-token'),
+            );
+            return [undefined, newRegistry];
+          }
+
+          ctx.members = ctx.members.filter((member) => member.peerId !== selfId);
 
           yield* PubSub.publish(ctx.pubsub, new PeerLeftEvent({ peerId: selfId }));
           yield* Effect.logInfo('Room session closed').pipe(
@@ -53,6 +64,14 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
       );
     });
 
+    const leave = Effect.fn('@tether/RoomService.leave')(function* (
+      roomId: RoomId,
+      selfId: PeerId,
+      sessionToken: string,
+    ) {
+      yield* removeMember(roomId, selfId, sessionToken);
+    });
+
     const openSession = Effect.fn('@tether/RoomService.openSession')(function* (
       roomId: RoomId,
       selfId: PeerId,
@@ -61,6 +80,7 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
         SynchronizedRef.modifyEffect(
           registryRef,
           Effect.fnUntraced(function* (registry) {
+            const sessionToken = crypto.randomUUID();
             const newRegistry = new Map(registry);
             let ctx = newRegistry.get(roomId);
 
@@ -72,7 +92,7 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
               newRegistry.set(roomId, ctx);
             }
 
-            if (ctx.members.includes(selfId)) {
+            if (ctx.members.some((member) => member.peerId === selfId)) {
               yield* Effect.logWarning('Room join rejected').pipe(
                 Effect.annotateLogs('reason', 'peer-already-joined'),
               );
@@ -88,15 +108,15 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
 
             const subscription = yield* PubSub.subscribe(ctx.pubsub);
 
-            ctx.members = [...ctx.members, selfId];
+            ctx.members = [...ctx.members, { peerId: selfId, sessionToken }];
 
             yield* PubSub.publish(ctx.pubsub, new PeerJoinedEvent({ peerId: selfId }));
             yield* Effect.logInfo('Room session opened').pipe(
               Effect.annotateLogs('occupancy', ctx.members.length),
             );
 
-            const peerId = ctx.members.find((member) => member !== selfId) ?? null;
-            const initial = [new RoomSessionOpenedEvent({ peerId })];
+            const peerId = ctx.members.find((member) => member.peerId !== selfId)?.peerId ?? null;
+            const initial = [new RoomSessionOpenedEvent({ peerId, sessionToken })];
 
             const events = Stream.fromArray<RoomEvent>(initial).pipe(
               Stream.concat(Stream.fromSubscription(subscription)),
@@ -106,13 +126,14 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
             return [events, newRegistry];
           }),
         ),
-        () => leave(roomId, selfId),
+        () => removeMember(roomId, selfId),
       );
     });
 
     const sendSignal = Effect.fnUntraced(function* (
       roomId: RoomId,
       selfId: PeerId,
+      sessionToken: string,
       signal: Signal,
     ) {
       yield* SynchronizedRef.modifyEffect(
@@ -120,7 +141,12 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
         Effect.fnUntraced(function* (registry) {
           const ctx = registry.get(roomId);
 
-          if (ctx === undefined || !ctx.members.includes(selfId)) {
+          if (
+            ctx === undefined ||
+            !ctx.members.some(
+              (member) => member.peerId === selfId && member.sessionToken === sessionToken,
+            )
+          ) {
             yield* Effect.logWarning('Signal rejected because peer is not in room');
             return yield* new PeerNotInRoom({ roomId, peerId: selfId });
           }

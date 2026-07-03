@@ -42,6 +42,7 @@ export class RoomSessionOpenedEvent extends Schema.TaggedClass<RoomSessionOpened
   '@tether/RoomSessionOpenedEvent',
   {
     peerId: Schema.NullOr(PeerId),
+    sessionToken: Schema.String,
   },
 ) {}
 
@@ -112,11 +113,13 @@ export const OpenRoomSessionError = Schema.Union([RoomFull, PeerAlreadyJoined]);
 export const LeaveRoomPayload = Schema.Struct({
   selfId: PeerId,
   roomId: RoomId,
+  sessionToken: Schema.String,
 });
 
 export const SendSignalPayload = Schema.Struct({
   selfId: PeerId,
   roomId: RoomId,
+  sessionToken: Schema.String,
   signal: Signal,
 });
 

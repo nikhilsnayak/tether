@@ -10,7 +10,7 @@ import {
   type SessionDescriptionSignal as SessionDescriptionSignalType,
   type Signal,
 } from '@tether/contracts/modules/room';
-import { Cause, Duration, Effect, Exit, Option, Queue, Scope, Stream } from 'effect';
+import { Cause, Duration, Effect, Exit, Option, Queue, Ref, Scope, Stream } from 'effect';
 
 import { AppClient } from '../../AppClient';
 import {
@@ -110,9 +110,10 @@ const requireDescription = (description: SessionDescription, type: 'offer' | 'an
  *
  * The handler deliberately has no browser or React knowledge. It mutates one
  * private state value and interprets each input using the injected RPC,
- * platform, and event-sink services. Inputs must be passed to the returned
- * handler serially; {@link startPeerSession} provides that serialization in
- * production, while tests can drive the handler directly.
+ * platform, and event-sink services. Its returned `handleInput` function must
+ * be called serially; {@link startPeerSession} provides that serialization in
+ * production, while tests can drive it directly. The returned session-token
+ * ref is actor-owned and exposed read-only to the session's leave operation.
  */
 export const makePeerSessionActor = Effect.fnUntraced(function* (
   session: RoomSession,
@@ -124,6 +125,7 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
   const platform = yield* PeerSessionPlatform;
   const eventSink = yield* PeerSessionEventSink;
   const actorScope = yield* Scope.Scope;
+  const sessionTokenRef = yield* Ref.make('');
   let nextMessageSequence = 0;
   let state: PeerSessionActorState = {
     _tag: 'AwaitingRoomSession',
@@ -132,7 +134,10 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
   const makeMessageId = (sender: ChatMessage['sender']) =>
     `${session.selfId}:${sender}:${nextMessageSequence++}`;
 
-  const sendSignal = (signal: Signal) => client.SendSignal({ ...session, signal });
+  const sendSignal = (signal: Signal) =>
+    Ref.get(sessionTokenRef).pipe(
+      Effect.flatMap((sessionToken) => client.SendSignal({ ...session, sessionToken, signal })),
+    );
 
   const createAndSendOffer = Effect.fn('@tether/client-runtime/createAndSendOffer')(function* (
     peerConnection: PeerConnectionHandle,
@@ -378,8 +383,10 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
 
   const handleRoomEvent = Effect.fnUntraced(function* (event: RoomEvent) {
     switch (event._tag) {
-      case '@tether/RoomSessionOpenedEvent':
+      case '@tether/RoomSessionOpenedEvent': {
+        yield* Ref.set(sessionTokenRef, event.sessionToken);
         return yield* handleRoomSessionOpened(event.peerId);
+      }
       case '@tether/PeerJoinedEvent':
         return yield* handlePeerJoined(event.peerId);
       case '@tether/SignalReceivedEvent':
@@ -578,7 +585,7 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
     });
   });
 
-  return Effect.fnUntraced(function* (input: PeerSessionInput) {
+  const handleInput = Effect.fnUntraced(function* (input: PeerSessionInput) {
     switch (input._tag) {
       case 'RoomEvent':
         return yield* handleRoomEvent(input.event);
@@ -606,6 +613,8 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
         return yield* handleUiSendMessage(input.message);
     }
   });
+
+  return { handleInput, sessionTokenRef };
 });
 
 /**
@@ -637,6 +646,7 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
  *                |
  *                +-- [actorScope]
  *                      - owns replaceable connection-generation scopes
+ *                      - actor owns the server-issued session-token ref
  *
  * The session scope may remain alive to display a terminal state after the
  * actor and media scopes have closed.
@@ -647,6 +657,7 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
  * [AwaitingRoomSession]
  *          |
  *          | RoomSessionOpened
+ *          | - store the server-issued session token
  *          | - fork a connection-generation scope
  *          | - acquire and observe its peer connection
  *          |
@@ -800,6 +811,7 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
   const peerSessionEventSink = yield* PeerSessionEventSink;
   const sessionScope = yield* Scope.Scope;
   const mediaScope = yield* Scope.fork(sessionScope);
+  const actorScope = yield* Scope.fork(sessionScope);
   const localInputQueue = yield* Queue.unbounded<PeerSessionLocalInput>();
   const dispatchLocalInput: PeerSessionLocalInputDispatch = (input) => {
     Queue.offerUnsafe(localInputQueue, input);
@@ -823,20 +835,19 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
   const localStream = yield* platform.acquireLocalMedia.pipe(Scope.provide(mediaScope));
   yield* peerSessionEventSink.emit({ _tag: 'LocalStreamReady', stream: localStream });
 
-  const actorLoop = Effect.gen(function* () {
-    const inputHandler = yield* makePeerSessionActor(
-      session,
-      localStream,
-      iceServers,
-      dispatchLocalInput,
-    );
+  const actor = yield* makePeerSessionActor(
+    session,
+    localStream,
+    iceServers,
+    dispatchLocalInput,
+  ).pipe(Scope.provide(actorScope));
 
-    return yield* Stream.merge(roomInputStream, localInputStream, {
-      haltStrategy: 'left',
-    }).pipe(Stream.runForEach(inputHandler));
-  });
+  const actorLoop = Stream.merge(roomInputStream, localInputStream, {
+    haltStrategy: 'left',
+  }).pipe(Stream.runForEach(actor.handleInput));
 
-  yield* Effect.scoped(actorLoop).pipe(
+  yield* actorLoop.pipe(
+    Effect.ensuring(Scope.close(actorScope, Exit.void)),
     Effect.ensuring(Queue.shutdown(localInputQueue)),
     Effect.onExit(
       Effect.fnUntraced(function* (exit) {
@@ -903,7 +914,11 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
         message,
       }),
     leave: () => {
-      leavePromise ??= Effect.runPromise(client.LeaveRoom(session));
+      leavePromise ??= Effect.runPromise(
+        Ref.get(actor.sessionTokenRef).pipe(
+          Effect.flatMap((sessionToken) => client.LeaveRoom({ ...session, sessionToken })),
+        ),
+      );
       return leavePromise;
     },
   } satisfies PeerSession;

@@ -92,8 +92,9 @@ entirely in the `@effect/rpc` world over a WebSocket with JSON serialization:
 
 The relay is an in-memory `Map<RoomId, { members, pubsub }>` behind a
 `SynchronizedRef` — 2 participants per room, ephemeral, no DB. Each client
-self-identifies with a `selfId` it mints; the server rewrites a sender's
-`selfId` into the recipient's `peerId`.
+self-identifies with a `selfId` it mints. On join, the server issues a private
+session token required for signaling and explicit leave operations, then
+rewrites a sender's `selfId` into the recipient's `peerId`.
 
 ### Peer session (`packages/client-runtime`)
 

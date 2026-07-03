@@ -18,7 +18,7 @@ audit session is required.
 | 002  | Recover failed peer connections automatically          | P1       | M      | 001                                   | DONE   |
 | 003  | Serve ICE config from the server; support TURN         | P1       | M      | —                                     | DONE   |
 | 004  | Release camera + clear stream atoms on session end     | P2       | S      | —                                     | DONE   |
-| 005  | Bind room membership to a server-issued session token  | P2       | M      | — (land after 003 to avoid conflicts) | TODO   |
+| 005  | Bind room membership to a server-issued session token  | P2       | M      | — (land after 003 to avoid conflicts) | DONE   |
 | 006  | Wire TokenBucket rate limiting + cap live rooms        | P2       | S      | 005                                   | TODO   |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |

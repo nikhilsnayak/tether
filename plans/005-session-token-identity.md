@@ -199,30 +199,22 @@ fixed string is fine as a token in tests). Then all pass.
 
 In `PeerSession.ts`:
 
-1. In `startPeerSession`, capture the token as the opened event flows past:
+1. Have `makePeerSessionActor` create a `Ref<string>` for the token and return
+   it alongside `handleInput`:
 
    ```ts
-   let sessionToken = '';
-   const roomInputStream = client.OpenRoomSession(session).pipe(
-     Stream.map(({ event }): PeerSessionInput => {
-       if (event._tag === '@tether/RoomSessionOpenedEvent') {
-         sessionToken = event.sessionToken;
-       }
-       return { _tag: 'RoomEvent', event };
-     }),
-   );
+   const sessionTokenRef = yield* Ref.make('');
+   // ...build handleInput...
+   return { handleInput, sessionTokenRef };
    ```
 
-2. Pass a getter into the actor: add a parameter
-   `getSessionToken: () => string` to `makePeerSessionActor`, and change
-   `sendSignal` to
-   `client.SendSignal({ ...session, sessionToken: getSessionToken(), signal })`.
-   In `startPeerSession`, call
-   `makePeerSessionActor(session, localStream, dispatchLocalInput, () => sessionToken)`.
-   (A getter, not the value: the actor is constructed before the first event
-   arrives.)
-3. `leave`: `client.LeaveRoom({ ...session, sessionToken })` inside the
-   existing `leavePromise ??= Effect.runPromise(...)`.
+2. In `startPeerSession`, fork an explicit `actorScope`, construct the actor in
+   that scope, and close it when the actor loop exits. Keep the room input
+   stream as a pure event mapping and run it through `actor.handleInput`.
+3. When the actor handles `RoomSessionOpenedEvent`, write `event.sessionToken`
+   to its ref before starting offer/answer work. `sendSignal` reads the ref and
+   includes the value in its payload. `leave` reads the returned ref and passes
+   the value to `LeaveRoom` inside the existing idempotent promise.
 
 **Verify**: `bun run lint` → remaining errors only in
 `PeerSession.test.ts` (fixture calls `makePeerSessionActor` with 3 args, and
@@ -291,10 +283,9 @@ Stop and report back (do not improvise) if:
 - `RoomSessionOpenedEvent` turns out to be published to the pubsub anywhere
   (it must stay opener-only, or the token leaks to the peer — recheck
   `RoomService.ts:99-104` against the live code).
-- The `Stream.map` capture (Step 3.1) doesn't see the event before the actor
-  processes it — symptom: the actor's first `SendSignal` carries an empty
-  token in test 5. Report the observed ordering; don't invent a buffering
-  workaround.
+- The actor does not store the opened event's token before its first
+  `SendSignal` — symptom: the first signaling payload carries an empty token.
+  Report the observed ordering; don't invent a buffering workaround.
 - Updating existing tests requires changing what they *assert* about
   join/leave semantics (beyond adding token fields) — that means behavior
   drifted somewhere unintended.

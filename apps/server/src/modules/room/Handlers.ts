@@ -27,11 +27,11 @@ export const RoomHandlers = RoomRpcs.toLayer(
 
         return events.pipe(Stream.map((event) => ({ event })));
       }, Stream.unwrap),
-      LeaveRoom: Effect.fnUntraced(function* ({ roomId, selfId }) {
-        yield* room.leave(roomId, selfId);
+      LeaveRoom: Effect.fnUntraced(function* ({ roomId, selfId, sessionToken }) {
+        yield* room.leave(roomId, selfId, sessionToken);
       }),
-      SendSignal: Effect.fnUntraced(function* ({ roomId, selfId, signal }) {
-        yield* room.sendSignal(roomId, selfId, signal);
+      SendSignal: Effect.fnUntraced(function* ({ roomId, selfId, sessionToken, signal }) {
+        yield* room.sendSignal(roomId, selfId, sessionToken, signal);
       }),
     });
   }),
