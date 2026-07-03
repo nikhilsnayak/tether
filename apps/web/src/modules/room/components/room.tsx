@@ -32,6 +32,7 @@ import {
   MicOff,
   PhoneOff,
   SendHorizontal,
+  ShieldCheck,
   User,
   Video,
   VideoOff,
@@ -173,7 +174,7 @@ function peerSessionStatusPresentation(status: PeerSessionView['status']): {
       return {
         indicatorClassName: 'animate-pulse bg-warning',
         label: 'Reconnecting',
-        hint: 'Connection interrupted — trying to recover…',
+        hint: 'Connection interrupted. Trying to recover…',
       };
     case 'transport-lost':
       return {
@@ -215,7 +216,7 @@ function peerSessionStatusPresentation(status: PeerSessionView['status']): {
       return {
         indicatorClassName: 'bg-destructive',
         label: 'Already joined',
-        hint: 'You already have this room open somewhere else — maybe another tab.',
+        hint: 'You already have this room open somewhere else, maybe another tab.',
       };
   }
 }
@@ -252,8 +253,14 @@ export function RoomSessionScreen({
   const deviceAspectRatio = useViewportAspectRatio();
   const stageRef = useRef<HTMLDivElement>(null);
   const [readCount, setReadCount] = useState(view.messages.length);
+  const [sasConfirmed, setSasConfirmed] = useState(false);
   const messageCount = view.messages.length;
   const hasUnread = !chatOpen && messageCount > readCount;
+
+  // Every new code (fresh session or reconnect) must be re-confirmed.
+  useEffect(() => {
+    setSasConfirmed(false);
+  }, [view.sas]);
 
   // Labels are only populated once mic permission is granted, so re-enumerate
   // when the local stream arrives and on any device hot-plug.
@@ -353,24 +360,87 @@ export function RoomSessionScreen({
             <div className='flex min-w-0 items-center gap-3'>
               <Wordmark className='drop-shadow-md max-sm:hidden' />
               <LogoMark className='size-5 shrink-0 drop-shadow-md sm:hidden' />
-              <div className='border-border bg-background/70 flex min-w-0 items-center gap-2 rounded-md border px-3 py-1.5 backdrop-blur-sm'>
+              <div
+                aria-label={presentation.label}
+                className='border-border bg-background/70 flex min-w-0 items-center gap-2 rounded-md border px-3 py-1.5 backdrop-blur-sm max-sm:px-2'
+              >
                 <span
                   className={cn('size-2 shrink-0 rounded-full', presentation.indicatorClassName)}
                 />
-                <span className='truncate font-mono text-[11px] tracking-[0.15em] uppercase'>
+                <span className='truncate font-mono text-[11px] tracking-[0.15em] uppercase max-sm:hidden'>
                   {presentation.label}
                 </span>
               </div>
             </div>
-            <Badge variant='secondary' className='shrink-0 font-mono tracking-[0.15em] uppercase'>
-              <span className='max-sm:hidden'>Room&nbsp;</span>
-              {session.roomId}
-            </Badge>
+            <div className='flex shrink-0 flex-col items-end gap-1.5'>
+              <Badge variant='secondary' className='font-mono tracking-[0.15em] uppercase'>
+                <span className='max-sm:hidden'>Room&nbsp;</span>
+                {session.roomId}
+              </Badge>
+              {view.sas !== null && sasConfirmed && (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Badge
+                        variant='secondary'
+                        className='gap-1.5 font-mono text-[10px] tracking-widest'
+                        render={
+                          <button
+                            aria-label='Safety code'
+                            type='button'
+                            onClick={() => setSasConfirmed(false)}
+                          />
+                        }
+                      />
+                    }
+                  >
+                    <ShieldCheck className='size-3' />
+                    <span className='max-sm:hidden'>{view.sas}</span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    You confirmed this code matches the other person&apos;s screen. Tap to review
+                    it.
+                  </TooltipContent>
+                </Tooltip>
+              )}
+            </div>
           </div>
 
           <SelfVideoTile boundaryRef={stageRef} aspectRatio={deviceAspectRatio}>
             <LocalVideoTile localStream={localStream} camOn={camOn} selfId={session.selfId} />
           </SelfVideoTile>
+
+          {view.sas !== null && !sasConfirmed && (
+            <div className='absolute inset-x-0 bottom-4 z-50 flex justify-center px-4'>
+              <section
+                aria-label='Safety check'
+                className='border-border bg-background/85 max-w-sm space-y-3 rounded-md border p-4 backdrop-blur-sm'
+              >
+                <div className='flex items-center gap-2'>
+                  <ShieldCheck className='size-4' />
+                  <h2 className='font-mono text-xs tracking-[0.2em] uppercase'>Safety check</h2>
+                </div>
+                <p
+                  aria-label='Safety code'
+                  className='text-center font-mono text-lg tracking-widest'
+                >
+                  {view.sas}
+                </p>
+                <p className='text-muted-foreground text-sm'>
+                  Read this code aloud to each other. It proves that no one, not even the server,
+                  can see this call. Trust the call only if you both see the same code.
+                </p>
+                <div className='grid grid-cols-2 gap-2'>
+                  <Button size='sm' variant='destructive' onClick={handleLeave}>
+                    They don&apos;t match
+                  </Button>
+                  <Button size='sm' onClick={() => setSasConfirmed(true)}>
+                    We see the same code
+                  </Button>
+                </div>
+              </section>
+            </div>
+          )}
         </div>
 
         <div className='border-border flex items-center justify-center gap-2 border-t p-4 sm:gap-3'>

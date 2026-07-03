@@ -10,7 +10,7 @@ import {
   type SessionDescriptionSignal as SessionDescriptionSignalType,
   type Signal,
 } from '@tether/contracts/modules/room';
-import { Cause, Duration, Effect, Exit, Option, Queue, Ref, Scope, Stream } from 'effect';
+import { Cause, Crypto, Duration, Effect, Exit, Option, Queue, Ref, Scope, Stream } from 'effect';
 
 import { AppClient } from '../../AppClient';
 import {
@@ -25,6 +25,7 @@ import {
   type SessionDescription,
 } from './PeerSessionModel';
 import { PeerSessionEventSink, PeerSessionPlatform } from './PeerSessionServices';
+import { deriveSasCode } from './Sas';
 
 type PeerRole = 'offerer' | 'answerer';
 
@@ -57,6 +58,8 @@ type PeerSessionActorState =
       readonly dataChannelState: DataChannelState;
       readonly remoteAnswerApplied: boolean;
       readonly reconnectAttempts: number;
+      /** Offerer only; kept to derive the SAS once the answer arrives. */
+      readonly offerSdp: string | null;
     }
   | { _tag: 'TransportLost'; peerId: PeerId };
 
@@ -124,6 +127,7 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
   const client = yield* AppClient;
   const platform = yield* PeerSessionPlatform;
   const eventSink = yield* PeerSessionEventSink;
+  const crypto = yield* Crypto.Crypto;
   const actorScope = yield* Scope.Scope;
   const sessionTokenRef = yield* Ref.make('');
   let nextMessageSequence = 0;
@@ -139,6 +143,18 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
       Effect.flatMap((sessionToken) => client.SendSignal({ ...session, sessionToken, signal })),
     );
 
+  // Hashes the SDPs as they crossed signaling; failure downgrades to unverified.
+  const emitSas = (offerSdp: string, answerSdp: string) =>
+    deriveSasCode({ offerSdp, answerSdp }).pipe(
+      Effect.flatMap((code) => eventSink.emit({ _tag: 'SasReady', code })),
+      Effect.catch((error: unknown) =>
+        Effect.logWarning('Skipped SAS derivation').pipe(
+          Effect.annotateLogs('reason', String(error)),
+        ),
+      ),
+      Effect.provideService(Crypto.Crypto, crypto),
+    );
+
   const createAndSendOffer = Effect.fn('@tether/client-runtime/createAndSendOffer')(function* (
     peerConnection: PeerConnectionHandle,
   ) {
@@ -146,6 +162,7 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
     const offer = yield* requireDescription(created, 'offer');
     yield* platform.setLocalDescription(peerConnection, offer);
     yield* sendSignal(new SessionDescriptionSignal(offer));
+    return offer.sdp;
   });
 
   const acceptOfferAndSendAnswer = Effect.fn('@tether/client-runtime/acceptOfferAndSendAnswer')(
@@ -159,6 +176,7 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
       const answer = yield* requireDescription(created, 'answer');
       yield* platform.setLocalDescription(peerConnection, answer);
       yield* sendSignal(new SessionDescriptionSignal(answer));
+      yield* emitSas(signal.sdp, answer.sdp);
     },
   );
 
@@ -225,6 +243,7 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
         dataChannelState: { _tag: 'AwaitingRemoteDataChannel' },
         remoteAnswerApplied: false,
         reconnectAttempts: reconnectAttempts + 1,
+        offerSdp: null,
       };
       yield* armNegotiationDeadline(generation);
       return;
@@ -238,7 +257,7 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
       .observeDataChannel(dataChannel, dispatchLocalInput)
       .pipe(Scope.provide(generation.scope));
     yield* armNegotiationDeadline(generation);
-    yield* createAndSendOffer(generation.peerConnection);
+    const offerSdp = yield* createAndSendOffer(generation.peerConnection);
     state = {
       _tag: 'PeerKnown',
       generation,
@@ -247,6 +266,7 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
       dataChannelState: { _tag: 'DataChannelConnecting', dataChannel },
       remoteAnswerApplied: false,
       reconnectAttempts: reconnectAttempts + 1,
+      offerSdp,
     };
   });
 
@@ -273,7 +293,7 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
       .pipe(Scope.provide(generation.scope));
 
     yield* armNegotiationDeadline(generation);
-    yield* createAndSendOffer(generation.peerConnection);
+    const offerSdp = yield* createAndSendOffer(generation.peerConnection);
 
     state = {
       _tag: 'PeerKnown',
@@ -283,6 +303,7 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
       dataChannelState: { _tag: 'DataChannelConnecting', dataChannel },
       remoteAnswerApplied: false,
       reconnectAttempts: 0,
+      offerSdp,
     };
   });
 
@@ -301,6 +322,7 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
       dataChannelState: { _tag: 'AwaitingRemoteDataChannel' },
       remoteAnswerApplied: false,
       reconnectAttempts: 0,
+      offerSdp: null,
     };
     yield* armNegotiationDeadline(generation);
   });
@@ -333,7 +355,11 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
           type: 'answer',
           sdp: signal.sdp,
         });
+        const { offerSdp } = state;
         state = { ...state, remoteAnswerApplied: true };
+        if (offerSdp !== null) {
+          yield* emitSas(offerSdp, signal.sdp);
+        }
         return;
       }
       case '@tether/IceCandidateSignal':

@@ -30,10 +30,15 @@ commented with the "why," not just the "what."
 
 ## Status
 
-**v0 is working.** Two browser tabs (or two laptops) can hold a private 1:1
-video/audio call with in-band text chat, over a peer-to-peer WebRTC connection.
-Signaling, STUN/TURN ICE configuration, camera/mic media, and
-reconnection/stall handling are all in place.
+**v0 is live.** Deployed to production, with real cross-network calls working —
+two peers on different networks hold a private 1:1 video/audio call with
+in-band text chat, over a peer-to-peer WebRTC connection. Signaling, ICE
+configuration, camera/mic media, and reconnection/stall handling are all in
+place.
+
+Currently STUN-only (Google's public servers) by deliberate choice: no TURN
+relay is deployed, so peers behind symmetric NAT won't connect. That tradeoff
+stands until real calls show it failing often enough to matter.
 
 The call and a future "watch-along" are not two products — they're two features
 on the same peer connection. A shared movie is just one more track added later.
@@ -107,9 +112,7 @@ static operator-managed secrets.
 ### Peer session (`packages/client-runtime`)
 
 `packages/client-runtime/src/modules/room` owns the handshake and chat rules and
-has no React, DOM, or browser dependency. The app supplies threxport const SIGNAL_BUCKET_CAPACITY = 50;
-const SIGNAL_BUCKET_REFILL_EVERY = Duration.millis(200);
-export const MAX_LIVE_ROOMS = 1000;ee Effect
+has no React, DOM, or browser dependency. The app supplies three Effect
 services: `AppClient` (signaling RPCs), `PeerSessionPlatform` (native WebRTC),
 and `PeerSessionEventSink` (projecting domain events into UI state).
 
@@ -145,6 +148,11 @@ browsers.
 
 Each of these is picked as much for what it teaches as for what it adds:
 
+- **Verifiable privacy (SAS)** — derive a short authentication string from both
+  peers' DTLS fingerprints and show it on each screen, so callers can verbally
+  confirm the signaling server isn't MITMing the call. A rep in where WebRTC's
+  trust boundary actually sits: media is always encrypted, but the fingerprints
+  travel through the server in the SDP.
 - **Mobile viewer** — reuse the platform-neutral actor behind a second platform
   adapter (Expo + `react-native-webrtc`). The test of whether the React/DOM-free
   boundary actually held.

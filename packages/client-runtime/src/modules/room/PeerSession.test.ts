@@ -15,7 +15,7 @@ import {
   type IceServer,
   type Signal,
 } from '@tether/contracts/modules/room';
-import { Deferred, Effect, Exit, Layer, Queue, Scope, Stream } from 'effect';
+import { Crypto, Deferred, Effect, Exit, Layer, Queue, Scope, Stream } from 'effect';
 import { TestClock } from 'effect/testing';
 import { RpcClientError } from 'effect/unstable/rpc';
 
@@ -42,6 +42,27 @@ interface TestPeerConnection {
 interface TestDataChannel {
   readonly label: string;
 }
+
+// No DOM lib in this tsconfig, so the Web Crypto global is typed by hand.
+const webCryptoApi = (
+  globalThis as unknown as {
+    readonly crypto: {
+      readonly getRandomValues: <T extends Uint8Array>(array: T) => T;
+      readonly subtle: {
+        readonly digest: (algorithm: string, data: Uint8Array) => Promise<ArrayBuffer>;
+      };
+    };
+  }
+).crypto;
+
+const webCrypto = Layer.succeed(
+  Crypto.Crypto,
+  Crypto.make({
+    randomBytes: (size) => webCryptoApi.getRandomValues(new Uint8Array(size)),
+    digest: (algorithm, data) =>
+      Effect.promise(async () => new Uint8Array(await webCryptoApi.subtle.digest(algorithm, data))),
+  }),
+);
 
 const session: RoomSession = {
   roomId: RoomId.make('room-1'),
@@ -159,6 +180,7 @@ const makeFixture = Effect.fn('makeFixture')(function* (
   const platform = PeerSessionPlatform.of({ ...basePlatform, ...overrides });
 
   const dependencies = Layer.mergeAll(
+    webCrypto,
     Layer.succeed(PeerSessionPlatform, platform),
     Layer.succeed(
       AppClient,
@@ -651,6 +673,88 @@ describe('startPeerSession', () => {
 });
 
 describe('peer-session actor', () => {
+  const fingerprintSdp = (fingerprint: string) =>
+    ['v=0', `a=fingerprint:sha-256 ${fingerprint}`, ''].join('\r\n');
+  const remoteOfferSdp = fingerprintSdp('AA:BB:CC:DD');
+  const localAnswerSdp = fingerprintSdp('11:22:33:44');
+
+  it.effect('answerer and offerer derive the same safety code from the same handshake', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const answererFixture = yield* makeFixture(undefined, undefined, {
+          createAnswer: () => Effect.succeed({ type: 'answer', sdp: localAnswerSdp }),
+        });
+
+        yield* answererFixture.actor({
+          _tag: 'RoomEvent',
+          event: new RoomSessionOpenedEvent({ peerId: null, sessionToken: testSessionToken }),
+        });
+        yield* answererFixture.actor({
+          _tag: 'RoomEvent',
+          event: new PeerJoinedEvent({ peerId: bob }),
+        });
+        yield* answererFixture.actor({
+          _tag: 'RoomEvent',
+          event: new SignalReceivedEvent({
+            peerId: bob,
+            signal: new SessionDescriptionSignal({ type: 'offer', sdp: remoteOfferSdp }),
+          }),
+        });
+
+        const offererFixture = yield* makeFixture(undefined, undefined, {
+          createOffer: () => Effect.succeed({ type: 'offer', sdp: remoteOfferSdp }),
+        });
+
+        yield* offererFixture.actor({
+          _tag: 'RoomEvent',
+          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+        });
+        yield* offererFixture.actor({
+          _tag: 'RoomEvent',
+          event: new SignalReceivedEvent({
+            peerId: bob,
+            signal: new SessionDescriptionSignal({ type: 'answer', sdp: localAnswerSdp }),
+          }),
+        });
+
+        const sasCodes = (events: ReadonlyArray<PeerSessionEvent>) =>
+          events.flatMap((event) => (event._tag === 'SasReady' ? [event.code] : []));
+        const answererCodes = sasCodes(answererFixture.events);
+        const offererCodes = sasCodes(offererFixture.events);
+
+        assert.lengthOf(answererCodes, 1);
+        assert.match(answererCodes[0] ?? '', /^\d{5}( \d{5}){4}$/);
+        assert.deepStrictEqual(offererCodes, answererCodes);
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('skips the safety code when a description carries no fingerprint', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture();
+
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+        });
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new SignalReceivedEvent({
+            peerId: bob,
+            signal: new SessionDescriptionSignal({ type: 'answer', sdp: 'remote-answer' }),
+          }),
+        });
+
+        assert.include(fixture.operations, 'setRemoteDescription:answer:remote-answer');
+        assert.lengthOf(
+          fixture.events.filter((event) => event._tag === 'SasReady'),
+          0,
+        );
+      }),
+    ).pipe(Effect.orDie),
+  );
+
   it.effect('drops a failed ICE candidate and continues processing signals', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -1426,6 +1530,7 @@ describe('reducePeerSessionView', () => {
       {
         status: 'connected',
         messages: [{ id: 'message-1', sender: 'peer', text: 'from the previous session' }],
+        sas: '11111 22222 33333 44444 55555',
       },
       { _tag: 'SessionStarted' },
     );
@@ -1441,7 +1546,11 @@ describe('reducePeerSessionView', () => {
       _tag: 'Connected',
       peerId: bob,
     });
-    const withMessage = reducePeerSessionView(connected, {
+    const withSas = reducePeerSessionView(connected, {
+      _tag: 'SasReady',
+      code: '11111 22222 33333 44444 55555',
+    });
+    const withMessage = reducePeerSessionView(withSas, {
       _tag: 'ChatMessageAdded',
       message: { id: 'message-1', sender: 'peer', text: 'hello' },
     });
@@ -1449,6 +1558,7 @@ describe('reducePeerSessionView', () => {
     assert.deepStrictEqual(withMessage, {
       status: 'connected',
       messages: [{ id: 'message-1', sender: 'peer', text: 'hello' }],
+      sas: '11111 22222 33333 44444 55555',
     });
   });
 
@@ -1457,6 +1567,7 @@ describe('reducePeerSessionView', () => {
       {
         status: 'connected',
         messages: [{ id: 'message-1', sender: 'peer', text: 'hello' }],
+        sas: '11111 22222 33333 44444 55555',
       },
       { _tag: 'SignalingDisconnected' },
     );
@@ -1464,6 +1575,7 @@ describe('reducePeerSessionView', () => {
     assert.deepStrictEqual(view, {
       status: 'disconnected',
       messages: [{ id: 'message-1', sender: 'peer', text: 'hello' }],
+      sas: '11111 22222 33333 44444 55555',
     });
   });
 
@@ -1472,6 +1584,7 @@ describe('reducePeerSessionView', () => {
       {
         status: 'connected',
         messages: [{ id: 'message-1', sender: 'self', text: 'hello' }],
+        sas: null,
       },
       { _tag: 'SessionFailed' },
     );
@@ -1479,6 +1592,7 @@ describe('reducePeerSessionView', () => {
     assert.deepStrictEqual(view, {
       status: 'failed',
       messages: [{ id: 'message-1', sender: 'self', text: 'hello' }],
+      sas: null,
     });
   });
 
@@ -1487,6 +1601,7 @@ describe('reducePeerSessionView', () => {
       {
         status: 'connecting',
         messages: [{ id: 'message-1', sender: 'self', text: 'hello' }],
+        sas: null,
       },
       { _tag: 'RoomJoinRejected', reason: 'room-full' },
     );
@@ -1494,6 +1609,7 @@ describe('reducePeerSessionView', () => {
     assert.deepStrictEqual(view, {
       status: 'room-full',
       messages: [{ id: 'message-1', sender: 'self', text: 'hello' }],
+      sas: null,
     });
   });
 
@@ -1502,6 +1618,7 @@ describe('reducePeerSessionView', () => {
       {
         status: 'connecting',
         messages: [{ id: 'message-1', sender: 'self', text: 'hello' }],
+        sas: null,
       },
       { _tag: 'RoomJoinRejected', reason: 'peer-already-joined' },
     );
@@ -1509,6 +1626,7 @@ describe('reducePeerSessionView', () => {
     assert.deepStrictEqual(view, {
       status: 'peer-already-joined',
       messages: [{ id: 'message-1', sender: 'self', text: 'hello' }],
+      sas: null,
     });
   });
 
@@ -1517,6 +1635,7 @@ describe('reducePeerSessionView', () => {
       {
         status: 'connected',
         messages: [{ id: 'message-1', sender: 'peer', text: 'hello' }],
+        sas: '11111 22222 33333 44444 55555',
       },
       { _tag: 'PeerDeparted', peerId: bob },
     );
@@ -1524,6 +1643,7 @@ describe('reducePeerSessionView', () => {
     assert.deepStrictEqual(view, {
       status: 'waiting-for-peer',
       messages: [{ id: 'message-1', sender: 'peer', text: 'hello' }],
+      sas: null,
     });
   });
 });

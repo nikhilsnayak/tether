@@ -112,6 +112,10 @@ export type PeerSessionEvent =
       readonly message: ChatMessage;
     }
   | {
+      readonly _tag: 'SasReady';
+      readonly code: string;
+    }
+  | {
       readonly _tag: 'SignalingDisconnected';
     }
   | {
@@ -155,11 +159,14 @@ export interface PeerSessionView {
     | 'peer-already-joined'
     | 'waiting-for-peer';
   readonly messages: ReadonlyArray<ChatMessage>;
+  /** Safety code both peers compare aloud. */
+  readonly sas: string | null;
 }
 
 export const initialPeerSessionView: PeerSessionView = {
   status: 'connecting',
   messages: [],
+  sas: null,
 };
 
 export const reducePeerSessionView = (
@@ -180,21 +187,24 @@ export const reducePeerSessionView = (
       return { ...view, status: 'connected' };
     case 'ChatMessageAdded':
       return { ...view, messages: [...view.messages, event.message] };
+    case 'SasReady':
+      return { ...view, sas: event.code };
     case 'SignalingDisconnected':
       return { ...view, status: 'disconnected' };
     case 'SessionFailed':
       return { ...view, status: 'failed' };
     case 'TransportLost':
-      return { ...view, status: 'transport-lost' };
+      return { ...view, status: 'transport-lost', sas: null };
     case 'NegotiationStalled':
       return { ...view, status: 'negotiation-stalled' };
+    // Reconnects mint fresh certificates, so the old code is stale.
     case 'PeerInterrupted':
-      return { ...view, status: 'reconnecting' };
+      return { ...view, status: 'reconnecting', sas: null };
     case 'PeerRestored':
       return { ...view, status: 'connected' };
     case 'RoomJoinRejected':
       return { ...view, status: event.reason };
     case 'PeerDeparted':
-      return { ...view, status: 'waiting-for-peer' };
+      return { ...view, status: 'waiting-for-peer', sas: null };
   }
 };
