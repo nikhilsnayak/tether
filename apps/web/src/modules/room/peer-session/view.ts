@@ -14,10 +14,8 @@ export const peerSessionViewAtom = Atom.make<PeerSessionView>(initialPeerSession
   Atom.keepAlive,
 );
 
-/** Live local media, kept out of the serializable view; unwrapped to MediaStream here. */
 export const peerLocalStreamAtom = Atom.make<MediaStream | null>(null).pipe(Atom.keepAlive);
 
-/** Live remote media; cleared when the peer's transport ends. */
 export const peerRemoteStreamAtom = Atom.make<MediaStream | null>(null).pipe(Atom.keepAlive);
 
 const emitPeerSessionEvent = (event: PeerSessionEvent) => {

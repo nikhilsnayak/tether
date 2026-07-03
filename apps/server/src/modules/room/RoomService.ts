@@ -40,6 +40,9 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
           ctx.members = ctx.members.filter((member) => member !== selfId);
 
           yield* PubSub.publish(ctx.pubsub, new PeerLeftEvent({ peerId: selfId }));
+          yield* Effect.logInfo('Room session closed').pipe(
+            Effect.annotateLogs('occupancy', ctx.members.length),
+          );
 
           if (ctx.members.length === 0) {
             newRegistry.delete(roomId);
@@ -70,10 +73,16 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
             }
 
             if (ctx.members.includes(selfId)) {
+              yield* Effect.logWarning('Room join rejected').pipe(
+                Effect.annotateLogs('reason', 'peer-already-joined'),
+              );
               return yield* new PeerAlreadyJoined({ roomId, peerId: selfId });
             }
 
             if (ctx.members.length > 1) {
+              yield* Effect.logWarning('Room join rejected').pipe(
+                Effect.annotateLogs('reason', 'room-full'),
+              );
               return yield* new RoomFull({ roomId });
             }
 
@@ -82,6 +91,9 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
             ctx.members = [...ctx.members, selfId];
 
             yield* PubSub.publish(ctx.pubsub, new PeerJoinedEvent({ peerId: selfId }));
+            yield* Effect.logInfo('Room session opened').pipe(
+              Effect.annotateLogs('occupancy', ctx.members.length),
+            );
 
             const peerId = ctx.members.find((member) => member !== selfId) ?? null;
             const initial = [new RoomSessionOpenedEvent({ peerId })];
@@ -98,7 +110,7 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
       );
     });
 
-    const sendSignal = Effect.fn('@tether/RoomService.sendSignal')(function* (
+    const sendSignal = Effect.fnUntraced(function* (
       roomId: RoomId,
       selfId: PeerId,
       signal: Signal,
@@ -109,6 +121,7 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
           const ctx = registry.get(roomId);
 
           if (ctx === undefined || !ctx.members.includes(selfId)) {
+            yield* Effect.logWarning('Signal rejected because peer is not in room');
             return yield* new PeerNotInRoom({ roomId, peerId: selfId });
           }
 

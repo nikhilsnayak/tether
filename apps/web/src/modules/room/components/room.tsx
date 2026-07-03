@@ -584,7 +584,6 @@ type TileCorner = 'tl' | 'tr' | 'bl' | 'br';
 const TILE_MARGIN = 16;
 const TILE_SNAP = { type: 'spring', stiffness: 500, damping: 40 } as const;
 
-/** Self-preview that snaps to the nearest stage corner on release. */
 function SelfVideoTile({
   boundaryRef,
   aspectRatio,
@@ -662,7 +661,6 @@ function SelfVideoTile({
   );
 }
 
-/** Self-preview of the local camera. The live stream stays out of React state. */
 function LocalVideoTile({
   localStream,
   camOn,

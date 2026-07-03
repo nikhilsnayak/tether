@@ -1,10 +1,4 @@
-/**
- * Browser adapter for the platform-neutral peer-session actor.
- *
- * Native WebRTC objects stay in this module. They cross the shared boundary as
- * opaque handles, while DOM events cross it as `PlatformEvent` values. Effect
- * scopes pair every connection/listener acquisition with its cleanup.
- */
+/** Browser WebRTC adapter exposing native objects as opaque peer-session handles. */
 import {
   PeerSessionPlatform,
   PlatformError,
@@ -20,45 +14,37 @@ const peerConnectionValue = (handle: PeerConnectionHandle) => handle.value as RT
 const dataChannelValue = (handle: DataChannelHandle) => handle.value as RTCDataChannel;
 const mediaStreamValue = (handle: MediaStreamHandle) => handle.value as MediaStream;
 
-/** Owns the local camera + microphone for as long as the session scope lives. */
 const acquireLocalMedia = Effect.acquireRelease(
   Effect.tryPromise({
     try: async (): Promise<MediaStreamHandle> => ({
       value: await navigator.mediaDevices.getUserMedia({ video: true, audio: true }),
     }),
     catch: (cause) => new PlatformError({ operation: 'acquire-local-media', cause }),
-  }).pipe(Effect.tap(() => Effect.logInfo('Local media acquired'))),
+  }),
   (handle) =>
-    Effect.gen(function* () {
+    Effect.sync(() => {
       for (const track of mediaStreamValue(handle).getTracks()) {
         track.stop();
       }
-      yield* Effect.logInfo('Local media released');
     }),
 );
 
-/** Owns the native connection for exactly as long as the session scope lives. */
 const acquirePeerConnection = Effect.acquireRelease(
-  Effect.gen(function* () {
-    const peerConnection: PeerConnectionHandle = yield* Effect.try({
-      try: () => ({
-        value: new RTCPeerConnection({
-          iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
-        }),
+  Effect.try({
+    try: () => ({
+      value: new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
       }),
-      catch: (cause) => new PlatformError({ operation: 'acquire-peer-connection', cause }),
-    });
-    yield* Effect.logInfo('Peer connection acquired');
-    return peerConnection;
+    }),
+    catch: (cause) => new PlatformError({ operation: 'acquire-peer-connection', cause }),
   }),
   (peerConnection) =>
-    Effect.gen(function* () {
+    Effect.sync(() => {
       peerConnectionValue(peerConnection).close();
-      yield* Effect.logInfo('Peer connection released');
     }),
 );
 
-const observePeerConnection = Effect.fn('@tether/web/observePeerConnection')(function* (
+const observePeerConnection = Effect.fnUntraced(function* (
   peerConnectionHandle: PeerConnectionHandle,
   dispatch: PlatformEventDispatch,
 ) {
@@ -128,20 +114,18 @@ const observePeerConnection = Effect.fn('@tether/web/observePeerConnection')(fun
   };
 
   yield* Effect.acquireRelease(
-    Effect.gen(function* () {
+    Effect.sync(() => {
       peerConnection.addEventListener('icecandidate', handleIceCandidate);
       peerConnection.addEventListener('datachannel', handleDataChannel);
       peerConnection.addEventListener('track', handleTrack);
       peerConnection.addEventListener('connectionstatechange', handleConnectionStateChange);
-      yield* Effect.logInfo('Peer connection listeners attached');
     }),
     () =>
-      Effect.gen(function* () {
+      Effect.sync(() => {
         peerConnection.removeEventListener('icecandidate', handleIceCandidate);
         peerConnection.removeEventListener('datachannel', handleDataChannel);
         peerConnection.removeEventListener('track', handleTrack);
         peerConnection.removeEventListener('connectionstatechange', handleConnectionStateChange);
-        yield* Effect.logInfo('Peer connection listeners detached');
       }),
   );
 });
@@ -151,7 +135,7 @@ const observePeerConnection = Effect.fn('@tether/web/observePeerConnection')(fun
  * actor queue. The immediate state checks cover a remotely-created channel that
  * opened before the actor installed its listeners.
  */
-const observeDataChannel = Effect.fn('@tether/web/observeDataChannel')(function* (
+const observeDataChannel = Effect.fnUntraced(function* (
   dataChannelHandle: DataChannelHandle,
   dispatch: PlatformEventDispatch,
 ) {
@@ -184,18 +168,16 @@ const observeDataChannel = Effect.fn('@tether/web/observeDataChannel')(function*
   };
 
   yield* Effect.acquireRelease(
-    Effect.gen(function* () {
+    Effect.sync(() => {
       dataChannel.addEventListener('open', handleOpen);
       dataChannel.addEventListener('message', handleMessage);
       dataChannel.addEventListener('close', handleClose);
-      yield* Effect.logInfo(`Data channel listeners attached: label=${dataChannel.label}`);
     }),
     () =>
-      Effect.gen(function* () {
+      Effect.sync(() => {
         dataChannel.removeEventListener('open', handleOpen);
         dataChannel.removeEventListener('message', handleMessage);
         dataChannel.removeEventListener('close', handleClose);
-        yield* Effect.logInfo(`Data channel listeners detached: label=${dataChannel.label}`);
       }),
   );
 

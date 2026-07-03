@@ -3,7 +3,6 @@ import { Data, Predicate } from 'effect';
 
 export const CHAT_CHANNEL_LABEL = 'chat';
 
-/** Which WebRTC operation a {@link PlatformError} originated from. */
 export type PlatformOperation =
   | 'acquire-peer-connection'
   | 'acquire-local-media'
@@ -16,11 +15,7 @@ export type PlatformOperation =
   | 'add-ice-candidate'
   | 'send-message';
 
-/**
- * Typed failure from a {@link PeerSessionPlatform} operation. Carrying the
- * originating `operation` lets the actor and session teardown branch on which
- * WebRTC step failed instead of inspecting an untyped `unknown`.
- */
+/** Identifies the failed WebRTC step without inspecting its untyped cause. */
 export class PlatformError extends Data.TaggedError('PlatformError')<{
   readonly operation: PlatformOperation;
   readonly cause: unknown;
@@ -39,22 +34,18 @@ export interface SessionDescription {
   readonly sdp?: string;
 }
 
-/** Platform-owned peer connection hidden from the shared actor. */
 export interface PeerConnectionHandle {
   readonly value: unknown;
 }
 
-/** Platform-owned data channel hidden from the shared actor. */
 export interface DataChannelHandle {
   readonly value: unknown;
 }
 
-/** Platform-owned local media stream (camera + microphone) hidden from the actor. */
 export interface MediaStreamHandle {
   readonly value: unknown;
 }
 
-/** Events observed by a native platform adapter and serialized through the actor. */
 export type PlatformEvent =
   | {
       readonly _tag: 'RemoteDataChannel';
@@ -97,7 +88,6 @@ export interface ChatMessage {
   readonly text: string;
 }
 
-/** Domain output emitted by the actor without assuming a UI state library. */
 export type PeerSessionEvent =
   | {
       readonly _tag: 'SessionStarted';
@@ -172,7 +162,6 @@ export const initialPeerSessionView: PeerSessionView = {
   messages: [],
 };
 
-/** Projects platform-independent actor events into renderable session state. */
 export const reducePeerSessionView = (
   view: PeerSessionView,
   event: PeerSessionEvent,

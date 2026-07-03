@@ -11,13 +11,7 @@ import type {
   SessionDescription,
 } from './PeerSessionModel';
 
-/**
- * Platform adapter used by the shared actor to operate a peer connection.
- *
- * Implementations own native objects and expose them only through opaque
- * handles. Observer methods translate native callbacks into actor events and
- * keep their listeners alive for the surrounding Effect scope.
- */
+/** Platform-neutral WebRTC operations used by the peer-session actor. */
 export class PeerSessionPlatform extends Context.Service<
   PeerSessionPlatform,
   {
@@ -65,12 +59,7 @@ export class PeerSessionPlatform extends Context.Service<
   }
 >()('@tether/client-runtime/room/PeerSessionPlatform') {}
 
-/**
- * Output port for domain events that a platform UI can project into its own
- * state system. The web implementation writes these events into an Effect Atom;
- * a mobile implementation can provide a different sink without changing the
- * actor.
- */
+/** Emits platform-independent session events to the host UI. */
 export class PeerSessionEventSink extends Context.Service<
   PeerSessionEventSink,
   {
