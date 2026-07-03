@@ -4,9 +4,9 @@ test('creating a room offers a copyable invite link', async ({ page, context }) 
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
 
   await page.goto('/');
-  await page.getByRole('button', { name: 'Create room', exact: true }).click();
+  await page.getByRole('button', { name: 'Call' }).click();
 
-  await expect(page.getByRole('heading', { name: 'Your room is ready' })).toBeVisible();
+  await expect(page.getByText('Room ready')).toBeVisible();
   const inviteLink = await page.getByRole('textbox', { name: 'Room invite link' }).inputValue();
   expect(inviteLink).toMatch(/\/room\/[a-z]{3}-[a-z]{4}-[a-z]{3}$/);
 

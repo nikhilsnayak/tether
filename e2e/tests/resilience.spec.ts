@@ -97,7 +97,7 @@ test('leaving a call and joining a new room starts with clean media', async ({
 
     // Join via the form (SPA navigation) so the probe keeps both streams.
     await guest.getByRole('textbox', { name: 'Room code' }).fill('fresh-after-leave');
-    await guest.getByRole('button', { name: 'Join', exact: true }).click();
+    await guest.getByRole('button', { name: 'Connect' }).click();
     await expect(guest.getByText('Share this room to invite someone.')).toBeVisible();
 
     // No stale remote frame from the previous call may survive the rejoin.

@@ -2,19 +2,12 @@ import { CatchBoundary, createFileRoute, useNavigate } from '@tanstack/react-rou
 import type { RoomSession } from '@tether/client-runtime/modules/room';
 import { PeerId, RoomId } from '@tether/contracts/modules/room';
 import { Button } from '@tether/ui/components/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@tether/ui/components/dialog';
 import { Input } from '@tether/ui/components/input';
 import { toast } from '@tether/ui/components/toast';
-import { Check, Copy, Share2 } from 'lucide-react';
+import { Check, Copy, Share2, X } from 'lucide-react';
 import { Suspense, useState } from 'react';
 
-import { generatePeerId } from '@/lib/ids';
+import { generatePeerId } from '@/lib/utils';
 import {
   PeerSessionError,
   PeerSessionLoading,
@@ -45,31 +38,29 @@ function RoomPage() {
           }}
         />
       </Suspense>
-      <RoomInviteDialog
+      <RoomInviteCard
         open={invite ?? false}
         roomId={roomId}
-        onOpenChange={(open) => {
-          if (!open) {
-            void navigate({
-              to: '/room/$roomId',
-              params: { roomId },
-              search: { invite: undefined },
-              replace: true,
-            });
-          }
+        onClose={() => {
+          void navigate({
+            to: '/room/$roomId',
+            params: { roomId },
+            search: { invite: undefined },
+            replace: true,
+          });
         }}
       />
     </CatchBoundary>
   );
 }
 
-function RoomInviteDialog({
+function RoomInviteCard({
   open,
-  onOpenChange,
+  onClose,
   roomId,
 }: {
   readonly open: boolean;
-  readonly onOpenChange: (open: boolean) => void;
+  readonly onClose: () => void;
   readonly roomId: string;
 }) {
   const [copied, setCopied] = useState(false);
@@ -106,35 +97,45 @@ function RoomInviteDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Your room is ready</DialogTitle>
-          <DialogDescription>
-            Send this link to the person you want to call. Anyone with the link can request to join.
-          </DialogDescription>
-        </DialogHeader>
+    <section
+      aria-label='Room invite'
+      className='border-border bg-card animate-in fade-in slide-in-from-bottom-4 fixed bottom-24 left-4 z-50 w-[min(26rem,calc(100vw-2rem))] border shadow-lg duration-300'
+    >
+      <div className='border-border flex items-center justify-between border-b px-4 py-2.5'>
+        <span className='text-muted-foreground font-mono text-[11px] tracking-[0.2em] uppercase'>
+          Room ready
+        </span>
+        <Button aria-label='Close' variant='ghost' size='icon-sm' onClick={onClose}>
+          <X />
+        </Button>
+      </div>
 
-        {canShare && (
-          <Button className='mt-6 w-full' onClick={() => void shareRoomUrl()}>
-            <Share2 />
-            Share room
-          </Button>
-        )}
+      <div className='space-y-3 p-4'>
+        <p className='text-sm leading-6'>
+          Send this link to the one person you want to call. First to open it joins the line.
+        </p>
 
-        <div className='mt-5 flex gap-2'>
+        <div className='flex gap-2'>
           <Input
             aria-label='Room invite link'
             readOnly
             value={roomUrl}
             onFocus={(event) => event.currentTarget.select()}
+            className='font-mono text-xs max-sm:text-[11px]'
           />
           <Button aria-label='Copy room link' variant='outline' onClick={() => void copyRoomUrl()}>
-            {copied ? <Check /> : <Copy />}
+            {copied ? <Check className='text-success' /> : <Copy />}
             <span className='hidden sm:inline'>{copied ? 'Copied' : 'Copy'}</span>
           </Button>
         </div>
-      </DialogContent>
-    </Dialog>
+
+        {canShare && (
+          <Button className='w-full' onClick={() => void shareRoomUrl()}>
+            <Share2 />
+            Share room
+          </Button>
+        )}
+      </div>
+    </section>
   );
 }

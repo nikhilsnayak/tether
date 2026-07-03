@@ -10,7 +10,9 @@ const fitsViewport = (page: Page) =>
 
 test('home page fits the viewport', async ({ page }) => {
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Start a private video call.' })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'A direct video line between two machines.' }),
+  ).toBeVisible();
   expect(await fitsViewport(page)).toBe(true);
 });
 

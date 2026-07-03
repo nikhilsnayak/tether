@@ -81,13 +81,13 @@ export const expectWaitingForPeer = (page: Page) =>
 export const joinRoom = async (page: Page, roomId: string) => {
   await page.goto('/');
   await page.getByRole('textbox', { name: 'Room code' }).fill(roomId);
-  await page.getByRole('button', { name: 'Join', exact: true }).click();
+  await page.getByRole('button', { name: 'Connect' }).click();
   await expect(page).toHaveURL(new RegExp(`/room/${roomId}$`));
 };
 
 export const createRoom = async (page: Page) => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Create room', exact: true }).click();
+  await page.getByRole('button', { name: 'Call' }).click();
   await expect(page).toHaveURL(/\/room\/[a-z]{3}-[a-z]{4}-[a-z]{3}\?invite=true$/);
   await page.getByRole('button', { name: 'Close' }).click();
   // Wait for the ?invite=true replace-navigation so the id is extracted clean.

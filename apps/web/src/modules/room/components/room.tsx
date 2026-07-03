@@ -51,7 +51,7 @@ import {
   useState,
 } from 'react';
 
-import { Wordmark } from '@/components/logo';
+import { LogoMark, Wordmark } from '@/components/logo';
 import { useViewportAspectRatio } from '@/hooks/use-viewport-aspect-ratio';
 
 import { usePeerConnection } from '../hooks/use-peer-connection';
@@ -80,20 +80,23 @@ function PeerSessionStatusScreen({
 }) {
   return (
     <div className='relative z-40 grid content-center justify-items-center gap-6 px-6 text-center'>
-      <div className='absolute top-4 left-4 flex items-center gap-3'>
-        <Wordmark />
-        <div className='border-border flex items-center gap-2 border-l pl-3'>
-          <span className={cn('size-2 rounded-full', indicatorClassName)} />
-          <span className='text-xs font-medium'>{pillLabel}</span>
+      <div className='absolute top-4 right-4 left-4 flex items-center gap-3'>
+        <Wordmark className='max-sm:hidden' />
+        <LogoMark className='size-5 sm:hidden' />
+        <div className='border-border flex min-w-0 items-center gap-2 border-l pl-3'>
+          <span className={cn('size-2 shrink-0 rounded-full', indicatorClassName)} />
+          <span className='truncate font-mono text-[11px] tracking-[0.15em] uppercase'>
+            {pillLabel}
+          </span>
         </div>
       </div>
 
-      <div className='grid justify-items-center gap-4'>
-        <Avatar size='lg'>
-          <AvatarFallback className={iconClassName}>{icon}</AvatarFallback>
-        </Avatar>
-        <div className='space-y-1'>
-          <p className='text-lg font-medium'>{label}</p>
+      <div className='grid justify-items-center gap-5'>
+        <div className={cn('border-border grid size-20 place-items-center border', iconClassName)}>
+          {icon}
+        </div>
+        <div className='space-y-2'>
+          <p className='font-mono text-sm tracking-[0.2em] uppercase'>{label}</p>
           <p className='text-muted-foreground max-w-sm text-sm'>{hint}</p>
         </div>
       </div>
@@ -109,7 +112,7 @@ export function PeerSessionLoading() {
       indicatorClassName='animate-pulse bg-warning'
       pillLabel='Starting'
       icon={<LoaderCircle className='size-9 animate-spin' />}
-      label='Starting peer session…'
+      label='Starting your call…'
       hint='Setting up your connection.'
     />
   );
@@ -130,7 +133,7 @@ export function PeerSessionError({
       pillLabel='Failed'
       icon={<AlertTriangle className='size-9' />}
       iconClassName='bg-destructive/15 text-destructive'
-      label='Peer session failed'
+      label='Something went wrong'
       hint={message}
       action={
         <Button variant='secondary' onClick={reset}>
@@ -175,13 +178,13 @@ function peerSessionStatusPresentation(status: PeerSessionView['status']): {
     case 'transport-lost':
       return {
         indicatorClassName: 'bg-warning',
-        label: 'Peer transport lost',
-        hint: 'The connection dropped. Waiting to recover, or leave to retry.',
+        label: 'Connection dropped',
+        hint: 'Trying to get you reconnected. You can also leave and retry.',
       };
     case 'waiting-for-peer':
       return {
         indicatorClassName: 'animate-pulse bg-warning',
-        label: 'Waiting for peer',
+        label: 'Waiting for the other person',
         hint: 'Share this room to invite someone.',
       };
     case 'negotiation-stalled':
@@ -193,8 +196,8 @@ function peerSessionStatusPresentation(status: PeerSessionView['status']): {
     case 'disconnected':
       return {
         indicatorClassName: 'bg-muted-foreground',
-        label: 'Signaling disconnected',
-        hint: 'The signaling connection was lost.',
+        label: 'Connection lost',
+        hint: 'Lost contact with the room. Leave and rejoin to retry.',
       };
     case 'failed':
       return {
@@ -212,7 +215,7 @@ function peerSessionStatusPresentation(status: PeerSessionView['status']): {
       return {
         indicatorClassName: 'bg-destructive',
         label: 'Already joined',
-        hint: 'This identity is already active in the room.',
+        hint: 'You already have this room open somewhere else — maybe another tab.',
       };
   }
 }
@@ -335,28 +338,34 @@ export function RoomSessionScreen({
           {remoteStream ? (
             <RemoteVideoTile stream={remoteStream} sinkId={sinkId} muted={!speakerOn} />
           ) : (
-            <div className='grid justify-items-center gap-4 px-6 text-center'>
-              <Avatar size='lg'>
-                <AvatarFallback>
-                  <User className='size-10' />
-                </AvatarFallback>
-              </Avatar>
-              <div className='space-y-1'>
-                <p className='text-lg font-medium'>{presentation.label}</p>
+            <div className='grid justify-items-center gap-5 px-6 text-center'>
+              <div className='border-border grid size-20 place-items-center border'>
+                <User className='text-muted-foreground size-9' />
+              </div>
+              <div className='space-y-2'>
+                <p className='font-mono text-sm tracking-[0.2em] uppercase'>{presentation.label}</p>
                 <p className='text-muted-foreground text-sm'>{presentation.hint}</p>
               </div>
             </div>
           )}
 
-          <div className='absolute inset-x-0 top-0 flex items-center justify-between bg-linear-to-b from-black/60 to-transparent p-4 pb-10'>
-            <div className='flex items-center gap-3'>
-              <Wordmark className='drop-shadow-md' />
-              <div className='border-border bg-background/70 flex items-center gap-2 rounded-md border px-3 py-1.5 backdrop-blur-sm'>
-                <span className={cn('size-2 rounded-full', presentation.indicatorClassName)} />
-                <span className='text-xs font-medium'>{presentation.label}</span>
+          <div className='absolute inset-x-0 top-0 flex items-center justify-between gap-3 bg-linear-to-b from-black/60 to-transparent p-4 pb-10'>
+            <div className='flex min-w-0 items-center gap-3'>
+              <Wordmark className='drop-shadow-md max-sm:hidden' />
+              <LogoMark className='size-5 shrink-0 drop-shadow-md sm:hidden' />
+              <div className='border-border bg-background/70 flex min-w-0 items-center gap-2 rounded-md border px-3 py-1.5 backdrop-blur-sm'>
+                <span
+                  className={cn('size-2 shrink-0 rounded-full', presentation.indicatorClassName)}
+                />
+                <span className='truncate font-mono text-[11px] tracking-[0.15em] uppercase'>
+                  {presentation.label}
+                </span>
               </div>
             </div>
-            <Badge variant='secondary'>Room {session.roomId}</Badge>
+            <Badge variant='secondary' className='shrink-0 font-mono tracking-[0.15em] uppercase'>
+              <span className='max-sm:hidden'>Room&nbsp;</span>
+              {session.roomId}
+            </Badge>
           </div>
 
           <SelfVideoTile boundaryRef={stageRef} aspectRatio={deviceAspectRatio}>
@@ -364,9 +373,10 @@ export function RoomSessionScreen({
           </SelfVideoTile>
         </div>
 
-        <div className='border-border flex items-center justify-center gap-3 border-t p-4'>
+        <div className='border-border flex items-center justify-center gap-2 border-t p-4 sm:gap-3'>
           <ControlButton
             label={micOn ? 'Mute microphone' : 'Unmute microphone'}
+            caption='mic'
             tone={micOn ? 'neutral' : 'danger'}
             onClick={handleMicToggle}
           >
@@ -374,6 +384,7 @@ export function RoomSessionScreen({
           </ControlButton>
           <ControlButton
             label={camOn ? 'Turn camera off' : 'Turn camera on'}
+            caption='cam'
             tone={camOn ? 'neutral' : 'danger'}
             onClick={handleCameraToggle}
           >
@@ -385,11 +396,12 @@ export function RoomSessionScreen({
             speakerOn={speakerOn}
             onChange={handleAudioOutputChange}
           />
-          <ControlButton label='Leave call' tone='danger' onClick={handleLeave}>
+          <ControlButton label='Leave call' caption='end' tone='danger' onClick={handleLeave}>
             <PhoneOff />
           </ControlButton>
           <ControlButton
             label={hasUnread ? 'Open chat (unread messages)' : 'Open chat'}
+            caption='chat'
             tone='neutral'
             indicator={hasUnread}
             onClick={() => setChatOpen(true)}
@@ -411,8 +423,10 @@ export function RoomSessionScreen({
       >
         <DrawerContent>
           <DrawerHeader className='relative border-b pr-14'>
-            <DrawerTitle>Chat</DrawerTitle>
-            <DrawerDescription>Messages are sent over the peer data channel.</DrawerDescription>
+            <DrawerTitle className='font-mono text-xs tracking-[0.2em] uppercase'>Chat</DrawerTitle>
+            <DrawerDescription>
+              Messages go straight to the other person and disappear when the call ends.
+            </DrawerDescription>
             <DrawerClose
               render={
                 <Button
@@ -434,25 +448,20 @@ export function RoomSessionScreen({
                   No messages yet. Say hello once you are connected.
                 </p>
               ) : (
-                <ol className='space-y-3' aria-label='Chat messages'>
+                <ol className='space-y-4' aria-label='Chat messages'>
                   {view.messages.map((message) => (
-                    <li
-                      key={message.id}
-                      className={cn(
-                        'flex',
-                        message.sender === 'self' ? 'justify-end' : 'justify-start',
-                      )}
-                    >
-                      <div
+                    <li key={message.id} className='grid grid-cols-[3rem_1fr] gap-3'>
+                      <span
                         className={cn(
-                          'max-w-[80%] rounded-2xl px-4 py-2 text-sm',
-                          message.sender === 'self'
-                            ? 'rounded-br-md bg-primary text-primary-foreground'
-                            : 'rounded-bl-md bg-muted text-foreground',
+                          'pt-0.5 text-right font-mono text-[10px] tracking-[0.15em] uppercase',
+                          message.sender === 'self' ? 'text-primary' : 'text-muted-foreground',
                         )}
                       >
-                        <p className='wrap-break-word whitespace-pre-wrap'>{message.text}</p>
-                      </div>
+                        {message.sender === 'self' ? 'you' : 'peer'}
+                      </span>
+                      <p className='border-border border-l pl-3 text-sm wrap-break-word whitespace-pre-wrap'>
+                        {message.text}
+                      </p>
                     </li>
                   ))}
                 </ol>
@@ -465,7 +474,7 @@ export function RoomSessionScreen({
               aria-label='Message'
               disabled={!isConnected}
               onChange={(event) => setDraft(event.target.value)}
-              placeholder={isConnected ? 'Write a message' : 'Connect to chat…'}
+              placeholder={isConnected ? 'Write a message' : 'You can chat once connected…'}
               value={draft}
             />
             <Button
@@ -546,13 +555,14 @@ function SpeakerControl({
                 <Button
                   aria-label='Audio output'
                   variant={speakerOn ? 'secondary' : 'destructive'}
-                  size='icon-lg'
+                  className='h-14 w-14 flex-col gap-1.5 rounded-sm sm:w-16'
                 />
               }
             />
           }
         >
           {speakerOn ? <Volume2 /> : <VolumeX />}
+          <span className='font-mono text-[9px] tracking-[0.2em] uppercase'>out</span>
         </TooltipTrigger>
         <TooltipContent>Audio output</TooltipContent>
       </Tooltip>
@@ -697,7 +707,7 @@ function LocalVideoTile({
           </Avatar>
         </div>
       )}
-      <span className='bg-background/50 absolute bottom-1 left-2 rounded px-1.5 py-0.5 text-[10px] font-medium'>
+      <span className='bg-background/50 absolute bottom-1 left-2 rounded px-1.5 py-0.5 font-mono text-[10px] tracking-[0.15em] uppercase'>
         You
       </span>
     </>
@@ -706,12 +716,14 @@ function LocalVideoTile({
 
 function ControlButton({
   label,
+  caption,
   tone,
   onClick,
   indicator = false,
   children,
 }: {
   readonly label: string;
+  readonly caption: string;
   readonly tone: 'neutral' | 'danger';
   readonly onClick: () => void;
   readonly indicator?: boolean;
@@ -724,15 +736,15 @@ function ControlButton({
           <Button
             aria-label={label}
             variant={tone === 'danger' ? 'destructive' : 'secondary'}
-            size='icon-lg'
             onClick={onClick}
-            className='relative'
+            className='relative h-14 w-14 flex-col gap-1.5 rounded-sm sm:w-16'
           />
         }
       >
         {children}
+        <span className='font-mono text-[9px] tracking-[0.2em] uppercase'>{caption}</span>
         {indicator && (
-          <span className='bg-primary ring-background absolute top-1 right-1 size-2.5 rounded-full ring-2' />
+          <span className='bg-primary ring-background absolute top-1.5 right-1.5 size-2.5 rounded-full ring-2' />
         )}
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>

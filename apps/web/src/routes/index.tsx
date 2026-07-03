@@ -1,14 +1,20 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { Button } from '@tether/ui/components/button';
-import { Input } from '@tether/ui/components/input';
 import { type SubmitEvent, useState } from 'react';
 
-import { Wordmark } from '@/components/logo';
-import { generateRoomId } from '@/lib/ids';
+import { LogoMark } from '@/components/logo';
+import { formatRoomCodeInput, generateRoomId } from '@/lib/utils';
 
 export const Route = createFileRoute('/')({
   component: HomePage,
 });
+
+function PanelLabel({ children }: { readonly children: string }) {
+  return (
+    <p className='text-muted-foreground font-mono text-[11px] tracking-[0.2em] uppercase'>
+      {children}
+    </p>
+  );
+}
 
 function HomePage() {
   const navigate = useNavigate();
@@ -31,60 +37,70 @@ function HomePage() {
   };
 
   return (
-    <div className='grid grid-rows-[auto_1fr_auto]'>
-      <header className='mx-auto flex w-full max-w-5xl items-center justify-between px-6 py-6'>
-        <Wordmark />
-        <span className='text-muted-foreground text-xs tracking-wide'>1:1 video</span>
+    <div className='grid grid-rows-[auto_1fr]'>
+      <header className='flex items-center justify-between px-8 py-6'>
+        <span className='flex items-center gap-2.5'>
+          <LogoMark className='size-5' />
+          <span className='font-medium tracking-tight'>tether</span>
+        </span>
+        <span className='text-muted-foreground font-mono text-[11px] tracking-[0.2em] uppercase'>
+          1:1 — video unit
+        </span>
       </header>
 
-      <main className='mx-auto flex w-full max-w-5xl items-center px-6 py-16'>
-        <div className='w-full max-w-xl'>
-          <p className='text-muted-foreground mb-3 text-xs font-medium tracking-widest uppercase'>
-            Peer-to-peer
-          </p>
-          <h1 className='max-w-lg text-3xl leading-tight font-medium tracking-tight sm:text-4xl'>
-            Start a private video call.
-          </h1>
-          <p className='text-muted-foreground mt-4 max-w-md text-sm leading-6'>
-            Create a room and send the code to one other person. No account or installation.
-          </p>
+      <main className='mx-auto grid w-full max-w-4xl content-center px-8 pb-20'>
+        <div className='divide-border divide-y border-y'>
+          <section className='grid gap-6 py-10 sm:grid-cols-[1fr_auto] sm:items-center'>
+            <div className='space-y-3'>
+              <PanelLabel>01 — new call</PanelLabel>
+              <h1 className='text-3xl tracking-tight sm:text-4xl'>
+                A direct video line
+                <br />
+                between two machines.
+              </h1>
+              <p className='text-muted-foreground max-w-sm pt-1 text-sm leading-6'>
+                Press to generate a room code, hand it to one person. Nothing in between.
+              </p>
+            </div>
+            <button
+              type='button'
+              onClick={() => enterRoom(generateRoomId(), true)}
+              className='bg-primary text-primary-foreground grid size-32 place-items-center justify-self-start rounded-full text-sm font-medium tracking-wide uppercase shadow-[inset_0_-4px_10px_rgba(0,0,0,0.35)] transition-transform active:scale-95 sm:justify-self-end'
+            >
+              Call
+            </button>
+          </section>
 
-          <div className='border-border mt-12 border-y'>
-            <section className='flex items-center justify-between gap-6 py-6'>
-              <div>
-                <h2 className='text-sm font-medium'>New call</h2>
-                <p className='text-muted-foreground mt-1 text-sm'>Create a new room code.</p>
-              </div>
-              <Button onClick={() => enterRoom(generateRoomId(), true)}>Create room</Button>
-            </section>
-
-            <section className='border-border border-t py-6'>
-              <div className='mb-4'>
-                <h2 className='text-sm font-medium'>Join a call</h2>
-                <p className='text-muted-foreground mt-1 text-sm'>
-                  Enter a room code you received.
-                </p>
-              </div>
-              <form className='flex max-w-md gap-2' onSubmit={handleJoin}>
-                <Input
+          <section className='grid gap-4 py-10 sm:grid-cols-[1fr_auto] sm:items-end'>
+            <div className='space-y-3'>
+              <PanelLabel>02 — join</PanelLabel>
+              <form id='join-form' onSubmit={handleJoin}>
+                <input
                   aria-label='Room code'
                   autoComplete='off'
-                  onChange={(event) => setCode(event.target.value)}
-                  placeholder='Room code'
                   value={code}
+                  onChange={(event) => setCode(formatRoomCodeInput(event.target.value))}
+                  placeholder='ROOM CODE'
+                  maxLength={12}
+                  className='border-input placeholder:text-muted-foreground/70 focus:border-primary w-full max-w-xs border-b bg-transparent py-2 font-mono text-xl tracking-[0.3em] uppercase outline-none'
                 />
-                <Button type='submit' variant='outline' disabled={code.trim().length === 0}>
-                  Join
-                </Button>
               </form>
-            </section>
-          </div>
+            </div>
+            <button
+              type='submit'
+              form='join-form'
+              disabled={code.trim().length === 0}
+              className='border-border hover:border-primary hover:text-primary justify-self-start border px-6 py-2.5 text-sm tracking-wide uppercase transition-colors disabled:opacity-50 sm:justify-self-end'
+            >
+              Connect
+            </button>
+          </section>
         </div>
-      </main>
 
-      <footer className='text-muted-foreground mx-auto w-full max-w-5xl px-6 py-6 text-xs'>
-        Calls connect directly between participants.
-      </footer>
+        <p className='text-muted-foreground mt-6 font-mono text-[11px] tracking-[0.2em] uppercase'>
+          peer-to-peer · no accounts · calls never touch a server
+        </p>
+      </main>
     </div>
   );
 }

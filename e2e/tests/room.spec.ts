@@ -60,9 +60,9 @@ test('complete room flow', async ({ browser, page }, testInfo) => {
   try {
     await test.step('host creates a meeting', async () => {
       await page.goto('/');
-      await page.getByRole('button', { name: 'Create room', exact: true }).click();
+      await page.getByRole('button', { name: 'Call' }).click();
       await expect(page).toHaveURL(/\/room\/[a-z]{3}-[a-z]{4}-[a-z]{3}\?invite=true$/);
-      await expect(page.getByRole('heading', { name: 'Your room is ready' })).toBeVisible();
+      await expect(page.getByText('Room ready')).toBeVisible();
       await expect(page.getByRole('textbox', { name: 'Room invite link' })).toHaveValue(
         /\/room\/[a-z]{3}-[a-z]{4}-[a-z]{3}$/,
       );
