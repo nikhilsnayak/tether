@@ -7,7 +7,7 @@ import {
   type PeerConnectionHandle,
   type PlatformEventDispatch,
 } from '@tether/client-runtime/modules/room';
-import { IceCandidateSignal } from '@tether/contracts/modules/room';
+import { IceCandidateSignal, type IceServer } from '@tether/contracts/modules/room';
 import { Effect, Layer } from 'effect';
 
 const peerConnectionValue = (handle: PeerConnectionHandle) => handle.value as RTCPeerConnection;
@@ -29,20 +29,25 @@ const acquireLocalMedia = Effect.acquireRelease(
     }),
 );
 
-const acquirePeerConnection = Effect.acquireRelease(
-  Effect.try({
-    try: () => ({
-      value: new RTCPeerConnection({
-        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+const acquirePeerConnection = (iceServers: ReadonlyArray<IceServer>) =>
+  Effect.acquireRelease(
+    Effect.try({
+      try: () => ({
+        value: new RTCPeerConnection({
+          iceServers: iceServers.map((server) => ({
+            urls: [...server.urls],
+            username: server.username,
+            credential: server.credential,
+          })),
+        }),
       }),
+      catch: (cause) => new PlatformError({ operation: 'acquire-peer-connection', cause }),
     }),
-    catch: (cause) => new PlatformError({ operation: 'acquire-peer-connection', cause }),
-  }),
-  (peerConnection) =>
-    Effect.sync(() => {
-      peerConnectionValue(peerConnection).close();
-    }),
-);
+    (peerConnection) =>
+      Effect.sync(() => {
+        peerConnectionValue(peerConnection).close();
+      }),
+  );
 
 const observePeerConnection = Effect.fnUntraced(function* (
   peerConnectionHandle: PeerConnectionHandle,

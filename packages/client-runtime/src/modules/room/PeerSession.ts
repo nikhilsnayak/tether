@@ -4,6 +4,7 @@ import {
   isRoomFull,
   SessionDescriptionSignal,
   type IceCandidateSignal,
+  type IceServer,
   type PeerId,
   type RoomEvent,
   type SessionDescriptionSignal as SessionDescriptionSignalType,
@@ -116,6 +117,7 @@ const requireDescription = (description: SessionDescription, type: 'offer' | 'an
 export const makePeerSessionActor = Effect.fnUntraced(function* (
   session: RoomSession,
   localStream: MediaStreamHandle,
+  iceServers: ReadonlyArray<IceServer>,
   dispatchLocalInput: PeerSessionLocalInputDispatch,
 ) {
   const client = yield* AppClient;
@@ -157,9 +159,9 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
 
   const acquirePeerConnectionGeneration = Effect.fnUntraced(function* () {
     const connectionScope = yield* Scope.fork(peerSessionScope);
-    const peerConnection = yield* platform.acquirePeerConnection.pipe(
-      Scope.provide(connectionScope),
-    );
+    const peerConnection = yield* platform
+      .acquirePeerConnection(iceServers)
+      .pipe(Scope.provide(connectionScope));
     yield* platform
       .observePeerConnection(peerConnection, dispatchLocalInput)
       .pipe(Scope.provide(connectionScope));
@@ -769,6 +771,15 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
   session: RoomSession,
 ) {
   const client = yield* AppClient;
+  const { iceServers } = yield* client
+    .GetIceServers()
+    .pipe(
+      Effect.catch(() =>
+        Effect.logWarning('Falling back to default ICE servers').pipe(
+          Effect.as({ iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }] }),
+        ),
+      ),
+    );
   const platform = yield* PeerSessionPlatform;
   const peerSessionEventSink = yield* PeerSessionEventSink;
   const localInputQueue = yield* Queue.unbounded<PeerSessionLocalInput>();
@@ -795,7 +806,12 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
   yield* peerSessionEventSink.emit({ _tag: 'LocalStreamReady', stream: localStream });
 
   const actorLoop = Effect.gen(function* () {
-    const inputHandler = yield* makePeerSessionActor(session, localStream, dispatchLocalInput);
+    const inputHandler = yield* makePeerSessionActor(
+      session,
+      localStream,
+      iceServers,
+      dispatchLocalInput,
+    );
 
     return yield* Stream.merge(roomInputStream, localInputStream, {
       haltStrategy: 'left',

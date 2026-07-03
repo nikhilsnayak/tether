@@ -1,4 +1,4 @@
-import type { IceCandidateSignal } from '@tether/contracts/modules/room';
+import type { IceCandidateSignal, IceServer } from '@tether/contracts/modules/room';
 import { Context, Effect, type Scope } from 'effect';
 
 import type {
@@ -15,7 +15,9 @@ import type {
 export class PeerSessionPlatform extends Context.Service<
   PeerSessionPlatform,
   {
-    readonly acquirePeerConnection: Effect.Effect<PeerConnectionHandle, PlatformError, Scope.Scope>;
+    readonly acquirePeerConnection: (
+      iceServers: ReadonlyArray<IceServer>,
+    ) => Effect.Effect<PeerConnectionHandle, PlatformError, Scope.Scope>;
     readonly acquireLocalMedia: Effect.Effect<MediaStreamHandle, PlatformError, Scope.Scope>;
     readonly addLocalTracks: (
       peerConnection: PeerConnectionHandle,

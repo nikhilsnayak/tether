@@ -12,10 +12,12 @@ import {
   SessionDescriptionSignal,
   SignalReceivedEvent,
   type RoomEvent,
+  type IceServer,
   type Signal,
 } from '@tether/contracts/modules/room';
 import { Deferred, Effect, Layer, Queue, Stream } from 'effect';
 import { TestClock } from 'effect/testing';
+import { RpcClientError } from 'effect/unstable/rpc';
 
 import { AppClient } from '../../AppClient';
 import { makePeerSessionActor, startPeerSession } from './PeerSession';
@@ -54,6 +56,10 @@ const makeFixture = Effect.fn('makeFixture')(function* (
     Stream.empty) as AppClient['Service']['OpenRoomSession'],
   sendSignal?: AppClient['Service']['SendSignal'],
   overrides?: Partial<PeerSessionPlatform['Service']>,
+  getIceServers?: () => Effect.Effect<
+    { readonly iceServers: ReadonlyArray<IceServer> },
+    RpcClientError.RpcClientError
+  >,
 ) {
   const peerConnections: Array<PeerConnectionHandle> = [];
   let nextPeerConnection = 0;
@@ -80,16 +86,19 @@ const makeFixture = Effect.fn('makeFixture')(function* (
   const signals: Array<Signal> = [];
   const events: Array<PeerSessionEvent> = [];
   const eventQueue = yield* Queue.unbounded<PeerSessionEvent>();
+  const acquiredIceServers: Array<ReadonlyArray<IceServer>> = [];
   let platformEventDispatch: PlatformEventDispatch | undefined;
 
   const basePlatform: PeerSessionPlatform['Service'] = {
-    acquirePeerConnection: Effect.acquireRelease(
-      Effect.sync(() => {
-        operations.push('acquirePeerConnection');
-        return peerConnections[nextPeerConnection++] ?? makePeerConnection();
-      }),
-      () => Effect.sync(() => operations.push('closePeerConnection')),
-    ),
+    acquirePeerConnection: (iceServers) =>
+      Effect.acquireRelease(
+        Effect.sync(() => {
+          acquiredIceServers.push(iceServers);
+          operations.push('acquirePeerConnection');
+          return peerConnections[nextPeerConnection++] ?? makePeerConnection();
+        }),
+        () => Effect.sync(() => operations.push('closePeerConnection')),
+      ),
     acquireLocalMedia: Effect.acquireRelease(
       Effect.sync(() => {
         operations.push('acquireLocalMedia');
@@ -152,6 +161,8 @@ const makeFixture = Effect.fn('makeFixture')(function* (
     Layer.succeed(
       AppClient,
       AppClient.of({
+        GetIceServers: (getIceServers ??
+          (() => Effect.succeed({ iceServers: [] }))) as AppClient['Service']['GetIceServers'],
         LeaveRoom: () =>
           Effect.sync(() => {
             operations.push('leaveRoom');
@@ -182,11 +193,12 @@ const makeFixture = Effect.fn('makeFixture')(function* (
     ),
   );
 
-  const actor = yield* makePeerSessionActor(session, localMediaStream, () => {}).pipe(
+  const actor = yield* makePeerSessionActor(session, localMediaStream, [], () => {}).pipe(
     Effect.provide(dependencies),
   );
 
   return {
+    acquiredIceServers,
     actor,
     dataChannels,
     dependencies,
@@ -208,6 +220,73 @@ const makeFixture = Effect.fn('makeFixture')(function* (
 });
 
 describe('startPeerSession', () => {
+  it.effect('passes fetched ICE servers to peer connection acquisition', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const offerSent = yield* Deferred.make<void>();
+        const iceServers = [
+          {
+            urls: ['turn:turn.example.com:3478'],
+            username: 'turn-user',
+            credential: 'turn-password',
+          },
+        ];
+        const fixture = yield* makeFixture(
+          (() =>
+            Stream.make({
+              event: new RoomSessionOpenedEvent({ peerId: bob }),
+            }).pipe(Stream.concat(Stream.never))) as AppClient['Service']['OpenRoomSession'],
+          ({ signal }) =>
+            signal._tag === '@tether/SessionDescriptionSignal' && signal.type === 'offer'
+              ? Deferred.succeed(offerSent, undefined)
+              : Effect.void,
+          undefined,
+          () => Effect.succeed({ iceServers }),
+        );
+
+        yield* startPeerSession(session).pipe(Effect.provide(fixture.dependencies));
+        yield* Deferred.await(offerSent);
+
+        assert.deepStrictEqual(fixture.acquiredIceServers, [iceServers]);
+      }),
+    ),
+  );
+
+  it.effect('falls back to the default STUN server when ICE config fails', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const offerSent = yield* Deferred.make<void>();
+        const fixture = yield* makeFixture(
+          (() =>
+            Stream.make({
+              event: new RoomSessionOpenedEvent({ peerId: bob }),
+            }).pipe(Stream.concat(Stream.never))) as AppClient['Service']['OpenRoomSession'],
+          ({ signal }) =>
+            signal._tag === '@tether/SessionDescriptionSignal' && signal.type === 'offer'
+              ? Deferred.succeed(offerSent, undefined)
+              : Effect.void,
+          undefined,
+          () =>
+            Effect.fail(
+              new RpcClientError.RpcClientError({
+                reason: new RpcClientError.RpcClientDefect({
+                  message: 'ICE config unavailable',
+                  cause: 'boom',
+                }),
+              }),
+            ),
+        );
+
+        yield* startPeerSession(session).pipe(Effect.provide(fixture.dependencies));
+        yield* Deferred.await(offerSent);
+
+        assert.deepStrictEqual(fixture.acquiredIceServers, [
+          [{ urls: ['stun:stun.l.google.com:19302'] }],
+        ]);
+      }),
+    ),
+  );
+
   it.effect('acquires local media and emits LocalStreamReady on session start', () =>
     Effect.scoped(
       Effect.gen(function* () {
