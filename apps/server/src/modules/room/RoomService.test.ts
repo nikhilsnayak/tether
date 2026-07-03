@@ -12,7 +12,9 @@ import {
   SignalReceivedEvent,
 } from '@tether/contracts/modules/room';
 import { Effect, Exit, Scope, Stream } from 'effect';
+import { TestClock } from 'effect/testing';
 
+import { MAX_LIVE_ROOMS, SIGNAL_BUCKET_CAPACITY } from './Constants';
 import { RoomService } from './RoomService';
 
 const roomId = RoomId.make('room-1');
@@ -195,6 +197,122 @@ describe('RoomService', () => {
           new PeerJoinedEvent({ peerId: bob }),
           ...signals.map((signal) => new SignalReceivedEvent({ peerId: bob, signal })),
         ]);
+      }),
+    ),
+  );
+
+  it.effect('silently drops signals beyond the member rate limit', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const room = yield* RoomService;
+        const aliceEvents = yield* room.openSession(roomId, alice);
+        const aliceOpened = requireOpenedEvent(
+          (yield* aliceEvents.pipe(Stream.take(1), Stream.runCollect))[0],
+        );
+        const bobEvents = yield* room.openSession(roomId, bob);
+        const signal = new SessionDescriptionSignal({ type: 'offer', sdp: 'flood' });
+
+        const results = yield* Effect.forEach(
+          Array.from({ length: SIGNAL_BUCKET_CAPACITY + 10 }),
+          () => room.sendSignal(roomId, alice, aliceOpened.sessionToken, signal),
+        );
+        const received = yield* bobEvents.pipe(
+          Stream.take(SIGNAL_BUCKET_CAPACITY + 1),
+          Stream.runCollect,
+        );
+
+        assert.lengthOf(results, SIGNAL_BUCKET_CAPACITY + 10);
+        assert.lengthOf(
+          received.filter((event) => event instanceof SignalReceivedEvent),
+          SIGNAL_BUCKET_CAPACITY,
+        );
+      }),
+    ),
+  );
+
+  it.effect('refills a member signal bucket over time', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const room = yield* RoomService;
+        const aliceEvents = yield* room.openSession(roomId, alice);
+        const aliceOpened = requireOpenedEvent(
+          (yield* aliceEvents.pipe(Stream.take(1), Stream.runCollect))[0],
+        );
+        const bobEvents = yield* room.openSession(roomId, bob);
+        const signal = new SessionDescriptionSignal({ type: 'offer', sdp: 'refill' });
+
+        yield* Effect.forEach(Array.from({ length: SIGNAL_BUCKET_CAPACITY }), () =>
+          room.sendSignal(roomId, alice, aliceOpened.sessionToken, signal),
+        );
+        yield* TestClock.adjust('1 second');
+        yield* Effect.forEach(Array.from({ length: 5 }), () =>
+          room.sendSignal(roomId, alice, aliceOpened.sessionToken, signal),
+        );
+
+        const received = yield* bobEvents.pipe(
+          Stream.take(SIGNAL_BUCKET_CAPACITY + 6),
+          Stream.runCollect,
+        );
+        assert.lengthOf(
+          received.filter((event) => event instanceof SignalReceivedEvent),
+          SIGNAL_BUCKET_CAPACITY + 5,
+        );
+      }),
+    ),
+  );
+
+  it.effect('maintains a separate signal bucket for each member', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const room = yield* RoomService;
+        const aliceEvents = yield* room.openSession(roomId, alice);
+        const aliceOpened = requireOpenedEvent(
+          (yield* aliceEvents.pipe(Stream.take(1), Stream.runCollect))[0],
+        );
+        const bobEvents = yield* room.openSession(roomId, bob);
+        const bobOpened = requireOpenedEvent(
+          (yield* bobEvents.pipe(Stream.take(1), Stream.runCollect))[0],
+        );
+        const aliceSignal = new SessionDescriptionSignal({ type: 'offer', sdp: 'alice' });
+        const bobSignal = new SessionDescriptionSignal({ type: 'answer', sdp: 'bob' });
+
+        yield* Effect.forEach(Array.from({ length: SIGNAL_BUCKET_CAPACITY }), () =>
+          room.sendSignal(roomId, alice, aliceOpened.sessionToken, aliceSignal),
+        );
+        yield* room.sendSignal(roomId, bob, bobOpened.sessionToken, bobSignal);
+
+        const received = yield* aliceEvents.pipe(Stream.take(3), Stream.runCollect);
+        assert.deepStrictEqual(
+          received.filter((event) => event instanceof SignalReceivedEvent),
+          [new SignalReceivedEvent({ peerId: bob, signal: bobSignal })],
+        );
+      }),
+    ),
+  );
+
+  it.effect('caps new rooms while allowing joins to existing rooms', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const room = yield* RoomService;
+
+        yield* Effect.forEach(
+          Array.from({ length: MAX_LIVE_ROOMS }, (_, index) => index),
+          (index) =>
+            room.openSession(RoomId.make(`capacity-room-${index}`), PeerId.make(`peer-${index}`)),
+          { discard: true },
+        );
+
+        const error = yield* room
+          .openSession(RoomId.make('over-capacity'), alice)
+          .pipe(Effect.flip);
+        const existingRoomEvents = yield* room.openSession(RoomId.make('capacity-room-0'), bob);
+        const existingRoomOpened = requireOpenedEvent(
+          (yield* existingRoomEvents.pipe(Stream.take(1), Stream.runCollect))[0],
+        );
+
+        assert.instanceOf(error, RoomFull);
+        assert.strictEqual(error.roomId, RoomId.make('over-capacity'));
+        assert.strictEqual(existingRoomOpened.peerId, PeerId.make('peer-0'));
       }),
     ),
   );

@@ -1,0 +1,5 @@
+import { Duration } from 'effect';
+
+export const SIGNAL_BUCKET_CAPACITY = 50;
+export const SIGNAL_BUCKET_REFILL_EVERY = Duration.millis(200);
+export const MAX_LIVE_ROOMS = 1000;

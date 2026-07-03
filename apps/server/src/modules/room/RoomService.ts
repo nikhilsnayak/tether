@@ -13,7 +13,14 @@ import {
 } from '@tether/contracts/modules/room';
 import { Context, Effect, Layer, PubSub, Stream, SynchronizedRef } from 'effect';
 
-type Member = { readonly peerId: PeerId; readonly sessionToken: string };
+import { makeTokenBucket, type TokenBucket } from '../../lib/TokenBucket';
+import { MAX_LIVE_ROOMS, SIGNAL_BUCKET_CAPACITY, SIGNAL_BUCKET_REFILL_EVERY } from './Constants';
+
+type Member = {
+  readonly peerId: PeerId;
+  readonly sessionToken: string;
+  readonly signalBucket: TokenBucket;
+};
 type Registry = Map<RoomId, { members: Member[]; pubsub: PubSub.PubSub<RoomEvent> }>;
 
 export class RoomService extends Context.Service<RoomService>()('@tether/RoomService', {
@@ -85,6 +92,13 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
             let ctx = newRegistry.get(roomId);
 
             if (ctx === undefined) {
+              if (newRegistry.size >= MAX_LIVE_ROOMS) {
+                yield* Effect.logWarning('Room join rejected').pipe(
+                  Effect.annotateLogs('reason', 'server-at-capacity'),
+                );
+                return yield* new RoomFull({ roomId });
+              }
+
               const pubsub = yield* PubSub.unbounded<RoomEvent>();
 
               ctx = { members: [], pubsub };
@@ -107,8 +121,12 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
             }
 
             const subscription = yield* PubSub.subscribe(ctx.pubsub);
+            const signalBucket = yield* makeTokenBucket({
+              capacity: SIGNAL_BUCKET_CAPACITY,
+              refillEvery: SIGNAL_BUCKET_REFILL_EVERY,
+            });
 
-            ctx.members = [...ctx.members, { peerId: selfId, sessionToken }];
+            ctx.members = [...ctx.members, { peerId: selfId, sessionToken, signalBucket }];
 
             yield* PubSub.publish(ctx.pubsub, new PeerJoinedEvent({ peerId: selfId }));
             yield* Effect.logInfo('Room session opened').pipe(
@@ -140,15 +158,19 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
         registryRef,
         Effect.fnUntraced(function* (registry) {
           const ctx = registry.get(roomId);
+          const member = ctx?.members.find(
+            (member) => member.peerId === selfId && member.sessionToken === sessionToken,
+          );
 
-          if (
-            ctx === undefined ||
-            !ctx.members.some(
-              (member) => member.peerId === selfId && member.sessionToken === sessionToken,
-            )
-          ) {
+          if (ctx === undefined || member === undefined) {
             yield* Effect.logWarning('Signal rejected because peer is not in room');
             return yield* new PeerNotInRoom({ roomId, peerId: selfId });
+          }
+
+          const allowed = yield* member.signalBucket.tryTake;
+          if (!allowed) {
+            yield* Effect.logWarning('Signal dropped by rate limit');
+            return [undefined, registry];
           }
 
           yield* PubSub.publish(ctx.pubsub, new SignalReceivedEvent({ peerId: selfId, signal }));
