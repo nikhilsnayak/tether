@@ -96,8 +96,8 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
 });
 ```
 
-Note the actor (`makePeerSessionActor`) does `const peerSessionScope = yield*
-Scope.Scope;` and forks generation scopes via `Scope.fork(peerSessionScope)`
+Note the actor (`makePeerSessionActor`) does `const actorScope = yield*
+Scope.Scope;` and forks generation scopes via `Scope.fork(actorScope)`
 (`PeerSession.ts:120`, `154-157`) — that is the repo's idiom for a closeable
 child scope, reused below.
 
@@ -172,8 +172,8 @@ In `startPeerSession`:
    generation-scope idiom from `makePeerSessionActor`):
 
    ```ts
-   const peerSessionScope = yield* Scope.Scope;
-   const mediaScope = yield* Scope.fork(peerSessionScope);
+   const sessionScope = yield* Scope.Scope;
+   const mediaScope = yield* Scope.fork(sessionScope);
    const localStream = yield* platform.acquireLocalMedia.pipe(Scope.provide(mediaScope));
    ```
 

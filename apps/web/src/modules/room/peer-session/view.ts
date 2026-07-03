@@ -20,6 +20,16 @@ export const peerRemoteStreamAtom = Atom.make<MediaStream | null>(null).pipe(Ato
 
 const emitPeerSessionEvent = (event: PeerSessionEvent) => {
   switch (event._tag) {
+    case 'SessionStarted':
+    case 'SignalingDisconnected':
+    case 'SessionFailed':
+    case 'RoomJoinRejected':
+      return Atom.update(peerLocalStreamAtom, () => null).pipe(
+        Effect.andThen(Atom.update(peerRemoteStreamAtom, () => null)),
+        Effect.andThen(
+          Atom.update(peerSessionViewAtom, (view) => reducePeerSessionView(view, event)),
+        ),
+      );
     case 'LocalStreamReady':
       return Atom.update(peerLocalStreamAtom, () => event.stream.value as MediaStream);
     case 'RemoteStreamReady':

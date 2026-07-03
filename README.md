@@ -110,9 +110,11 @@ and becomes the **answerer**; the second becomes the **offerer**, creates the
 chat data channel, and sends the offer.
 
 The camera + microphone stream is acquired once per session and added to each
-peer connection before negotiation. A failed connection, closed data channel,
-or 20s negotiation deadline replaces only the current connection generation
-while signaling stays alive. The actor retries twice, preserving each peer's
+peer connection before negotiation. A dedicated media scope releases it when
+the session actor reaches a terminal state, even if the UI remains mounted to
+display that state. A failed connection, closed data channel, or 20s
+negotiation deadline replaces only the current connection generation while
+signaling stays alive. The actor retries twice, preserving each peer's
 offerer/answerer role, before surfacing `TransportLost` or
 `NegotiationStalled`.
 

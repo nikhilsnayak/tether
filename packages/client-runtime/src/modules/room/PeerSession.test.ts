@@ -15,7 +15,7 @@ import {
   type IceServer,
   type Signal,
 } from '@tether/contracts/modules/room';
-import { Deferred, Effect, Layer, Queue, Stream } from 'effect';
+import { Deferred, Effect, Exit, Layer, Queue, Scope, Stream } from 'effect';
 import { TestClock } from 'effect/testing';
 import { RpcClientError } from 'effect/unstable/rpc';
 
@@ -385,6 +385,50 @@ describe('startPeerSession', () => {
         });
       }),
     ),
+  );
+
+  it.effect('releases local media before the room-full session scope closes', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture((() =>
+          Stream.fail(
+            new RoomFull({ roomId: session.roomId }),
+          )) as AppClient['Service']['OpenRoomSession']);
+
+        yield* startPeerSession(session).pipe(Effect.provide(fixture.dependencies));
+        yield* Queue.take(fixture.eventQueue);
+        yield* Queue.take(fixture.eventQueue);
+        assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), {
+          _tag: 'RoomJoinRejected',
+          reason: 'room-full',
+        });
+
+        assert.include(fixture.operations, 'releaseLocalMedia');
+      }),
+    ),
+  );
+
+  it.effect('releases local media exactly once during normal scope teardown', () =>
+    Effect.gen(function* () {
+      const scope = yield* Scope.make();
+      const fixture = yield* makeFixture(
+        (() => Stream.never) as AppClient['Service']['OpenRoomSession'],
+      ).pipe(Scope.provide(scope));
+
+      yield* startPeerSession(session).pipe(
+        Effect.provide(fixture.dependencies),
+        Scope.provide(scope),
+      );
+      yield* Queue.take(fixture.eventQueue);
+      yield* Queue.take(fixture.eventQueue);
+
+      assert.notInclude(fixture.operations, 'releaseLocalMedia');
+      yield* Scope.close(scope, Exit.void);
+      assert.lengthOf(
+        fixture.operations.filter((operation) => operation === 'releaseLocalMedia'),
+        1,
+      );
+    }),
   );
 
   it.effect('emits RoomJoinRejected when the peer identity is already present', () =>

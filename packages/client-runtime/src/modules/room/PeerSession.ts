@@ -123,7 +123,7 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
   const client = yield* AppClient;
   const platform = yield* PeerSessionPlatform;
   const eventSink = yield* PeerSessionEventSink;
-  const peerSessionScope = yield* Scope.Scope;
+  const actorScope = yield* Scope.Scope;
   let nextMessageSequence = 0;
   let state: PeerSessionActorState = {
     _tag: 'AwaitingRoomSession',
@@ -158,7 +158,7 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
   );
 
   const acquirePeerConnectionGeneration = Effect.fnUntraced(function* () {
-    const connectionScope = yield* Scope.fork(peerSessionScope);
+    const connectionScope = yield* Scope.fork(actorScope);
     const peerConnection = yield* platform
       .acquirePeerConnection(iceServers)
       .pipe(Scope.provide(connectionScope));
@@ -625,6 +625,22 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
  *       --> PeerSessionPlatform ----> WebRTC operations
  *       --> PeerSessionEventSink ---> UI projection events
  *
+ * RESOURCE OWNERSHIP
+ *
+ * [sessionScope: owned by the host UI]
+ *          |
+ *          +-- [mediaScope]
+ *          |     - owns local camera + microphone
+ *          |     - closes when the actor terminates
+ *          |
+ *          +-- [actor fiber]
+ *                |
+ *                +-- [actorScope]
+ *                      - owns replaceable connection-generation scopes
+ *
+ * The session scope may remain alive to display a terminal state after the
+ * actor and media scopes have closed.
+ *
  *
  * COMMON START
  *
@@ -782,6 +798,8 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
     );
   const platform = yield* PeerSessionPlatform;
   const peerSessionEventSink = yield* PeerSessionEventSink;
+  const sessionScope = yield* Scope.Scope;
+  const mediaScope = yield* Scope.fork(sessionScope);
   const localInputQueue = yield* Queue.unbounded<PeerSessionLocalInput>();
   const dispatchLocalInput: PeerSessionLocalInputDispatch = (input) => {
     Queue.offerUnsafe(localInputQueue, input);
@@ -800,9 +818,9 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
 
   yield* peerSessionEventSink.emit({ _tag: 'SessionStarted' });
 
-  // Local camera + microphone are acquired for the whole session (they outlive
-  // any single peer connection) and released when the session scope closes.
-  const localStream = yield* platform.acquireLocalMedia;
+  // Local camera + microphone outlive individual connection generations but
+  // are released as soon as the session actor reaches a terminal state.
+  const localStream = yield* platform.acquireLocalMedia.pipe(Scope.provide(mediaScope));
   yield* peerSessionEventSink.emit({ _tag: 'LocalStreamReady', stream: localStream });
 
   const actorLoop = Effect.gen(function* () {
@@ -822,6 +840,8 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
     Effect.ensuring(Queue.shutdown(localInputQueue)),
     Effect.onExit(
       Effect.fnUntraced(function* (exit) {
+        yield* Scope.close(mediaScope, Exit.void);
+
         if (Exit.isSuccess(exit)) {
           yield* Effect.logInfo('Signaling stream ended');
           return yield* peerSessionEventSink.emit({ _tag: 'SignalingDisconnected' });
