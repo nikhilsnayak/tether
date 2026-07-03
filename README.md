@@ -1,166 +1,176 @@
-# Tether
+<p align="center">
+  <img src="assets/tether-mark.svg" width="88" height="88" alt="Tether logo" />
+</p>
 
-A private, 1:1 channel between you and one other person: video-call them, and
-(later) share what's on your screen so you can watch something together.
+<h1 align="center">Tether</h1>
 
-**This is a learning project.** The point isn't to ship a calling app — it's to
-learn **Effect 4** and **WebRTC** by building something real end to end. The
-product is genuinely useful (a private call with someone specific), but every
-design choice is made to maximize what there is to learn, not to reach a feature
-count fastest.
+<p align="center">
+  Private, account-free video calls for two people.
+  <br />
+  Peer-to-peer media, ephemeral chat, and a safety code you can verify aloud.
+</p>
 
-## What I'm learning
+<p align="center">
+  <a href="https://tether.nikhilsnayak.dev"><strong>Open Tether</strong></a>
+  ·
+  <a href="https://github.com/nikhilsnayak/tether/issues">Report an issue</a>
+</p>
 
-- **WebRTC, by hand.** No LiveKit, no SDK wrapper — the offer/answer handshake,
-  ICE, STUN, renegotiation, and multi-track are all wired up directly. 1:1 is
-  chosen deliberately because it's the tractable case (no SFU/mesh/simulcast),
-  which keeps the fundamentals in view instead of hiding them behind a library.
-- **Effect 4.** Modelling a stateful, concurrent, callback-driven protocol as a
-  single serialized actor over a merged stream; scoped resource ownership
-  (`Scope`) for connection/listener lifecycles; streaming RPC (`@effect/rpc`)
-  for the signaling channel; tagged errors and `Layer`-based dependency wiring.
-- **Where the two meet.** Adapting messy browser WebRTC callbacks into a clean,
-  platform-neutral Effect workflow — and keeping that core free of React and DOM
-  so the same actor could later drive a mobile client.
+<p align="center">
+  <a href="https://github.com/nikhilsnayak/tether/actions/workflows/ci.yml"><img src="https://github.com/nikhilsnayak/tether/actions/workflows/ci.yml/badge.svg" alt="CI status" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-f06a32" alt="MIT license" /></a>
+</p>
 
-If you're reading the code to learn, the two places to start are
-`apps/server/src/modules/room` (the Effect signaling relay) and
-`packages/client-runtime/src/modules/room` (the peer-session actor). Both are
-commented with the "why," not just the "what."
+> [!NOTE]
+> Tether is a production beta. The hosted web application supports real cross-network calls,
+> while the mobile client remains under development.
 
-## Status
+## Features
 
-**v0 is live.** Deployed to production, with real cross-network calls working —
-two peers on different networks hold a private 1:1 video/audio call with
-in-band text chat, over a peer-to-peer WebRTC connection. Signaling, ICE
-configuration, camera/mic media, and reconnection/stall handling are all in
-place.
+- **Private rooms for two.** Create a short room code, share the invite link, and connect without an account or lobby.
+- **Peer-to-peer video and audio.** Camera and microphone media use WebRTC, with in-call mic, camera, speaker, and audio-output controls.
+- **Ephemeral chat.** Messages travel over the call's encrypted WebRTC data channel and disappear when the session ends.
+- **Verifiable safety codes.** Both callers can compare a code derived from the negotiated DTLS fingerprints to detect signaling-path fingerprint substitution.
+- **Resilient sessions.** Tether handles transient disconnects, failed peer connections, closed data channels, stale events, and stalled negotiation.
+- **Configurable connectivity.** STUN works out of the box; deployments can add TURN for networks that cannot establish a direct path.
 
-Currently STUN-only (Google's public servers) by deliberate choice: no TURN
-relay is deployed, so peers behind symmetric NAT won't connect. That tradeoff
-stands until real calls show it failing often enough to matter.
+## Privacy and security
 
-The call and a future "watch-along" are not two products — they're two features
-on the same peer connection. A shared movie is just one more track added later.
+Tether separates signaling from call content:
 
-## Tech stack
+- The signaling server relays room membership, SDP, and ICE messages. It does not receive decoded camera, microphone, or chat content.
+- Audio, video, and chat are encrypted by WebRTC. They normally travel directly between callers; when TURN is configured, the relay forwards encrypted packets.
+- Rooms and signaling state are held in memory and removed when callers leave. Tether has no account system, call history, or message database.
+- Each room admits at most two peers. Private session tokens authorize signaling and leave operations after a caller joins.
+- The server restricts WebSocket origins, validates RPC payloads, rate-limits signaling per member, and caps live rooms.
 
-Bun + Turborepo. Effect 4 (beta), React 19, TypeScript 6, Tailwind v4,
-oxlint/oxfmt.
-
-```
-apps/
-  server/   Bun + @effect/platform-bun + Effect RPC over WebSocket/JSON
-  web/      Vite + TanStack Router + Tailwind v4 + React Compiler + @effect/atom-react
-  mobile/   Expo + expo-router + @effect/atom-react (viewer, planned)
-packages/
-  contracts/       shared Effect Schema + @effect/rpc definitions
-  client-runtime/  React-free RPC client + platform-neutral peer-session actor
-  ui/              shared React components
-e2e/               Playwright end-to-end tests
-```
-
-## Getting started
-
-```sh
-bun install
-bun run dev          # runs server (:8008) + web (:5173)
-```
-
-Open two tabs at `http://localhost:5173`, join the same room, and you're on a
-call. WebRTC media is peer-to-peer — it never touches the server.
-
-### Checks
-
-```sh
-bun run lint         # oxlint
-bun run fmt:check    # oxfmt
-bun run test         # unit (vitest) + e2e (playwright)
-```
-
-CI runs all three on push to `main` and on PRs targeting `main`
-(`.github/workflows/ci.yml`).
+The safety code is meaningful only when both callers compare it through a separate trusted channel, such as reading it aloud. It does not protect a compromised browser, device, or copy of the client application.
 
 ## How it works
 
-### Signaling (`apps/server`)
+```mermaid
+flowchart LR
+    A[Caller A] <-->|Effect RPC over WebSocket| S[Signaling server]
+    B[Caller B] <-->|Effect RPC over WebSocket| S
+    A <-->|Encrypted WebRTC media and chat| B
+    A -.->|Optional encrypted relay| T[TURN server]
+    T -.-> B
+```
 
-WebRTC needs a server to relay the other peer's offer/answer/ICE. Tether stays
-entirely in the `@effect/rpc` world over a WebSocket with JSON serialization:
+The Bun server exposes an Effect RPC endpoint over WebSocket. A streaming `OpenRoomSession` call represents both room membership and the server-to-client event channel; unary RPCs carry ICE and session-description signals and handle explicit departure.
 
-- **`OpenRoomSession`** — a streaming RPC. The held-open stream _is_ both the
-  room-session lifetime and the realtime server→client channel: its first event
-  confirms membership and reports the existing peer, then it pushes `RoomEvent`s.
-- **`SendSignal`** — a unary RPC for offer/answer/ICE going up.
-- **`LeaveRoom`** — an idempotent unary RPC for deliberate departures; stream
-  cancellation is the fallback for abrupt disconnects.
+On the client, room events, WebRTC callbacks, timers, and UI commands enter one serialized peer-session actor. That actor owns negotiation state and scoped resources, preventing concurrent callbacks from racing connection state. The implementation is React-free and browser-neutral; the web app supplies the WebRTC and UI adapters.
 
-The relay is an in-memory `Map<RoomId, { members, pubsub }>` behind a
-`SynchronizedRef` — 2 participants per room, ephemeral, no DB. Each client
-self-identifies with a `selfId` it mints. On join, the server issues a private
-session token required for signaling and explicit leave operations, then
-rewrites a sender's `selfId` into the recipient's `peerId`. Signaling is
-limited per member to a burst of 50 messages and a sustained 5 messages/second;
-the server also caps concurrently live rooms at 1,000.
+## Quick start
 
-`GetIceServers` serves the browser's ICE configuration. `STUN_URLS` accepts a
-comma-separated list and defaults to Google's public STUN service. Set
-`TURN_URL`, `TURN_USERNAME`, and `TURN_CREDENTIAL` together to append a TURN
-relay. TURN credentials are delivered to signaling clients but are currently
-static operator-managed secrets.
+### Requirements
 
-### Peer session (`packages/client-runtime`)
+- [Bun](https://bun.sh/) 1.3.14 or newer
+- A modern browser with WebRTC and camera/microphone access
 
-`packages/client-runtime/src/modules/room` owns the handshake and chat rules and
-has no React, DOM, or browser dependency. The app supplies three Effect
-services: `AppClient` (signaling RPCs), `PeerSessionPlatform` (native WebRTC),
-and `PeerSessionEventSink` (projecting domain events into UI state).
+```sh
+git clone https://github.com/nikhilsnayak/tether.git
+cd tether
+bun install
+cp apps/web/.env.example apps/web/.env
+bun run dev --filter=server --filter=web
+```
 
-Room events, WebRTC callbacks, and UI commands are merged into a single stream
-consumed by exactly one actor fiber. That serialization is the coordination
-guarantee — offer/answer, ICE, channel lifecycle, and chat can't mutate state
-concurrently. The role split is deterministic: the first peer in a room waits
-and becomes the **answerer**; the second becomes the **offerer**, creates the
-chat data channel, and sends the offer.
+Open `http://localhost:5173` in two tabs, create a room, and join it from the second tab. Localhost is treated as a secure browser context, so camera and microphone APIs are available during development.
 
-The camera + microphone stream is acquired once per session and added to each
-peer connection before negotiation. A dedicated media scope releases it when
-the session actor reaches a terminal state, even if the UI remains mounted to
-display that state. A failed connection, closed data channel, or 20s
-negotiation deadline replaces only the current connection generation while
-signaling stays alive. The actor retries twice, preserving each peer's
-offerer/answerer role, before surfacing `TransportLost` or
-`NegotiationStalled`. Individual ICE candidates that cannot be applied are
-dropped without terminating the session.
+## Configuration
 
-### Test coverage
+The default configuration runs locally without additional services.
 
-Playwright exercises the complete two-peer call, authenticated signaling and
-leave/replacement flow, full-room rejection, TURN configuration propagation,
-non-fatal candidate failures, signaling bursts, successful reconnection, and
-media release on terminal states. Exact security/resource invariants—token
-forgery rejection, per-member bucket accounting, and the 1,000-room boundary—
-run against `RoomService` and the real RPC handlers in the server test suite;
-they are deterministic boundary tests rather than creating thousands of
-browsers.
+### Server
 
-## Next learning reps
+| Variable          | Default                        | Purpose                                            |
+| ----------------- | ------------------------------ | -------------------------------------------------- |
+| `HOST`            | `0.0.0.0`                      | HTTP server bind address                           |
+| `PORT`            | `8008`                         | HTTP and WebSocket server port                     |
+| `CORS_ORIGIN`     | `http://localhost:5173`        | Comma-separated browser origins allowed to connect |
+| `STUN_URLS`       | `stun:stun.l.google.com:19302` | Comma-separated STUN server URLs                   |
+| `TURN_URL`        | unset                          | Optional TURN server URL                           |
+| `TURN_USERNAME`   | unset                          | Username for the configured TURN server            |
+| `TURN_CREDENTIAL` | unset                          | Credential for the configured TURN server          |
 
-Each of these is picked as much for what it teaches as for what it adds:
+Set all three TURN variables together. The current server distributes operator-managed TURN credentials to connected clients, so use scoped, short-lived credentials in exposed deployments where possible.
 
-- **Verifiable privacy (SAS)** — derive a short authentication string from both
-  peers' DTLS fingerprints and show it on each screen, so callers can verbally
-  confirm the signaling server isn't MITMing the call. A rep in where WebRTC's
-  trust boundary actually sits: media is always encrypted, but the fingerprints
-  travel through the server in the SDP.
-- **Mobile viewer** — reuse the platform-neutral actor behind a second platform
-  adapter (Expo + `react-native-webrtc`). The test of whether the React/DOM-free
-  boundary actually held.
-- **Watch-along** — add a `captureStream()` track from a local file to the
-  existing peer connection. A rep in multi-track renegotiation; no sync engine
-  needed (it's the same pixels).
-- **A real refactor** — a `PlayerAdapter` abstraction, deliberately skipped now
-  (YAGNI), left as practice for tackling a refactor once a second source exists.
-- **Later, if warranted:** ephemeral HMAC TURN credentials, a YouTube adapter
-  (embeddable IFrame API), Netflix/Prime via a browser extension (the Teleparty
-  model).
+### Web
+
+| Variable          | Default                   | Purpose                                          |
+| ----------------- | ------------------------- | ------------------------------------------------ |
+| `VITE_SERVER_URL` | `ws://localhost:8008/rpc` | Full WebSocket URL of the signaling RPC endpoint |
+
+Production browser deployments require HTTPS and a corresponding `wss://` signaling URL for camera and microphone access.
+
+## Architecture
+
+Tether is a Bun workspace managed with Turborepo.
+
+```text
+apps/
+  server/          Bun HTTP server and Effect RPC signaling relay
+  web/             React 19, Vite, TanStack Router, and browser WebRTC adapter
+  mobile/          Expo application shell; calling support is planned
+packages/
+  contracts/       Shared Effect Schema models and RPC contracts
+  client-runtime/  React-free peer-session actor and platform service interfaces
+  ui/              Shared React components and design tokens
+e2e/               Playwright browser tests for complete two-peer flows
+```
+
+The main implementation boundaries are:
+
+- [`apps/server/src/modules/room`](apps/server/src/modules/room) — ephemeral room membership, authenticated signaling, limits, and event delivery.
+- [`packages/client-runtime/src/modules/room`](packages/client-runtime/src/modules/room) — negotiation, reconnection, safety-code derivation, chat, and resource ownership.
+- [`apps/web/src/modules/room`](apps/web/src/modules/room) — browser WebRTC integration and the call interface.
+- [`packages/contracts/src/modules/room`](packages/contracts/src/modules/room) — shared wire schemas and RPC definitions.
+
+### Technology
+
+- Effect 4 and Effect RPC
+- TypeScript 6
+- Bun and Turborepo
+- React 19 and Vite
+- TanStack Router
+- Tailwind CSS 4
+- Vitest and Playwright
+- oxlint and oxfmt
+
+## Development
+
+Install the Playwright browser once before running the complete test suite:
+
+```sh
+cd e2e
+bun x playwright install chromium
+cd ..
+```
+
+Then run the repository checks from the root:
+
+```sh
+bun run lint
+bun run fmt:check
+bun run test
+bun run build
+```
+
+The test suite covers room-capacity invariants, authenticated signaling, rate limits, ICE and TURN configuration, peer-session state transitions, resource cleanup, safety-code agreement, complete two-peer calls, chat, media controls, and reconnection.
+
+## Roadmap
+
+- Complete the native WebRTC adapter and mobile calling experience.
+- Add watch-along media as another negotiated track on the existing connection.
+- Support short-lived TURN credentials instead of static operator-managed secrets.
+
+## Contributing
+
+Issues and pull requests are welcome. For substantial changes, open an issue first so the behavior and scope can be agreed before implementation.
+
+Keep changes focused, follow the existing package boundaries, and run lint, formatting, tests, and the build before opening a pull request.
+
+## License
+
+Tether is available under the [MIT License](LICENSE).
