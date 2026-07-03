@@ -16,22 +16,21 @@ const asciiBytes = (input: string): Uint8Array =>
   Uint8Array.from(input, (char) => char.charCodeAt(0));
 
 /** Hashes both fingerprints as received over signaling, offer first so both roles agree. */
-export const deriveSas = ({
+export const deriveSas = Effect.fnUntraced(function* ({
   answerSdp,
   offerSdp,
 }: {
   readonly offerSdp: string;
   readonly answerSdp: string;
-}) =>
-  Effect.gen(function* () {
-    const offer = fingerprintLines(offerSdp);
-    const answer = fingerprintLines(answerSdp);
-    if (offer.length === 0) return yield* new FingerprintMissing({ description: 'offer' });
-    if (answer.length === 0) return yield* new FingerprintMissing({ description: 'answer' });
-    const crypto = yield* Crypto.Crypto;
-    const input = ['tether-sas-v1', ...offer, ...answer].join('\n');
-    return yield* crypto.digest('SHA-256', asciiBytes(input));
-  });
+}) {
+  const offer = fingerprintLines(offerSdp);
+  const answer = fingerprintLines(answerSdp);
+  if (offer.length === 0) return yield* new FingerprintMissing({ description: 'offer' });
+  if (answer.length === 0) return yield* new FingerprintMissing({ description: 'answer' });
+  const crypto = yield* Crypto.Crypto;
+  const input = ['tether-sas-v1', ...offer, ...answer].join('\n');
+  return yield* crypto.digest('SHA-256', asciiBytes(input));
+});
 
 // Five groups of five digits: 80 bits, too long to grind a colliding certificate.
 export const formatSas = (digest: Uint8Array): string => {
