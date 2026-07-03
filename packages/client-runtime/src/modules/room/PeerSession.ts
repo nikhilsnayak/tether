@@ -54,6 +54,7 @@ type PeerSessionActorState =
       readonly peerId: PeerId;
       readonly role: PeerRole;
       readonly dataChannelState: DataChannelState;
+      readonly remoteAnswerApplied: boolean;
     }
   | { _tag: 'TransportLost'; peerId: PeerId };
 
@@ -219,6 +220,7 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
       peerId,
       role: 'offerer',
       dataChannelState: { _tag: 'DataChannelConnecting', dataChannel },
+      remoteAnswerApplied: false,
     };
   });
 
@@ -235,6 +237,7 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
       peerId,
       role: 'answerer',
       dataChannelState: { _tag: 'AwaitingRemoteDataChannel' },
+      remoteAnswerApplied: false,
     };
     yield* armNegotiationDeadline(generation);
   });
@@ -260,14 +263,26 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
         if (state.role !== 'offerer') {
           return yield* Effect.logWarning('Ignored answer received in invalid role');
         }
+        if (state.remoteAnswerApplied) {
+          return yield* Effect.logWarning('Ignored duplicate answer');
+        }
         yield* platform.setRemoteDescription(state.generation.peerConnection, {
           type: 'answer',
           sdp: signal.sdp,
         });
+        state = { ...state, remoteAnswerApplied: true };
         return;
       }
       case '@tether/IceCandidateSignal':
-        return yield* platform.addIceCandidate(state.generation.peerConnection, signal);
+        return yield* platform
+          .addIceCandidate(state.generation.peerConnection, signal)
+          .pipe(
+            Effect.catchTag('PlatformError', (error) =>
+              Effect.logWarning('Dropped ICE candidate that failed to apply').pipe(
+                Effect.annotateLogs('operation', error.operation),
+              ),
+            ),
+          );
     }
   });
 

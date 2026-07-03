@@ -14,7 +14,7 @@ audit session is required.
 
 | Plan | Title                                                  | Priority | Effort | Depends on                            | Status |
 | ---- | ------------------------------------------------------ | -------- | ------ | ------------------------------------- | ------ |
-| 001  | Make per-signal failures non-fatal to the peer session | P1       | S      | —                                     | TODO   |
+| 001  | Make per-signal failures non-fatal to the peer session | P1       | S      | —                                     | DONE   |
 | 002  | Recover failed peer connections automatically          | P1       | M      | 001                                   | TODO   |
 | 003  | Serve ICE config from the server; support TURN         | P1       | M      | —                                     | TODO   |
 | 004  | Release camera + clear stream atoms on session end     | P2       | S      | —                                     | TODO   |

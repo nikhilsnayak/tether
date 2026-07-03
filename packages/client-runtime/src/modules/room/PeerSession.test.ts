@@ -21,6 +21,7 @@ import { AppClient } from '../../AppClient';
 import { makePeerSessionActor, startPeerSession } from './PeerSession';
 import {
   initialPeerSessionView,
+  PlatformError,
   reducePeerSessionView,
   type DataChannelHandle,
   type MediaStreamHandle,
@@ -52,6 +53,7 @@ const makeFixture = Effect.fn('makeFixture')(function* (
   openRoomSession: AppClient['Service']['OpenRoomSession'] = (() =>
     Stream.empty) as AppClient['Service']['OpenRoomSession'],
   sendSignal?: AppClient['Service']['SendSignal'],
+  overrides?: Partial<PeerSessionPlatform['Service']>,
 ) {
   const peerConnections: Array<PeerConnectionHandle> = [];
   let nextPeerConnection = 0;
@@ -73,7 +75,7 @@ const makeFixture = Effect.fn('makeFixture')(function* (
   const eventQueue = yield* Queue.unbounded<PeerSessionEvent>();
   let platformEventDispatch: PlatformEventDispatch | undefined;
 
-  const platform = PeerSessionPlatform.of({
+  const basePlatform: PeerSessionPlatform['Service'] = {
     acquirePeerConnection: Effect.acquireRelease(
       Effect.sync(() => {
         operations.push('acquirePeerConnection');
@@ -135,7 +137,8 @@ const makeFixture = Effect.fn('makeFixture')(function* (
       Effect.sync(() => operations.push(`addIceCandidate:${candidate.candidate}`)),
     sendDataChannelMessage: (_, message) =>
       Effect.sync(() => operations.push(`sendDataChannelMessage:${message}`)),
-  });
+  };
+  const platform = PeerSessionPlatform.of({ ...basePlatform, ...overrides });
 
   const dependencies = Layer.mergeAll(
     Layer.succeed(PeerSessionPlatform, platform),
@@ -485,6 +488,71 @@ describe('startPeerSession', () => {
 });
 
 describe('peer-session actor', () => {
+  it.effect('drops a failed ICE candidate and continues processing signals', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture(undefined, undefined, {
+          addIceCandidate: () =>
+            Effect.fail(new PlatformError({ operation: 'add-ice-candidate', cause: 'boom' })),
+        });
+        const remoteIce = new IceCandidateSignal({
+          candidate: 'invalid-ice',
+          sdpMid: '0',
+          sdpMLineIndex: 0,
+          usernameFragment: null,
+        });
+
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new RoomSessionOpenedEvent({ peerId: bob }),
+        });
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new SignalReceivedEvent({ peerId: bob, signal: remoteIce }),
+        });
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new SignalReceivedEvent({
+            peerId: bob,
+            signal: new SessionDescriptionSignal({ type: 'answer', sdp: 'remote-answer' }),
+          }),
+        });
+
+        assert.include(fixture.operations, 'setRemoteDescription:answer:remote-answer');
+        assert.lengthOf(
+          fixture.events.filter((event) => event._tag === 'SessionFailed'),
+          0,
+        );
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('ignores a duplicate answer', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture();
+        const answer = new SignalReceivedEvent({
+          peerId: bob,
+          signal: new SessionDescriptionSignal({ type: 'answer', sdp: 'remote-answer' }),
+        });
+
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new RoomSessionOpenedEvent({ peerId: bob }),
+        });
+        yield* fixture.actor({ _tag: 'RoomEvent', event: answer });
+        yield* fixture.actor({ _tag: 'RoomEvent', event: answer });
+
+        assert.lengthOf(
+          fixture.operations.filter(
+            (operation) => operation === 'setRemoteDescription:answer:remote-answer',
+          ),
+          1,
+        );
+      }),
+    ).pipe(Effect.orDie),
+  );
+
   it.effect('makes the second peer the offerer and opens its local data channel', () =>
     Effect.scoped(
       Effect.gen(function* () {
