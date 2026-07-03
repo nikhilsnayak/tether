@@ -55,6 +55,7 @@ type PeerSessionActorState =
       readonly role: PeerRole;
       readonly dataChannelState: DataChannelState;
       readonly remoteAnswerApplied: boolean;
+      readonly reconnectAttempts: number;
     }
   | { _tag: 'TransportLost'; peerId: PeerId };
 
@@ -77,10 +78,12 @@ type PeerSessionLocalInput = PlatformEvent | PeerSessionUiCommand | PeerSessionT
 
 /**
  * How long a peer may stay mid-negotiation (offer/answer/data-channel opening)
- * before the actor surfaces a stall. Chosen well above a healthy handshake
+ * before the actor replaces the stalled generation or, once retries are
+ * exhausted, surfaces the stall. Chosen well above a healthy handshake
  * (typically < 5s) yet short enough to not feel indefinite.
  */
 const NEGOTIATION_DEADLINE = Duration.seconds(20);
+const MAX_RECONNECT_ATTEMPTS = 2;
 
 type PeerSessionLocalInputDispatch = (input: PeerSessionLocalInput) => void;
 
@@ -189,6 +192,57 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
       Scope.provide(generation.scope),
     );
 
+  const beginPeerReconnect = Effect.fnUntraced(function* () {
+    if (state._tag !== 'PeerKnown') {
+      return;
+    }
+
+    const { peerId, role, reconnectAttempts } = state;
+    yield* Scope.close(state.generation.scope, Exit.void);
+
+    if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      state = { _tag: 'TransportLost', peerId };
+      yield* Effect.logWarning('Reconnect attempts exhausted');
+      return yield* eventSink.emit({ _tag: 'TransportLost', peerId });
+    }
+
+    const generation = yield* acquirePeerConnectionGeneration();
+    yield* eventSink.emit({ _tag: 'PeerInterrupted', peerId });
+
+    if (role === 'answerer') {
+      state = {
+        _tag: 'PeerKnown',
+        generation,
+        peerId,
+        role,
+        dataChannelState: { _tag: 'AwaitingRemoteDataChannel' },
+        remoteAnswerApplied: false,
+        reconnectAttempts: reconnectAttempts + 1,
+      };
+      yield* armNegotiationDeadline(generation);
+      return;
+    }
+
+    const dataChannel = yield* platform.createDataChannel(
+      generation.peerConnection,
+      CHAT_CHANNEL_LABEL,
+    );
+    yield* platform
+      .observeDataChannel(dataChannel, dispatchLocalInput)
+      .pipe(Scope.provide(generation.scope));
+    yield* armNegotiationDeadline(generation);
+    yield* createAndSendOffer(generation.peerConnection);
+    state = {
+      _tag: 'PeerKnown',
+      generation,
+      peerId,
+      role,
+      dataChannelState: { _tag: 'DataChannelConnecting', dataChannel },
+      remoteAnswerApplied: false,
+      reconnectAttempts: reconnectAttempts + 1,
+    };
+  });
+
   const handleRoomSessionOpened = Effect.fnUntraced(function* (peerId: PeerId | null) {
     if (state._tag !== 'AwaitingRoomSession') {
       return yield* Effect.logWarning('Ignored duplicate room session open');
@@ -221,6 +275,7 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
       role: 'offerer',
       dataChannelState: { _tag: 'DataChannelConnecting', dataChannel },
       remoteAnswerApplied: false,
+      reconnectAttempts: 0,
     };
   });
 
@@ -238,6 +293,7 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
       role: 'answerer',
       dataChannelState: { _tag: 'AwaitingRemoteDataChannel' },
       remoteAnswerApplied: false,
+      reconnectAttempts: 0,
     };
     yield* armNegotiationDeadline(generation);
   });
@@ -384,14 +440,7 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
 
     if (state._tag === 'PeerKnown' && state.generation.peerConnection === peerConnection) {
       yield* Effect.logWarning('Peer connection failed');
-      yield* Scope.close(state.generation.scope, Exit.void);
-
-      state = {
-        _tag: 'TransportLost',
-        peerId: state.peerId,
-      };
-
-      return yield* eventSink.emit({ _tag: 'TransportLost', peerId: state.peerId });
+      return yield* beginPeerReconnect();
     }
 
     if (state._tag === 'WaitingForPeer' && state.generation.peerConnection === peerConnection) {
@@ -416,15 +465,7 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
     }
 
     yield* Effect.logWarning('Data channel closed');
-
-    yield* Scope.close(state.generation.scope, Exit.void);
-
-    state = {
-      _tag: 'TransportLost',
-      peerId: state.peerId,
-    };
-
-    yield* eventSink.emit({ _tag: 'TransportLost', peerId: state.peerId });
+    return yield* beginPeerReconnect();
   });
 
   const handlePeerConnectionInterrupted = Effect.fnUntraced(function* (
@@ -474,7 +515,11 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
       return;
     }
 
-    state = { ...state, dataChannelState: { _tag: 'DataChannelOpen', dataChannel } };
+    state = {
+      ...state,
+      dataChannelState: { _tag: 'DataChannelOpen', dataChannel },
+      reconnectAttempts: 0,
+    };
     yield* Effect.logInfo('Peer connection established');
     yield* eventSink.emit({ _tag: 'Connected', peerId: state.peerId });
   });
@@ -511,8 +556,12 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
       return;
     }
 
-    yield* Effect.logWarning('Negotiation stalled');
-    yield* eventSink.emit({ _tag: 'NegotiationStalled', peerId: state.peerId });
+    if (state.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      yield* Effect.logWarning('Negotiation stalled');
+      return yield* eventSink.emit({ _tag: 'NegotiationStalled', peerId: state.peerId });
+    }
+
+    return yield* beginPeerReconnect();
   });
 
   const handleUiSendMessage = Effect.fnUntraced(function* (text: string) {
@@ -561,7 +610,7 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
  * Runs signaling, platform callbacks, and UI commands through one serialized
  * actor. The room stream owns the session lifetime, while a replaceable child
  * scope owns each peer-connection generation. Handle identity rejects stale
- * callbacks, and transport loss closes only the active generation.
+ * callbacks, and transport recovery replaces only the active generation.
  *
  * ```text
  * INPUTS                              SERIALIZED PROCESSOR
@@ -659,12 +708,26 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
  * connection and channel identity checks reject them.
  *
  *
- * TRANSPORT LOSS (generation-scoped, not session-scoped)
+ * AUTOMATIC RECONNECTION (generation-scoped, not session-scoped)
  *
  * PeerConnectionFailed(current generation while PeerKnown)
  *   OR DataChannelClosed(current owned channel)
+ *   OR NegotiationDeadlineElapsed(mid-negotiation, retries remain)
  *          |
- *          | - close only the current generation
+ *          | - close current generation
+ *          | - acquire and observe a fresh generation
+ *          | - emit PeerInterrupted(peerId)
+ *          | - preserve role and increment reconnect attempts
+ *          |
+ *          +-- offerer: create a fresh channel and send a new offer
+ *          |
+ *          +-- answerer: await the peer's offer and remote channel
+ *
+ * DataChannelOpened resets the reconnect-attempt budget.
+ *
+ * PeerConnectionFailed OR DataChannelClosed after 2 attempts
+ *          |
+ *          | - close current generation
  *          | - emit TransportLost(peerId)
  *          v
  * [TransportLost(peerId) + signaling remains alive]
@@ -674,6 +737,9 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
  *          | - emit PeerDeparted
  *          v
  * [WaitingForPeer + fresh generation]
+ *
+ * NegotiationDeadlineElapsed after 2 attempts
+ *   -> emit NegotiationStalled(peerId)
  *
  * PeerConnectionFailed(current generation while WaitingForPeer)
  *          |

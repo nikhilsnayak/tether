@@ -110,10 +110,11 @@ and becomes the **answerer**; the second becomes the **offerer**, creates the
 chat data channel, and sends the offer.
 
 The camera + microphone stream is acquired once per session and added to each
-peer connection before negotiation. A failed connection or closed data channel
-tears down only the current connection generation (`TransportLost`) while
-signaling stays alive; a 20s negotiation deadline surfaces stalls; transient ICE
-drops surface as reconnecting.
+peer connection before negotiation. A failed connection, closed data channel,
+or 20s negotiation deadline replaces only the current connection generation
+while signaling stays alive. The actor retries twice, preserving each peer's
+offerer/answerer role, before surfacing `TransportLost` or
+`NegotiationStalled`.
 
 ## Next learning reps
 

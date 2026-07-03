@@ -65,9 +65,16 @@ const makeFixture = Effect.fn('makeFixture')(function* (
     return peerConnection;
   };
   const peerConnection = makePeerConnection();
-  const localDataChannel: DataChannelHandle = {
-    value: { label: 'chat' } satisfies TestDataChannel,
+  const dataChannels: Array<DataChannelHandle> = [];
+  let nextDataChannel = 0;
+  const makeDataChannel = (label: string): DataChannelHandle => {
+    const dataChannel: DataChannelHandle = {
+      value: { label } satisfies TestDataChannel,
+    };
+    dataChannels.push(dataChannel);
+    return dataChannel;
   };
+  const localDataChannel = makeDataChannel('chat');
   const localMediaStream: MediaStreamHandle = { value: { id: 'local-media' } };
   const operations: Array<string> = [];
   const signals: Array<Signal> = [];
@@ -102,7 +109,7 @@ const makeFixture = Effect.fn('makeFixture')(function* (
     createDataChannel: (_, label) =>
       Effect.sync(() => {
         operations.push(`createDataChannel:${label}`);
-        return localDataChannel;
+        return dataChannels[nextDataChannel++] ?? makeDataChannel(label);
       }),
     observeDataChannel: (dataChannel) =>
       Effect.acquireRelease(
@@ -181,6 +188,7 @@ const makeFixture = Effect.fn('makeFixture')(function* (
 
   return {
     actor,
+    dataChannels,
     dependencies,
     dispatchPlatformEvent: (event: PlatformEvent) => {
       if (platformEventDispatch === undefined) {
@@ -352,7 +360,7 @@ describe('startPeerSession', () => {
     ),
   );
 
-  it.effect('processes PeerLeft after the current data channel closes', () =>
+  it.effect('processes PeerLeft while reconnecting after the data channel closes', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const roomEventQueue = yield* Queue.unbounded<{ readonly event: RoomEvent }>();
@@ -384,7 +392,7 @@ describe('startPeerSession', () => {
         });
         yield* Effect.yieldNow;
         assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), {
-          _tag: 'TransportLost',
+          _tag: 'PeerInterrupted',
           peerId: bob,
         });
 
@@ -400,7 +408,7 @@ describe('startPeerSession', () => {
     ),
   );
 
-  it.effect('emits NegotiationStalled when the data channel never opens', () =>
+  it.effect('reconnects when the initial negotiation stalls', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const roomEventQueue = yield* Queue.unbounded<{ readonly event: RoomEvent }>();
@@ -427,13 +435,13 @@ describe('startPeerSession', () => {
         // The offer is sent, so the actor is now in DataChannelConnecting. The
         // peer never answers and no DataChannelOpened arrives; because the remote
         // description is never set, ICE never starts and the browser never fires
-        // 'failed'. Only a negotiation deadline can surface this stall.
+        // 'failed'. Only a negotiation deadline can initiate recovery.
         yield* Deferred.await(offerSent);
 
         yield* TestClock.adjust('20 seconds');
 
         assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), {
-          _tag: 'NegotiationStalled',
+          _tag: 'PeerInterrupted',
           peerId: bob,
         });
       }),
@@ -549,6 +557,260 @@ describe('peer-session actor', () => {
           ),
           1,
         );
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('reconnects the offerer after a peer connection failure', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture();
+
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new RoomSessionOpenedEvent({ peerId: bob }),
+        });
+        yield* fixture.actor({
+          _tag: 'DataChannelOpened',
+          dataChannel: fixture.localDataChannel,
+        });
+        yield* fixture.actor({
+          _tag: 'PeerConnectionFailed',
+          peerConnection: fixture.peerConnection,
+        });
+
+        assert.lengthOf(
+          fixture.operations.filter((operation) => operation === 'acquirePeerConnection'),
+          2,
+        );
+        assert.lengthOf(
+          fixture.operations.filter((operation) => operation === 'createDataChannel:chat'),
+          2,
+        );
+        assert.lengthOf(
+          fixture.signals.filter(
+            (signal) =>
+              signal._tag === '@tether/SessionDescriptionSignal' && signal.type === 'offer',
+          ),
+          2,
+        );
+        assert.include(fixture.operations, 'closePeerConnection');
+        assert.deepStrictEqual(fixture.events, [
+          { _tag: 'Connected', peerId: bob },
+          { _tag: 'PeerInterrupted', peerId: bob },
+        ]);
+        assert.lengthOf(
+          fixture.events.filter((event) => event._tag === 'TransportLost'),
+          0,
+        );
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('reconnects the answerer without creating an offer', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture();
+        const remoteDataChannel: DataChannelHandle = {
+          value: { label: 'chat' } satisfies TestDataChannel,
+        };
+
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new RoomSessionOpenedEvent({ peerId: null }),
+        });
+        yield* fixture.actor({ _tag: 'RoomEvent', event: new PeerJoinedEvent({ peerId: bob }) });
+        yield* fixture.actor({
+          _tag: 'RemoteDataChannel',
+          peerConnection: fixture.peerConnection,
+          dataChannel: remoteDataChannel,
+        });
+        yield* fixture.actor({ _tag: 'DataChannelOpened', dataChannel: remoteDataChannel });
+        yield* fixture.actor({
+          _tag: 'PeerConnectionFailed',
+          peerConnection: fixture.peerConnection,
+        });
+
+        assert.lengthOf(
+          fixture.operations.filter((operation) => operation === 'acquirePeerConnection'),
+          2,
+        );
+        assert.lengthOf(
+          fixture.operations.filter((operation) => operation === 'createDataChannel:chat'),
+          0,
+        );
+        assert.lengthOf(fixture.signals, 0);
+        assert.deepStrictEqual(fixture.events, [
+          { _tag: 'WaitingForPeer' },
+          { _tag: 'Connected', peerId: bob },
+          { _tag: 'PeerInterrupted', peerId: bob },
+        ]);
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('emits TransportLost after reconnect attempts are exhausted', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture();
+
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new RoomSessionOpenedEvent({ peerId: bob }),
+        });
+        yield* fixture.actor({
+          _tag: 'PeerConnectionFailed',
+          peerConnection: fixture.peerConnections[0]!,
+        });
+        yield* fixture.actor({
+          _tag: 'PeerConnectionFailed',
+          peerConnection: fixture.peerConnections[1]!,
+        });
+        yield* fixture.actor({
+          _tag: 'PeerConnectionFailed',
+          peerConnection: fixture.peerConnections[2]!,
+        });
+
+        assert.deepStrictEqual(fixture.events, [
+          { _tag: 'PeerInterrupted', peerId: bob },
+          { _tag: 'PeerInterrupted', peerId: bob },
+          { _tag: 'TransportLost', peerId: bob },
+        ]);
+        assert.lengthOf(
+          fixture.operations.filter((operation) => operation === 'acquirePeerConnection'),
+          3,
+        );
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('refills the reconnect budget after the replacement channel opens', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture();
+
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new RoomSessionOpenedEvent({ peerId: bob }),
+        });
+        yield* fixture.actor({
+          _tag: 'DataChannelOpened',
+          dataChannel: fixture.localDataChannel,
+        });
+        yield* fixture.actor({
+          _tag: 'PeerConnectionFailed',
+          peerConnection: fixture.peerConnections[0]!,
+        });
+        yield* fixture.actor({
+          _tag: 'DataChannelOpened',
+          dataChannel: fixture.dataChannels[1]!,
+        });
+        yield* fixture.actor({
+          _tag: 'PeerConnectionFailed',
+          peerConnection: fixture.peerConnections[1]!,
+        });
+
+        assert.deepStrictEqual(fixture.events, [
+          { _tag: 'Connected', peerId: bob },
+          { _tag: 'PeerInterrupted', peerId: bob },
+          { _tag: 'Connected', peerId: bob },
+          { _tag: 'PeerInterrupted', peerId: bob },
+        ]);
+        assert.lengthOf(
+          fixture.events.filter((event) => event._tag === 'TransportLost'),
+          0,
+        );
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('accepts a fresh answer after reconnecting', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture();
+
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new RoomSessionOpenedEvent({ peerId: bob }),
+        });
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new SignalReceivedEvent({
+            peerId: bob,
+            signal: new SessionDescriptionSignal({ type: 'answer', sdp: 'initial-answer' }),
+          }),
+        });
+        yield* fixture.actor({
+          _tag: 'PeerConnectionFailed',
+          peerConnection: fixture.peerConnections[0]!,
+        });
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new SignalReceivedEvent({
+            peerId: bob,
+            signal: new SessionDescriptionSignal({ type: 'answer', sdp: 'reconnect-answer' }),
+          }),
+        });
+
+        assert.include(fixture.operations, 'setRemoteDescription:answer:reconnect-answer');
+        assert.lengthOf(
+          fixture.operations.filter((operation) =>
+            operation.startsWith('setRemoteDescription:answer:'),
+          ),
+          2,
+        );
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('reconnects on negotiation deadlines before reporting a stall', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const roomEventQueue = yield* Queue.unbounded<{ readonly event: RoomEvent }>();
+        const offerSent = yield* Queue.unbounded<void>();
+        let offerCount = 0;
+        const fixture = yield* makeFixture(
+          (() => Stream.fromQueue(roomEventQueue)) as AppClient['Service']['OpenRoomSession'],
+          ({ signal }) =>
+            signal._tag === '@tether/SessionDescriptionSignal' && signal.type === 'offer'
+              ? Effect.gen(function* () {
+                  offerCount += 1;
+                  yield* Queue.offer(offerSent, undefined);
+                })
+              : Effect.void,
+        );
+
+        yield* startPeerSession(session).pipe(Effect.provide(fixture.dependencies));
+        assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), {
+          _tag: 'SessionStarted',
+        });
+        assert.strictEqual((yield* Queue.take(fixture.eventQueue))._tag, 'LocalStreamReady');
+
+        yield* Queue.offer(roomEventQueue, {
+          event: new RoomSessionOpenedEvent({ peerId: bob }),
+        });
+        yield* Queue.take(offerSent);
+
+        yield* TestClock.adjust('20 seconds');
+        assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), {
+          _tag: 'PeerInterrupted',
+          peerId: bob,
+        });
+        yield* Queue.take(offerSent);
+
+        yield* TestClock.adjust('20 seconds');
+        assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), {
+          _tag: 'PeerInterrupted',
+          peerId: bob,
+        });
+        yield* Queue.take(offerSent);
+
+        yield* TestClock.adjust('20 seconds');
+        assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), {
+          _tag: 'NegotiationStalled',
+          peerId: bob,
+        });
+        assert.strictEqual(offerCount, 3);
       }),
     ).pipe(Effect.orDie),
   );
@@ -945,7 +1207,7 @@ describe('peer-session actor', () => {
     ).pipe(Effect.orDie),
   );
 
-  it.effect('emits TransportLost when the current data channel closes', () =>
+  it.effect('reconnects when the current data channel closes', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const fixture = yield* makeFixture();
@@ -966,9 +1228,7 @@ describe('peer-session actor', () => {
           dataChannel: fixture.localDataChannel,
         });
 
-        // The transport loss ends only the generation; the actor survives and
-        // emits TransportLost rather than failing the session.
-        assert.deepStrictEqual(fixture.events, [{ _tag: 'TransportLost', peerId: bob }]);
+        assert.deepStrictEqual(fixture.events, [{ _tag: 'PeerInterrupted', peerId: bob }]);
         assert.include(fixture.operations, 'closePeerConnection');
       }),
     ).pipe(Effect.orDie),
