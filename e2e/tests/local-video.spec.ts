@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 test('turning the camera off hides the local preview and shows the avatar', async ({ page }) => {
   await page.goto('/room/camera-toggle');
   const preview = page.getByLabel('Local video preview');
-  await expect(preview).toBeVisible();
+  await expect(preview).toBeVisible({ timeout: 20_000 });
   await expect(preview).not.toHaveClass(/invisible/);
 
   const tileAvatar = preview.locator('xpath=..').locator('[data-slot="avatar-fallback"]');

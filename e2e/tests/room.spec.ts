@@ -1,6 +1,12 @@
 import { expect, test, type Page } from '@playwright/test';
 
-import { expectConnected, expectWaitingForPeer, joinRoom } from './helpers';
+import {
+  expectConnected,
+  expectWaitingForPeer,
+  installWebRtcProbe,
+  joinRoom,
+  requireBaseURL,
+} from './helpers';
 
 const expectMessage = (page: Page, message: string) =>
   expect(page.getByRole('list', { name: 'Chat messages' }).getByText(message)).toBeVisible();
@@ -42,13 +48,12 @@ const expectLocalAndRemoteMedia = async (page: Page) => {
 };
 
 test('complete room flow', async ({ browser, page }, testInfo) => {
-  const baseURL = testInfo.project.use.baseURL;
-  if (typeof baseURL !== 'string') {
-    throw new Error('The room E2E test requires a configured baseURL');
-  }
+  const baseURL = requireBaseURL(testInfo.project.use.baseURL);
 
+  await installWebRtcProbe(page.context());
   const guestContext = await browser.newContext({ baseURL });
   const replacementContext = await browser.newContext({ baseURL });
+  await Promise.all([installWebRtcProbe(guestContext), installWebRtcProbe(replacementContext)]);
   const guestPage = await guestContext.newPage();
   const replacementPage = await replacementContext.newPage();
 
@@ -122,6 +127,17 @@ test('complete room flow', async ({ browser, page }, testInfo) => {
       await expect(
         replacementPage.getByText('Room is full', { exact: true }).first(),
       ).toBeVisible();
+      await expect
+        .poll(() =>
+          replacementPage.evaluate(
+            () =>
+              window.__tetherE2E.localStreams.length > 0 &&
+              window.__tetherE2E.localStreams.every((stream) =>
+                stream.getTracks().every((track) => track.readyState === 'ended'),
+              ),
+          ),
+        )
+        .toBe(true);
       await replacementPage.getByRole('button', { name: 'Back to room setup' }).click();
       await expect(replacementPage).toHaveURL('/');
     });
@@ -142,6 +158,15 @@ test('complete room flow', async ({ browser, page }, testInfo) => {
     await test.step('both remaining peers leave the room', async () => {
       await page.getByRole('button', { name: 'Leave call' }).click();
       await expect(page).toHaveURL('/');
+      await expect
+        .poll(() =>
+          page.evaluate(() =>
+            window.__tetherE2E.localStreams.every((stream) =>
+              stream.getTracks().every((track) => track.readyState === 'ended'),
+            ),
+          ),
+        )
+        .toBe(true);
       await expectWaitingForPeer(replacementPage);
 
       await replacementPage.getByRole('button', { name: 'Leave call' }).click();
