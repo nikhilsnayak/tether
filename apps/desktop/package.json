@@ -1,0 +1,78 @@
+{
+  "name": "desktop",
+  "version": "0.0.1",
+  "private": true,
+  "homepage": "https://tether.nikhilsnayak.dev",
+  "author": {
+    "name": "Nikhil S",
+    "email": "nikhilsnayak3473@gmail.com"
+  },
+  "main": "./dist/main/index.js",
+  "scripts": {
+    "dev": "bun run scripts/dev.ts",
+    "build": "vite build && tsc -p tsconfig.electron.json",
+    "start": "electron .",
+    "package": "bun run build && electron-builder"
+  },
+  "dependencies": {
+    "@rolldown/plugin-babel": "^0.2.3",
+    "@tailwindcss/vite": "catalog:",
+    "@tanstack/devtools-vite": "catalog:",
+    "@tether/ui": "workspace:*",
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@vitejs/plugin-react": "^6.0.3",
+    "babel-plugin-react-compiler": "^1.0.0",
+    "electron": "43.0.0",
+    "electron-builder": "26.15.3",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "typescript": "catalog:",
+    "vite": "^8.1.3",
+    "web": "workspace:*"
+  },
+  "build": {
+    "appId": "dev.nikhilsnayak.tether",
+    "productName": "Tether",
+    "executableName": "tether",
+    "directories": {
+      "buildResources": "build",
+      "output": "release"
+    },
+    "extraMetadata": {
+      "dependencies": null
+    },
+    "npmRebuild": false,
+    "files": [
+      "dist/**",
+      "!node_modules/**"
+    ],
+    "extraResources": [
+      {
+        "from": "build/icon.png",
+        "to": "icon.png"
+      }
+    ],
+    "linux": {
+      "category": "Network",
+      "icon": "build/icons",
+      "syncDesktopName": true,
+      "target": [
+        "deb"
+      ]
+    },
+    "deb": {
+      "artifactName": "tether_${version}_${arch}.${ext}",
+      "packageName": "tether"
+    },
+    "protocols": [
+      {
+        "name": "Tether room link",
+        "schemes": [
+          "tether"
+        ]
+      }
+    ]
+  },
+  "desktopName": "dev.nikhilsnayak.tether.desktop"
+}

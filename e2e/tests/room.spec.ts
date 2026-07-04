@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import {
+  continueInBrowser,
   expectConnected,
   expectWaitingForPeer,
   installWebRtcProbe,
@@ -48,6 +49,7 @@ const expectLocalAndRemoteMedia = async (page: Page) => {
 };
 
 test('complete room flow', async ({ browser, page }, testInfo) => {
+  test.slow();
   const baseURL = requireBaseURL(testInfo.project.use.baseURL);
 
   await installWebRtcProbe(page.context());
@@ -62,6 +64,7 @@ test('complete room flow', async ({ browser, page }, testInfo) => {
       await page.goto('/');
       await page.getByRole('button', { name: 'Call' }).click();
       await expect(page).toHaveURL(/\/room\/[a-z]{3}-[a-z]{4}-[a-z]{3}\?invite=true$/);
+      await continueInBrowser(page);
       await expect(page.getByText('Room ready')).toBeVisible();
       await expect(page.getByRole('textbox', { name: 'Room invite link' })).toHaveValue(
         /\/room\/[a-z]{3}-[a-z]{4}-[a-z]{3}$/,

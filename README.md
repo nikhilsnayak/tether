@@ -24,12 +24,13 @@
 > [!NOTE]
 > Tether is a production beta. The hosted web application supports real cross-network calls.
 > The Android client has reached feature parity and is distributed as an Expo development build
-> while it is validated for release.
+> while it is validated for release. A desktop client reuses the web app inside an Electron shell
+> and is currently packaged for Linux.
 
 ## Features
 
 - **Private rooms for two.** Create a short room code, share the invite link, and connect without an account or lobby.
-- **Web and Android clients.** The same room works from a browser or the native app, and room links open directly in the app when it is installed (Android App Links).
+- **Web, Android, and desktop clients.** The same room works from a browser, the native Android app, or the Electron desktop app. Shared room links open directly in the installed app — Android App Links on mobile, and on desktop the web page hands off to the app through its `tether://` deep link.
 - **Peer-to-peer video and audio.** Camera and microphone media use WebRTC, with in-call mic, camera, speaker, and audio-output controls.
 - **Ephemeral chat.** Messages travel over the call's encrypted WebRTC data channel and disappear when the session ends.
 - **Verifiable safety codes.** Both callers can compare a code derived from the negotiated DTLS fingerprints to detect signaling-path fingerprint substitution.
@@ -126,6 +127,25 @@ Room links open in the app through Android App Links. The web deployment serves 
 [`assetlinks.json`](apps/web/public/.well-known/assetlinks.json), which must list the SHA-256
 fingerprint of the Android signing certificate (`bunx eas-cli credentials -p android`).
 
+### Desktop
+
+The desktop client is an Electron shell that loads the web app's source, so it shares the web
+build variables. Both default to the hosted deployment and can be overridden in `apps/desktop/.env`.
+
+| Variable          | Default                                    | Purpose                                          |
+| ----------------- | ------------------------------------------ | ------------------------------------------------ |
+| `VITE_SERVER_URL` | `wss://tether-server.nikhilsnayak.dev/rpc` | Full WebSocket URL of the signaling RPC endpoint |
+| `VITE_WEB_URL`    | `https://tether.nikhilsnayak.dev`          | Web origin used for shareable room links         |
+
+```sh
+cd apps/desktop
+cp .env.example .env
+bun run dev
+```
+
+`bun run package` produces an installable Linux `.deb`. Room links (`tether://room/<id>`) open the
+installed app and route directly to the room.
+
 ## Architecture
 
 Tether is a Bun workspace managed with Turborepo.
@@ -135,6 +155,7 @@ apps/
   server/          Bun HTTP server and Effect RPC signaling relay
   web/             React 19, Vite, TanStack Router, and browser WebRTC adapter
   mobile/          Expo + react-native-webrtc client on the shared peer-session runtime
+  desktop/         Electron shell that reuses the web app and handles tether:// deep links
 packages/
   contracts/       Shared Effect Schema models and RPC contracts
   client-runtime/  React-free peer-session actor and platform service interfaces

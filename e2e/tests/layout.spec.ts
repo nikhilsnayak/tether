@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
-import { connectPeers, requireBaseURL } from './helpers';
+import { connectPeers, continueInBrowser, requireBaseURL } from './helpers';
 
 const fitsViewport = (page: Page) =>
   page.evaluate(() => {
@@ -18,6 +18,7 @@ test('home page fits the viewport', async ({ page }) => {
 
 test('room waiting screen fits the viewport', async ({ page }) => {
   await page.goto('/room/layout-waiting');
+  await continueInBrowser(page);
   await expect(page.getByText('Share this room to invite someone.')).toBeVisible();
   expect(await fitsViewport(page)).toBe(true);
 });

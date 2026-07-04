@@ -5,10 +5,16 @@ import { Button } from '@tether/ui/components/button';
 import { Input } from '@tether/ui/components/input';
 import { toast } from '@tether/ui/components/toast';
 import { Check, Copy, Share2, X } from 'lucide-react';
-import { Suspense, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 
+import { canOfferDesktopApp, desktopRoomUrl } from '@/lib/desktop-handoff';
 import { generatePeerId } from '@/lib/utils';
-import { CallErrorScreen, CallLoadingScreen, CallScreen } from '@/modules/room/components/room';
+import {
+  CallErrorScreen,
+  CallHandoffScreen,
+  CallLoadingScreen,
+  CallScreen,
+} from '@/modules/room/components/room';
 
 const DEFAULT_WEB_URL = 'https://tether.nikhilsnayak.dev';
 
@@ -24,7 +30,22 @@ function RoomPage() {
   const { invite } = Route.useSearch();
   const navigate = useNavigate();
   const [selfId] = useState(() => PeerId.make(generatePeerId()));
+  // On a desktop web browser we hand off to the app first, so hold the call
+  // (and its media grab) until the caller opts to stay in the browser.
+  const [joinInBrowser, setJoinInBrowser] = useState(() => !canOfferDesktopApp());
   const session: RoomSession = { roomId: RoomId.make(roomId), selfId };
+
+  // Fire the tether:// scheme once; the browser's native "Open Tether?" prompt
+  // takes over. If the app is absent or declined, the caller taps to join here.
+  useEffect(() => {
+    if (canOfferDesktopApp()) {
+      window.location.href = desktopRoomUrl(roomId);
+    }
+  }, [roomId]);
+
+  if (!joinInBrowser) {
+    return <CallHandoffScreen onJoinInBrowser={() => setJoinInBrowser(true)} />;
+  }
 
   return (
     <CatchBoundary errorComponent={CallErrorScreen} getResetKey={() => roomId}>

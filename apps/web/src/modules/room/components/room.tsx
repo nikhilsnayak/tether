@@ -38,6 +38,7 @@ import {
   MessageSquare,
   Mic,
   MicOff,
+  Monitor,
   PhoneOff,
   SendHorizontal,
   ShieldCheck,
@@ -124,6 +125,26 @@ export function CallLoadingScreen() {
       icon={<LoaderCircle className='size-9 animate-spin' />}
       label='Starting your call…'
       hint='Setting up your connection.'
+    />
+  );
+}
+
+// Shown while the browser's native "Open Tether?" prompt hands off to the
+// desktop app, so the browser call (and its camera/mic grab) is held back
+// until the caller explicitly chooses to stay here.
+export function CallHandoffScreen({ onJoinInBrowser }: { readonly onJoinInBrowser: () => void }) {
+  return (
+    <CallStatusScreen
+      indicatorClassName='animate-pulse bg-warning'
+      pillLabel='Opening'
+      icon={<Monitor className='size-9' />}
+      label='Opening in the Tether app…'
+      hint='No app, or want to stay here? Join this call in your browser.'
+      action={
+        <Button variant='secondary' onClick={onJoinInBrowser}>
+          Join in this browser
+        </Button>
+      }
     />
   );
 }
