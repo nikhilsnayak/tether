@@ -1,6 +1,7 @@
 import { PeerId, RoomId } from '@tether/contracts/modules/room';
+import * as Clipboard from 'expo-clipboard';
 import { Stack, useLocalSearchParams, useRouter, type ErrorBoundaryProps } from 'expo-router';
-import { Share2, X } from 'lucide-react-native';
+import { Check, Copy, Share2, X } from 'lucide-react-native';
 import { Suspense, useState } from 'react';
 import { Pressable, Share, StyleSheet, Text, View } from 'react-native';
 
@@ -41,8 +42,19 @@ function RoomInviteCard({
   readonly roomId: string;
   readonly onClose: () => void;
 }) {
+  const [copied, setCopied] = useState(false);
   // Share the web URL so the invitee needs nothing installed.
   const roomUrl = `${webBaseUrl}/room/${encodeURIComponent(roomId)}`;
+
+  const copyRoomUrl = async () => {
+    try {
+      await Clipboard.setStringAsync(roomUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2_000);
+    } catch {
+      setCopied(false);
+    }
+  };
 
   const shareRoomUrl = () => {
     void Share.share({ message: `Join my Tether video call\n${roomUrl}` }).catch(() => {});
@@ -63,6 +75,19 @@ function RoomInviteCard({
         <Text selectable style={styles.roomUrl}>
           {roomUrl}
         </Text>
+        <Pressable
+          accessibilityRole='button'
+          accessibilityLabel='Copy room link'
+          onPress={() => void copyRoomUrl()}
+          style={({ pressed }) => [styles.copyButton, pressed && styles.pressed]}
+        >
+          {copied ? (
+            <Check color={colors.success} size={16} />
+          ) : (
+            <Copy color={colors.foreground} size={16} />
+          )}
+          <Text style={styles.copyButtonText}>{copied ? 'Copied' : 'Copy link'}</Text>
+        </Pressable>
         <Pressable
           accessibilityRole='button'
           onPress={shareRoomUrl}
@@ -101,6 +126,17 @@ const styles = StyleSheet.create({
   cardBody: { gap: 12, padding: 16 },
   cardText: { color: colors.foreground, fontSize: 13, lineHeight: 20 },
   roomUrl: { fontFamily: 'monospace', color: colors.mutedForeground, fontSize: 12 },
+  copyButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    borderRadius: 6,
+    paddingVertical: 12,
+  },
+  copyButtonText: { color: colors.foreground, fontSize: 14, fontWeight: '500' },
   shareButton: {
     flexDirection: 'row',
     alignItems: 'center',

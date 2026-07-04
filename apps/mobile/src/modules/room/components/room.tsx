@@ -11,20 +11,25 @@ import {
 } from '@tether/client-runtime/modules/room';
 import { useKeepAwake } from 'expo-keep-awake';
 import {
+  Bluetooth,
+  Check,
+  Headphones,
   MessageSquare,
   Mic,
   MicOff,
   PhoneOff,
   SendHorizontal,
   ShieldCheck,
+  Smartphone,
   User,
   Video,
   VideoOff,
   Volume1,
   Volume2,
+  VolumeX,
   X,
 } from 'lucide-react-native';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import {
   FlatList,
   KeyboardAvoidingView,
@@ -37,16 +42,19 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import InCallManager from 'react-native-incall-manager';
-import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
+import { GestureDetector } from 'react-native-gesture-handler';
+import Animated from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { RTCView, type MediaStream } from 'react-native-webrtc';
 
 import { LogoMark, Wordmark } from '@/components/logo';
 import { colors, mono } from '@/lib/theme';
 
+import { AUDIO_ROUTE_LABEL, type AudioRoute } from '../audio-output';
+import { useCallAudioRouting } from '../hooks/use-call-audio-routing';
 import { usePeerConnection } from '../hooks/use-peer-connection';
+import { usePinnedDraggableTile } from '../hooks/use-pinned-draggable-tile';
+import { useRemoteAudioVolume } from '../hooks/use-remote-audio-volume';
 import { mediaStreamValue } from '../peer-session/platform';
 
 // The dot stays static here; the web's pulse animation has no cheap RN equivalent.
@@ -143,7 +151,9 @@ export function CallScreen({
   const remoteStream = remoteStreamHandle === null ? null : mediaStreamValue(remoteStreamHandle);
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
-  const [speakerOn, setSpeakerOn] = useState(true);
+  const [remoteAudioOn, setRemoteAudioOn] = useState(true);
+  const [audioOutputOpen, setAudioOutputOpen] = useState(false);
+  const { availableAudioRoutes, selectedAudioRoute, selectAudioRoute } = useCallAudioRouting();
   const [chatOpen, setChatOpen] = useState(false);
   const [readCount, setReadCount] = useState(view.messages.length);
   // Compared against view.sas, so a new code (reconnect) is unconfirmed by construction.
@@ -155,17 +165,7 @@ export function CallScreen({
   const isConnected = view.status === 'connected';
   const canChat = isConnected && view.chatReady;
 
-  // Route call audio through the loudspeaker, like the web defaults to system
-  // output. The try guards a dev client built without the native module.
-  useEffect(() => {
-    try {
-      InCallManager.start({ media: 'video' });
-      InCallManager.setForceSpeakerphoneOn(true);
-    } catch {
-      return;
-    }
-    return () => InCallManager.stop();
-  }, []);
+  useRemoteAudioVolume(remoteStream, remoteAudioOn);
 
   const presentation = peerSessionStatusPresentation(view.status);
   const handleLeave = () => {
@@ -189,16 +189,14 @@ export function CallScreen({
 
     setCamOn(enabled);
   };
-  const handleSpeakerToggle = () => {
-    const enabled = !speakerOn;
-
+  const handleAudioRouteChange = async (route: AudioRoute) => {
     try {
-      InCallManager.setForceSpeakerphoneOn(enabled);
+      await selectAudioRoute(route);
+      setRemoteAudioOn(true);
+      setAudioOutputOpen(false);
     } catch {
-      return;
+      // Keep the selector open so the user can retry or choose another route.
     }
-
-    setSpeakerOn(enabled);
   };
   const closeChat = () => {
     setChatOpen(false);
@@ -302,11 +300,14 @@ export function CallScreen({
           )}
         </ControlButton>
         <ControlButton
-          label={speakerOn ? 'Switch to earpiece' : 'Switch to speaker'}
+          label='Audio output'
           caption='out'
-          onPress={handleSpeakerToggle}
+          danger={!remoteAudioOn}
+          onPress={() => setAudioOutputOpen(true)}
         >
-          {speakerOn ? (
+          {!remoteAudioOn ? (
+            <VolumeX color={colors.destructive} size={22} />
+          ) : selectedAudioRoute === 'SPEAKER_PHONE' ? (
             <Volume2 color={colors.foreground} size={22} />
           ) : (
             <Volume1 color={colors.foreground} size={22} />
@@ -325,6 +326,19 @@ export function CallScreen({
         </ControlButton>
       </View>
 
+      <AudioOutputModal
+        open={audioOutputOpen}
+        availableRoutes={availableAudioRoutes}
+        selectedRoute={selectedAudioRoute}
+        remoteAudioOn={remoteAudioOn}
+        onClose={() => setAudioOutputOpen(false)}
+        onSelectRoute={(route) => void handleAudioRouteChange(route)}
+        onTurnOff={() => {
+          setRemoteAudioOn(false);
+          setAudioOutputOpen(false);
+        }}
+      />
+
       <ChatModal
         open={chatOpen}
         onClose={closeChat}
@@ -333,6 +347,90 @@ export function CallScreen({
         sendMessage={sendMessage}
       />
     </SafeAreaView>
+  );
+}
+
+function AudioRouteIcon({ route }: { readonly route: AudioRoute }) {
+  switch (route) {
+    case 'SPEAKER_PHONE':
+      return <Volume2 color={colors.foreground} size={18} />;
+    case 'EARPIECE':
+      return <Smartphone color={colors.foreground} size={18} />;
+    case 'WIRED_HEADSET':
+      return <Headphones color={colors.foreground} size={18} />;
+    case 'BLUETOOTH':
+      return <Bluetooth color={colors.foreground} size={18} />;
+  }
+}
+
+function AudioOutputModal({
+  open,
+  availableRoutes,
+  selectedRoute,
+  remoteAudioOn,
+  onClose,
+  onSelectRoute,
+  onTurnOff,
+}: {
+  readonly open: boolean;
+  readonly availableRoutes: readonly AudioRoute[];
+  readonly selectedRoute: AudioRoute;
+  readonly remoteAudioOn: boolean;
+  readonly onClose: () => void;
+  readonly onSelectRoute: (route: AudioRoute) => void;
+  readonly onTurnOff: () => void;
+}) {
+  return (
+    <Modal
+      visible={open}
+      transparent
+      statusBarTranslucent
+      navigationBarTranslucent
+      animationType='fade'
+      onRequestClose={onClose}
+    >
+      <View style={styles.outputBackdrop}>
+        <Pressable
+          accessibilityLabel='Close audio output'
+          onPress={onClose}
+          style={styles.outputScrim}
+        />
+        <View accessibilityRole='menu' style={styles.outputSheet}>
+          <View style={styles.outputHeader}>
+            <Text style={styles.outputTitle}>Audio output</Text>
+            <Pressable accessibilityLabel='Close audio output' onPress={onClose} hitSlop={8}>
+              <X color={colors.mutedForeground} size={18} />
+            </Pressable>
+          </View>
+          {availableRoutes.map((route) => {
+            const selected = remoteAudioOn && route === selectedRoute;
+            return (
+              <Pressable
+                key={route}
+                accessibilityRole='radio'
+                accessibilityState={{ checked: selected }}
+                onPress={() => onSelectRoute(route)}
+                style={({ pressed }) => [styles.outputOption, pressed && styles.pressed]}
+              >
+                <AudioRouteIcon route={route} />
+                <Text style={styles.outputOptionText}>{AUDIO_ROUTE_LABEL[route]}</Text>
+                {selected && <Check color={colors.success} size={18} />}
+              </Pressable>
+            );
+          })}
+          <Pressable
+            accessibilityRole='radio'
+            accessibilityState={{ checked: !remoteAudioOn }}
+            onPress={onTurnOff}
+            style={({ pressed }) => [styles.outputOption, pressed && styles.pressed]}
+          >
+            <VolumeX color={colors.destructive} size={18} />
+            <Text style={styles.outputOptionText}>Off</Text>
+            {!remoteAudioOn && <Check color={colors.success} size={18} />}
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -355,14 +453,6 @@ function ChatModal({
   const [sheetHeight, setSheetHeight] = useState(windowHeight * 0.55);
   const canSend = canChat && draft.trim().length > 0;
 
-  // Android shortens the reported window while the keyboard is visible. Keep
-  // the pre-keyboard height so the sheet moves instead of shrinking behind it.
-  useEffect(() => {
-    if (!open) {
-      setSheetHeight(windowHeight * 0.55);
-    }
-  }, [open, windowHeight]);
-
   const handleSend = () => {
     const message = draft.trim();
     if (message.length === 0 || !canChat) {
@@ -381,6 +471,9 @@ function ChatModal({
       navigationBarTranslucent
       animationType='none'
       onRequestClose={onClose}
+      // Capture the pre-keyboard height when the sheet opens. Android then
+      // shortens the reported window without shrinking the sheet behind it.
+      onShow={() => setSheetHeight(windowHeight * 0.55)}
     >
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -465,7 +558,6 @@ function RemoteVideo({ stream }: { readonly stream: MediaStream }) {
 }
 
 const TILE_MARGIN = 12;
-const TILE_SNAP = { stiffness: 500, damping: 40 };
 
 function SelfPreview({
   stream,
@@ -483,43 +575,14 @@ function SelfPreview({
   const tileHeight = tileWidth / aspectRatio;
   const maxX = Math.max(stage.width - tileWidth - TILE_MARGIN, TILE_MARGIN);
   const maxY = Math.max(stage.height - tileHeight - TILE_MARGIN, TILE_MARGIN);
-  // Off-screen until the stage is measured, so the first pin lands bottom-right.
-  const x = useSharedValue(10_000);
-  const y = useSharedValue(10_000);
-  const startX = useSharedValue(0);
-  const startY = useSharedValue(0);
-  const scale = useSharedValue(1);
-
-  // Pin to the nearest corner on first measure and whenever the stage resizes.
-  useEffect(() => {
-    if (stage.width === 0 || stage.height === 0) {
-      return;
-    }
-    x.value = x.value * 2 + tileWidth < stage.width ? TILE_MARGIN : maxX;
-    y.value = y.value * 2 + tileHeight < stage.height ? TILE_MARGIN : maxY;
-  }, [stage.width, stage.height, tileWidth, tileHeight, maxX, maxY, x, y]);
-
-  const pan = Gesture.Pan()
-    .onStart(() => {
-      startX.value = x.value;
-      startY.value = y.value;
-      scale.value = withSpring(1.04, TILE_SNAP);
-    })
-    .onUpdate((event) => {
-      x.value = Math.min(Math.max(startX.value + event.translationX, TILE_MARGIN), maxX);
-      y.value = Math.min(Math.max(startY.value + event.translationY, TILE_MARGIN), maxY);
-    })
-    .onEnd(() => {
-      x.value = withSpring(x.value * 2 + tileWidth < stage.width ? TILE_MARGIN : maxX, TILE_SNAP);
-      y.value = withSpring(y.value * 2 + tileHeight < stage.height ? TILE_MARGIN : maxY, TILE_SNAP);
-    })
-    .onFinalize(() => {
-      scale.value = withSpring(1, TILE_SNAP);
-    });
-
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: x.value }, { translateY: y.value }, { scale: scale.value }],
-  }));
+  const { pan, animatedStyle } = usePinnedDraggableTile({
+    stage,
+    tileWidth,
+    tileHeight,
+    maxX,
+    maxY,
+    margin: TILE_MARGIN,
+  });
 
   return (
     <GestureDetector gesture={pan}>
@@ -760,13 +823,14 @@ const styles = StyleSheet.create({
   controls: {
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: 12,
+    gap: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.border,
-    padding: 16,
+    padding: 12,
   },
   controlButton: {
-    width: 64,
+    flex: 1,
+    maxWidth: 64,
     height: 60,
     alignItems: 'center',
     justifyContent: 'center',
@@ -786,6 +850,40 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     backgroundColor: colors.brand,
   },
+  outputBackdrop: { flex: 1, justifyContent: 'flex-end' },
+  outputScrim: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  outputSheet: {
+    backgroundColor: colors.background,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    borderTopLeftRadius: 6,
+    borderTopRightRadius: 6,
+    paddingBottom: 16,
+  },
+  outputHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+    padding: 16,
+  },
+  outputTitle: { ...mono, color: colors.foreground, fontSize: 11 },
+  outputOption: {
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 20,
+  },
+  outputOptionText: { flex: 1, color: colors.foreground, fontSize: 14 },
   chatBackdrop: { flex: 1, justifyContent: 'flex-end' },
   chatScrim: {
     position: 'absolute',

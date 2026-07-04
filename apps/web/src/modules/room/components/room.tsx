@@ -49,21 +49,16 @@ import {
   X,
 } from 'lucide-react';
 import { motion, useMotionValue, animate } from 'motion/react';
-import {
-  type ReactNode,
-  type RefObject,
-  type SubmitEvent,
-  useEffect,
-  useEffectEvent,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from 'react';
+import { type ReactNode, type RefObject, type SubmitEvent, useRef, useState } from 'react';
 
 import { LogoMark, Wordmark } from '@/components/logo';
 import { useViewportAspectRatio } from '@/hooks/use-viewport-aspect-ratio';
 
+import { useAudioOutputDevices } from '../hooks/use-audio-output-devices';
+import { useChatAutoScroll } from '../hooks/use-chat-auto-scroll';
 import { usePeerConnection } from '../hooks/use-peer-connection';
+import { usePinnedDraggableTile, type TileCorner } from '../hooks/use-pinned-draggable-tile';
+import { useScreenWakeLock } from '../hooks/use-screen-wake-lock';
 import { mediaStreamValue } from '../peer-session/platform';
 
 const INDICATOR_TONE_CLASS = {
@@ -187,7 +182,6 @@ export function CallScreen({
   const [chatOpen, setChatOpen] = useState(false);
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
-  const [audioOutputs, setAudioOutputs] = useState<readonly MediaDeviceInfo[]>([]);
   const [sinkId, setSinkId] = useState('');
   const [speakerOn, setSpeakerOn] = useState(true);
   const deviceAspectRatio = useViewportAspectRatio();
@@ -200,24 +194,9 @@ export function CallScreen({
   const messageCount = view.messages.length;
   const hasUnread = !chatOpen && messageCount > readCount;
 
-  useEffect(() => {
-    if (chatOpen) {
-      messageListEndRef.current?.scrollIntoView({ block: 'end' });
-    }
-  }, [chatOpen, messageCount]);
-
-  // Labels are only populated once mic permission is granted, so re-enumerate
-  // when the local stream arrives and on any device hot-plug.
-  useEffect(() => {
-    const refresh = () => {
-      void navigator.mediaDevices.enumerateDevices().then((devices) => {
-        setAudioOutputs(devices.filter((device) => device.kind === 'audiooutput'));
-      });
-    };
-    refresh();
-    navigator.mediaDevices.addEventListener('devicechange', refresh);
-    return () => navigator.mediaDevices.removeEventListener('devicechange', refresh);
-  }, [localStream]);
+  useScreenWakeLock();
+  useChatAutoScroll(messageListEndRef, chatOpen, messageCount);
+  const audioOutputs = useAudioOutputDevices(localStream);
 
   const handleAudioOutputChange = (value: string) => {
     if (value === SPEAKER_OFF) {
@@ -511,6 +490,21 @@ export function CallScreen({
   );
 }
 
+function attachMediaStreamVideo(
+  video: HTMLVideoElement | null,
+  stream: MediaStream | null,
+  sinkId = '',
+) {
+  if (video === null) {
+    return;
+  }
+
+  video.srcObject = stream;
+  if (sinkId !== '' && typeof video.setSinkId === 'function') {
+    void video.setSinkId(sinkId).catch(() => {});
+  }
+}
+
 function RemoteVideo({
   stream,
   sinkId,
@@ -520,28 +514,10 @@ function RemoteVideo({
   readonly sinkId: string;
   readonly muted: boolean;
 }) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-
-  useEffect(() => {
-    const video = videoRef.current;
-    if (video === null) {
-      return;
-    }
-    video.srcObject = stream;
-  }, [stream]);
-
-  useEffect(() => {
-    const video = videoRef.current;
-    if (video === null || sinkId === '' || typeof video.setSinkId !== 'function') {
-      return;
-    }
-    void video.setSinkId(sinkId).catch(() => {});
-  }, [sinkId]);
-
   return (
     // oxlint-disable-next-line jsx-a11y/media-has-caption -- live call has no captions
     <video
-      ref={videoRef}
+      ref={(video) => attachMediaStreamVideo(video, stream, sinkId)}
       aria-label='Remote video'
       autoPlay
       muted={muted}
@@ -608,8 +584,6 @@ function AudioOutputControl({
   );
 }
 
-type TileCorner = 'tl' | 'tr' | 'bl' | 'br';
-
 const TILE_MARGIN = 16;
 const TILE_SNAP = { type: 'spring', stiffness: 500, damping: 40 } as const;
 
@@ -623,36 +597,9 @@ function DraggableSelfPreview({
   readonly children: ReactNode;
 }) {
   const tileRef = useRef<HTMLDivElement>(null);
-  const cornerRef = useRef<TileCorner>('br');
   const x = useMotionValue(0);
   const y = useMotionValue(0);
-
-  const cornerOffset = (corner: TileCorner) => {
-    const tile = tileRef.current;
-    // offsetParent, not boundaryRef: the ancestor ref isn't attached yet during the mount layout effect.
-    const boundary = tile?.offsetParent as HTMLElement | null;
-    if (tile === null || boundary === null) {
-      return { x: 0, y: 0 };
-    }
-    const maxX = boundary.clientWidth - tile.offsetWidth - TILE_MARGIN;
-    const maxY = boundary.clientHeight - tile.offsetHeight - TILE_MARGIN;
-    return {
-      x: corner === 'tl' || corner === 'bl' ? TILE_MARGIN : maxX,
-      y: corner === 'tl' || corner === 'tr' ? TILE_MARGIN : maxY,
-    };
-  };
-
-  const onResize = useEffectEvent(() => {
-    const offset = cornerOffset(cornerRef.current);
-    x.set(offset.x);
-    y.set(offset.y);
-  });
-
-  useLayoutEffect(() => {
-    onResize();
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
+  const { cornerRef, cornerOffset } = usePinnedDraggableTile(tileRef, x, y, TILE_MARGIN);
 
   const snapToNearestCorner = () => {
     const tile = tileRef.current;
@@ -699,20 +646,10 @@ function SelfVideo({
   readonly cameraOn: boolean;
   readonly selfId: string;
 }) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-
-  useEffect(() => {
-    const video = videoRef.current;
-    if (video === null) {
-      return;
-    }
-    video.srcObject = stream;
-  }, [stream]);
-
   return (
     <>
       <video
-        ref={videoRef}
+        ref={(video) => attachMediaStreamVideo(video, stream)}
         aria-label='Local video preview'
         autoPlay
         muted
