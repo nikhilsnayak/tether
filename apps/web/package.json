@@ -3,6 +3,9 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
+  "exports": {
+    "./app": "./src/app.tsx"
+  },
   "scripts": {
     "dev": "vite --host",
     "build": "vite build",
@@ -12,7 +15,7 @@
     "@effect/atom-react": "catalog:",
     "@rolldown/plugin-babel": "^0.2.3",
     "@tailwindcss/vite": "catalog:",
-    "@tanstack/devtools-vite": "^0.8.1",
+    "@tanstack/devtools-vite": "catalog:",
     "@tanstack/react-devtools": "^0.10.8",
     "@tanstack/react-router": "^1.170.17",
     "@tanstack/react-router-devtools": "^1.167.0",

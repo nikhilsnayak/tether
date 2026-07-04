@@ -44,7 +44,7 @@ Tether separates signaling from call content:
 - Audio, video, and chat are encrypted by WebRTC. They normally travel directly between callers; when TURN is configured, the relay forwards encrypted packets.
 - Rooms and signaling state are held in memory and removed when callers leave. Tether has no account system, call history, or message database.
 - Each room admits at most two peers. Private session tokens authorize signaling and leave operations after a caller joins.
-- The server restricts WebSocket origins, validates RPC payloads, rate-limits signaling per member, and caps live rooms.
+- The server validates RPC payloads, rate-limits signaling per member, and caps live rooms.
 
 The safety code is meaningful only when both callers compare it through a separate trusted channel, such as reading it aloud. It does not protect a compromised browser, device, or copy of the client application.
 

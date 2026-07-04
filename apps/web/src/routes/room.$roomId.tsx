@@ -10,6 +10,8 @@ import { Suspense, useState } from 'react';
 import { generatePeerId } from '@/lib/utils';
 import { CallErrorScreen, CallLoadingScreen, CallScreen } from '@/modules/room/components/room';
 
+const DEFAULT_WEB_URL = 'https://tether.nikhilsnayak.dev';
+
 export const Route = createFileRoute('/room/$roomId')({
   validateSearch: (search: Record<string, unknown>) => ({
     invite: search.invite === true || search.invite === 'true' ? true : undefined,
@@ -65,7 +67,13 @@ function RoomInviteCard({
     return null;
   }
 
-  const roomUrl = new URL(`/room/${encodeURIComponent(roomId)}`, window.location.origin).href;
+  const roomUrl = new URL(
+    `/room/${encodeURIComponent(roomId)}`,
+    import.meta.env.VITE_WEB_URL ??
+      (window.location.protocol === 'http:' || window.location.protocol === 'https:'
+        ? window.location.origin
+        : DEFAULT_WEB_URL),
+  ).href;
   const canShare = typeof navigator.share === 'function';
 
   const copyRoomUrl = async () => {

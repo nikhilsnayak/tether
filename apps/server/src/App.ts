@@ -2,7 +2,6 @@ import { Config, Effect, Layer } from 'effect';
 import { HttpRouter, HttpServerResponse } from 'effect/unstable/http';
 import { RpcSerialization, RpcServer } from 'effect/unstable/rpc';
 
-import { websocketOriginGuard } from './lib/WebSocketOriginGuard';
 import { RpcLive } from './Rpc';
 
 const HealthRoute = HttpRouter.add('GET', '/health', HttpServerResponse.text('OK'));
@@ -15,10 +14,7 @@ const HttpSecurityLive = Layer.unwrap(
 
     const allowedOrigins = origins.split(',').map((origin) => origin.trim());
 
-    return Layer.mergeAll(
-      HttpRouter.cors({ allowedOrigins }),
-      HttpRouter.middleware(websocketOriginGuard(allowedOrigins), { global: true }),
-    );
+    return HttpRouter.cors({ allowedOrigins });
   }),
 );
 

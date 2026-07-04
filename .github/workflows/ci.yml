@@ -30,6 +30,9 @@ jobs:
       - name: Format check
         run: bun run fmt:check
 
+      - name: Build
+        run: bun run build
+
       # `bun run test` (turbo test) includes the e2e Playwright suite, which
       # launches Chromium against the dev server + web app.
       - name: Install Playwright browser
