@@ -22,12 +22,14 @@
 </p>
 
 > [!NOTE]
-> Tether is a production beta. The hosted web application supports real cross-network calls,
-> while the mobile client remains under development.
+> Tether is a production beta. The hosted web application supports real cross-network calls.
+> The Android client has reached feature parity and is distributed as an Expo development build
+> while it is validated for release.
 
 ## Features
 
 - **Private rooms for two.** Create a short room code, share the invite link, and connect without an account or lobby.
+- **Web and Android clients.** The same room works from a browser or the native app, and room links open directly in the app when it is installed (Android App Links).
 - **Peer-to-peer video and audio.** Camera and microphone media use WebRTC, with in-call mic, camera, speaker, and audio-output controls.
 - **Ephemeral chat.** Messages travel over the call's encrypted WebRTC data channel and disappear when the session ends.
 - **Verifiable safety codes.** Both callers can compare a code derived from the negotiated DTLS fingerprints to detect signaling-path fingerprint substitution.
@@ -59,7 +61,7 @@ flowchart LR
 
 The Bun server exposes an Effect RPC endpoint over WebSocket. A streaming `OpenRoomSession` call represents both room membership and the server-to-client event channel; unary RPCs carry ICE and session-description signals and handle explicit departure.
 
-On the client, room events, WebRTC callbacks, timers, and UI commands enter one serialized peer-session actor. That actor owns negotiation state and scoped resources, preventing concurrent callbacks from racing connection state. The implementation is React-free and browser-neutral; the web app supplies the WebRTC and UI adapters.
+On the client, room events, WebRTC callbacks, timers, and UI commands enter one serialized peer-session actor. That actor owns negotiation state and scoped resources, preventing concurrent callbacks from racing connection state. The implementation is React-free and platform-neutral; the web and mobile apps each supply a thin WebRTC adapter and UI on top of the shared runtime.
 
 ## Quick start
 
@@ -104,6 +106,26 @@ Set all three TURN variables together. The current server distributes operator-m
 
 Production browser deployments require HTTPS and a corresponding `wss://` signaling URL for camera and microphone access.
 
+### Mobile
+
+| Variable                 | Default                                    | Purpose                                          |
+| ------------------------ | ------------------------------------------ | ------------------------------------------------ |
+| `EXPO_PUBLIC_SERVER_URL` | `wss://tether-server.nikhilsnayak.dev/rpc` | Full WebSocket URL of the signaling RPC endpoint |
+| `EXPO_PUBLIC_WEB_URL`    | `https://tether.nikhilsnayak.dev`          | Web origin used for shareable room links         |
+
+The app uses `react-native-webrtc`, so it runs in an Expo development build rather than Expo Go:
+
+```sh
+cd apps/mobile
+cp .env.example .env
+bunx eas-cli build --profile development --platform android
+bun run dev
+```
+
+Room links open in the app through Android App Links. The web deployment serves the matching
+[`assetlinks.json`](apps/web/public/.well-known/assetlinks.json), which must list the SHA-256
+fingerprint of the Android signing certificate (`bunx eas-cli credentials -p android`).
+
 ## Architecture
 
 Tether is a Bun workspace managed with Turborepo.
@@ -112,7 +134,7 @@ Tether is a Bun workspace managed with Turborepo.
 apps/
   server/          Bun HTTP server and Effect RPC signaling relay
   web/             React 19, Vite, TanStack Router, and browser WebRTC adapter
-  mobile/          Expo application shell; calling support is planned
+  mobile/          Expo + react-native-webrtc client on the shared peer-session runtime
 packages/
   contracts/       Shared Effect Schema models and RPC contracts
   client-runtime/  React-free peer-session actor and platform service interfaces
@@ -125,6 +147,7 @@ The main implementation boundaries are:
 - [`apps/server/src/modules/room`](apps/server/src/modules/room) — ephemeral room membership, authenticated signaling, limits, and event delivery.
 - [`packages/client-runtime/src/modules/room`](packages/client-runtime/src/modules/room) — negotiation, reconnection, safety-code derivation, chat, and resource ownership.
 - [`apps/web/src/modules/room`](apps/web/src/modules/room) — browser WebRTC integration and the call interface.
+- [`apps/mobile/src/modules/room`](apps/mobile/src/modules/room) — react-native-webrtc integration and the native call interface.
 - [`packages/contracts/src/modules/room`](packages/contracts/src/modules/room) — shared wire schemas and RPC definitions.
 
 ### Technology
@@ -134,6 +157,7 @@ The main implementation boundaries are:
 - Bun and Turborepo
 - React 19 and Vite
 - TanStack Router
+- Expo and React Native
 - Tailwind CSS 4
 - Vitest and Playwright
 - oxlint and oxfmt
@@ -161,7 +185,7 @@ The test suite covers room-capacity invariants, authenticated signaling, rate li
 
 ## Roadmap
 
-- Complete the native WebRTC adapter and mobile calling experience.
+- Release the Android app beyond internal development builds.
 - Add watch-along media as another negotiated track on the existing connection.
 - Support short-lived TURN credentials instead of static operator-managed secrets.
 

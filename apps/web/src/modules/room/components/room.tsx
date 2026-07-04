@@ -193,14 +193,11 @@ export function CallScreen({
   const deviceAspectRatio = useViewportAspectRatio();
   const stageRef = useRef<HTMLDivElement>(null);
   const [readCount, setReadCount] = useState(view.messages.length);
-  const [sasConfirmed, setSasConfirmed] = useState(false);
+  // Compared against view.sas, so a new code (reconnect) is unconfirmed by construction.
+  const [confirmedSas, setConfirmedSas] = useState<string | null>(null);
+  const sasConfirmed = view.sas !== null && confirmedSas === view.sas;
   const messageCount = view.messages.length;
   const hasUnread = !chatOpen && messageCount > readCount;
-
-  // Every new code (fresh session or reconnect) must be re-confirmed.
-  useEffect(() => {
-    setSasConfirmed(false);
-  }, [view.sas]);
 
   // Labels are only populated once mic permission is granted, so re-enumerate
   // when the local stream arrives and on any device hot-plug.
@@ -331,7 +328,7 @@ export function CallScreen({
                           <button
                             aria-label='Safety code'
                             type='button'
-                            onClick={() => setSasConfirmed(false)}
+                            onClick={() => setConfirmedSas(null)}
                           />
                         }
                       />
@@ -377,7 +374,7 @@ export function CallScreen({
                   <Button size='sm' variant='destructive' onClick={handleLeave}>
                     They don&apos;t match
                   </Button>
-                  <Button size='sm' onClick={() => setSasConfirmed(true)}>
+                  <Button size='sm' onClick={() => setConfirmedSas(view.sas)}>
                     We see the same code
                   </Button>
                 </div>
@@ -454,8 +451,10 @@ export function CallScreen({
             </DrawerClose>
           </DrawerHeader>
 
-          <ScrollArea className='flex-1'>
-            <div className='p-4'>
+          {/* column-reverse pins the scroller to the newest message; the DOM
+              stays chronological so reading order is unchanged. */}
+          <ScrollArea className='flex-1 **:data-[slot=scroll-area-viewport]:flex **:data-[slot=scroll-area-viewport]:flex-col-reverse'>
+            <div className='min-h-full p-4'>
               {view.messages.length === 0 ? (
                 <p className='text-muted-foreground mt-8 text-center text-sm'>
                   No messages yet. Say hello once you are connected.

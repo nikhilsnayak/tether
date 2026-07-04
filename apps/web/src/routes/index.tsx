@@ -2,7 +2,7 @@ import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { type SubmitEvent, useState } from 'react';
 
 import { LogoMark } from '@/components/logo';
-import { formatRoomCodeInput, generateRoomId } from '@/lib/utils';
+import { formatRoomCodeInput, generateRoomId, ROOM_CODE_LENGTH } from '@/lib/utils';
 
 export const Route = createFileRoute('/')({
   component: HomePage,
@@ -19,6 +19,7 @@ function PanelLabel({ children }: { readonly children: string }) {
 function HomePage() {
   const navigate = useNavigate();
   const [code, setCode] = useState('');
+  const canJoin = code.length === ROOM_CODE_LENGTH;
 
   const enterRoom = (roomId: string, showInvite = false) => {
     const trimmed = roomId.trim();
@@ -33,7 +34,9 @@ function HomePage() {
 
   const handleJoin = (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
-    enterRoom(code);
+    if (canJoin) {
+      enterRoom(code);
+    }
   };
 
   return (
@@ -89,7 +92,7 @@ function HomePage() {
             <button
               type='submit'
               form='join-form'
-              disabled={code.trim().length === 0}
+              disabled={!canJoin}
               className='border-border hover:border-primary hover:text-primary justify-self-start border px-6 py-2.5 text-sm tracking-wide uppercase transition-colors disabled:opacity-50 sm:justify-self-end'
             >
               Connect

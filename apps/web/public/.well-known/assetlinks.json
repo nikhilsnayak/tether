@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "dev.nikhilsnayak.tether",
+      "sha256_cert_fingerprints": [
+        "16:0D:28:7F:37:3F:15:98:86:3B:46:8B:DE:AD:BF:6C:DA:60:4A:64:FC:A1:E5:FD:39:2A:B7:BD:F5:23:0B:BD"
+      ]
+    }
+  }
+]

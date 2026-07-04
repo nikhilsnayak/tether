@@ -23,7 +23,12 @@ export default function Home() {
         <Text style={styles.panelLabel}>01 — New call</Text>
         <Pressable
           accessibilityRole='button'
-          onPress={() => router.push(`/room/${generateRoomId()}`)}
+          onPress={() =>
+            router.push({
+              pathname: '/room/[roomId]',
+              params: { roomId: generateRoomId(), invite: 'true' },
+            })
+          }
           style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}
         >
           <Text style={styles.primaryButtonText}>Start a call</Text>
