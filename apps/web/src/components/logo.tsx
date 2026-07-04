@@ -10,7 +10,7 @@ export function LogoMark({ className }: { readonly className?: string }) {
       aria-label='Tether'
       className={cn('size-6', className)}
     >
-      <path d='M9.4 14.6 14.6 9.4' stroke='currentColor' strokeWidth='2.4' strokeLinecap='round' />
+      <path d='M9.4 14.6 14.6 9.4' stroke='var(--brand)' strokeWidth='2.4' strokeLinecap='round' />
       <circle cx='7' cy='17' r='3.4' fill='currentColor' />
       <circle cx='7' cy='17' r='6' stroke='currentColor' strokeWidth='1.2' opacity='0.35' />
       <circle cx='17' cy='7' r='3.4' fill='currentColor' />

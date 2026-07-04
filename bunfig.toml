@@ -1,0 +1,4 @@
+[install]
+# Expo autolinking requires a single physical copy of each native module;
+# bun's isolated linker materializes one copy per peer context.
+linker = "hoisted"

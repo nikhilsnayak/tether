@@ -9,17 +9,34 @@
     "ios": "expo start --ios"
   },
   "dependencies": {
+    "@config-plugins/react-native-webrtc": "^15.0.1",
     "@tether/client-runtime": "workspace:*",
     "@tether/contracts": "workspace:*",
     "@types/react": "~19.2.2",
     "effect": "catalog:",
-    "expo": "^57.0.0",
-    "expo-router": "~57.0.2",
-    "expo-splash-screen": "~57.0.1",
-    "react": "19.2.3",
-    "react-dom": "19.2.3",
+    "expo": "~57.0.2",
+    "expo-constants": "~57.0.3",
+    "expo-dev-client": "~57.0.5",
+    "expo-linking": "~57.0.1",
+    "expo-router": "~57.0.3",
+    "expo-splash-screen": "~57.0.2",
+    "react": "catalog:",
+    "react-dom": "catalog:",
     "react-native": "0.86.0",
-    "react-native-safe-area-context": "~5.8.0",
+    "react-native-gesture-handler": "~2.32.0",
+    "react-native-reanimated": "4.5.0",
+    "react-native-safe-area-context": "~5.7.0",
+    "react-native-webrtc": "^124.0.7",
+    "react-native-worklets": "0.10.0",
     "typescript": "catalog:"
+  },
+  "expo": {
+    "doctor": {
+      "reactNativeDirectoryCheck": {
+        "exclude": [
+          "react-native-webrtc"
+        ]
+      }
+    }
   }
 }
