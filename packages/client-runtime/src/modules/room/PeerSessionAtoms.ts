@@ -1,12 +1,14 @@
-import {
-  PeerSessionEventSink,
-  initialPeerSessionView,
-  reducePeerSessionView,
-  type PeerSessionEvent,
-  type PeerSessionView,
-} from '@tether/client-runtime/modules/room';
 import { Effect, Layer } from 'effect';
 import { Atom, AtomRegistry } from 'effect/unstable/reactivity';
+
+import {
+  initialPeerSessionView,
+  reducePeerSessionView,
+  type MediaStreamHandle,
+  type PeerSessionEvent,
+  type PeerSessionView,
+} from './PeerSessionModel';
+import { PeerSessionEventSink } from './PeerSessionServices';
 
 // The sink writes state before the suspended UI subscribes. Keeping these atoms
 // alive preserves early events such as the offerer's immediate Connected event.
@@ -14,9 +16,11 @@ export const peerSessionViewAtom = Atom.make<PeerSessionView>(initialPeerSession
   Atom.keepAlive,
 );
 
-export const peerLocalStreamAtom = Atom.make<MediaStream | null>(null).pipe(Atom.keepAlive);
+// Streams stay wrapped in their opaque handles; each platform unwraps at the
+// video element that renders them.
+export const peerLocalStreamAtom = Atom.make<MediaStreamHandle | null>(null).pipe(Atom.keepAlive);
 
-export const peerRemoteStreamAtom = Atom.make<MediaStream | null>(null).pipe(Atom.keepAlive);
+export const peerRemoteStreamAtom = Atom.make<MediaStreamHandle | null>(null).pipe(Atom.keepAlive);
 
 const emitPeerSessionEvent = (event: PeerSessionEvent) => {
   switch (event._tag) {
@@ -31,9 +35,9 @@ const emitPeerSessionEvent = (event: PeerSessionEvent) => {
         ),
       );
     case 'LocalStreamReady':
-      return Atom.update(peerLocalStreamAtom, () => event.stream.value as MediaStream);
+      return Atom.update(peerLocalStreamAtom, () => event.stream);
     case 'RemoteStreamReady':
-      return Atom.update(peerRemoteStreamAtom, () => event.stream.value as MediaStream);
+      return Atom.update(peerRemoteStreamAtom, () => event.stream);
     case 'PeerDeparted':
     case 'TransportLost':
       return Atom.update(peerRemoteStreamAtom, () => null).pipe(

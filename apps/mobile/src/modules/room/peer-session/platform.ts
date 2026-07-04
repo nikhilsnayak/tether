@@ -1,4 +1,4 @@
-/** Browser service implementations required by the peer-session runtime. */
+/** react-native-webrtc adapter exposing native objects as opaque peer-session handles. */
 import {
   PeerSessionPlatform,
   PlatformError,
@@ -9,35 +9,49 @@ import {
 } from '@tether/client-runtime/modules/room';
 import { IceCandidateSignal, type IceServer } from '@tether/contracts/modules/room';
 import { Crypto, Effect, Layer } from 'effect';
+import * as ExpoCrypto from 'expo-crypto';
+import { MediaStream, RTCPeerConnection, mediaDevices } from 'react-native-webrtc';
 
-export const webCryptoLayer = Layer.succeed(
+export const nativeCryptoLayer = Layer.succeed(
   Crypto.Crypto,
   Crypto.make({
-    randomBytes: (size) => crypto.getRandomValues(new Uint8Array(size)),
+    randomBytes: (size) => ExpoCrypto.getRandomBytes(size),
     // Fresh copy: BufferSource rejects Uint8Array<ArrayBufferLike>.
     digest: (algorithm, data) =>
       Effect.promise(
-        async () => new Uint8Array(await crypto.subtle.digest(algorithm, new Uint8Array(data))),
+        async () =>
+          new Uint8Array(
+            await ExpoCrypto.digest(
+              algorithm as ExpoCrypto.CryptoDigestAlgorithm,
+              new Uint8Array(data),
+            ),
+          ),
       ),
   }),
 );
+
+// Not exported from the package index.
+type RTCDataChannel = ReturnType<RTCPeerConnection['createDataChannel']>;
 
 const peerConnectionValue = (handle: PeerConnectionHandle) => handle.value as RTCPeerConnection;
 const dataChannelValue = (handle: DataChannelHandle) => handle.value as RTCDataChannel;
 export const mediaStreamValue = (handle: MediaStreamHandle) => handle.value as MediaStream;
 
-const acquireLocalMedia = Effect.acquireRelease(
+export const acquireLocalMedia = Effect.acquireRelease(
   Effect.tryPromise({
     try: async (): Promise<MediaStreamHandle> => ({
-      value: await navigator.mediaDevices.getUserMedia({ video: true, audio: true }),
+      value: await mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: true }),
     }),
     catch: (cause) => new PlatformError({ operation: 'acquire-local-media', cause }),
   }),
   (handle) =>
     Effect.sync(() => {
-      for (const track of mediaStreamValue(handle).getTracks()) {
+      const mediaStream = mediaStreamValue(handle);
+      for (const track of mediaStream.getTracks()) {
         track.stop();
       }
+
+      mediaStream.release();
     }),
 );
 
@@ -61,13 +75,19 @@ const acquirePeerConnection = (iceServers: ReadonlyArray<IceServer>) =>
       }),
   );
 
+interface IceCandidateLike {
+  readonly candidate: string;
+  readonly sdpMid?: string | null;
+  readonly sdpMLineIndex?: number | null;
+}
+
 const observePeerConnection = Effect.fnUntraced(function* (
   peerConnectionHandle: PeerConnectionHandle,
   dispatch: PlatformEventDispatch,
 ) {
   const peerConnection = peerConnectionValue(peerConnectionHandle);
 
-  const handleIceCandidate = (event: RTCPeerConnectionIceEvent) => {
+  const handleIceCandidate = (event: { readonly candidate: IceCandidateLike | null }) => {
     if (event.candidate === null) return;
 
     dispatch({
@@ -75,14 +95,15 @@ const observePeerConnection = Effect.fnUntraced(function* (
       peerConnection: peerConnectionHandle,
       candidate: new IceCandidateSignal({
         candidate: event.candidate.candidate,
-        sdpMid: event.candidate.sdpMid,
-        sdpMLineIndex: event.candidate.sdpMLineIndex,
-        usernameFragment: event.candidate.usernameFragment,
+        sdpMid: event.candidate.sdpMid ?? null,
+        sdpMLineIndex: event.candidate.sdpMLineIndex ?? null,
+        // react-native-webrtc does not expose usernameFragment on candidates.
+        usernameFragment: null,
       }),
     });
   };
 
-  const handleDataChannel = (event: RTCDataChannelEvent) => {
+  const handleDataChannel = (event: { readonly channel: RTCDataChannel }) => {
     dispatch({
       _tag: 'RemoteDataChannel',
       peerConnection: peerConnectionHandle,
@@ -90,7 +111,7 @@ const observePeerConnection = Effect.fnUntraced(function* (
     });
   };
 
-  const handleTrack = (event: RTCTrackEvent) => {
+  const handleTrack = (event: { readonly streams: ReadonlyArray<MediaStream> }) => {
     const stream = event.streams[0];
     if (stream === undefined) return;
 
@@ -167,7 +188,7 @@ const observeDataChannel = Effect.fnUntraced(function* (
     });
   };
 
-  const handleMessage = (event: MessageEvent<unknown>) => {
+  const handleMessage = (event: { readonly data: unknown }) => {
     dispatch({
       _tag: 'DataChannelMessageReceived',
       dataChannel: dataChannelHandle,
@@ -202,7 +223,7 @@ const observeDataChannel = Effect.fnUntraced(function* (
   handleClose();
 });
 
-const webPeerSessionPlatform = PeerSessionPlatform.of({
+const nativePeerSessionPlatform = PeerSessionPlatform.of({
   acquirePeerConnection,
   acquireLocalMedia,
   addLocalTracks: (peerConnection, localStream) =>
@@ -225,7 +246,7 @@ const webPeerSessionPlatform = PeerSessionPlatform.of({
   dataChannelLabel: (dataChannel) => dataChannelValue(dataChannel).label,
   createOffer: (peerConnection) =>
     Effect.tryPromise({
-      try: () => peerConnectionValue(peerConnection).createOffer(),
+      try: () => peerConnectionValue(peerConnection).createOffer({}),
       catch: (cause) => new PlatformError({ operation: 'create-offer', cause }),
     }).pipe(Effect.map(({ sdp }) => ({ type: 'offer' as const, sdp }))),
   createAnswer: (peerConnection) =>
@@ -250,7 +271,6 @@ const webPeerSessionPlatform = PeerSessionPlatform.of({
           candidate: candidate.candidate,
           sdpMid: candidate.sdpMid,
           sdpMLineIndex: candidate.sdpMLineIndex,
-          usernameFragment: candidate.usernameFragment,
         }),
       catch: (cause) => new PlatformError({ operation: 'add-ice-candidate', cause }),
     }),
@@ -261,7 +281,7 @@ const webPeerSessionPlatform = PeerSessionPlatform.of({
     }),
 });
 
-export const webPeerSessionPlatformLayer = Layer.succeed(
+export const nativePeerSessionPlatformLayer = Layer.succeed(
   PeerSessionPlatform,
-  webPeerSessionPlatform,
+  nativePeerSessionPlatform,
 );

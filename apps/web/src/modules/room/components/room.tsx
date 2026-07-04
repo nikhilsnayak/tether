@@ -1,5 +1,13 @@
 import { useAtomValue } from '@effect/atom-react';
-import type { PeerSessionView, RoomSession } from '@tether/client-runtime/modules/room';
+import {
+  isPeerSessionErrorStatus,
+  peerLocalStreamAtom,
+  peerRemoteStreamAtom,
+  peerSessionStatusPresentation,
+  peerSessionViewAtom,
+  type PeerSessionStatusPresentation,
+  type RoomSession,
+} from '@tether/client-runtime/modules/room';
 import { Avatar, AvatarFallback } from '@tether/ui/components/avatar';
 import { Badge } from '@tether/ui/components/badge';
 import { Button } from '@tether/ui/components/button';
@@ -56,11 +64,17 @@ import { LogoMark, Wordmark } from '@/components/logo';
 import { useViewportAspectRatio } from '@/hooks/use-viewport-aspect-ratio';
 
 import { usePeerConnection } from '../hooks/use-peer-connection';
-import {
-  peerLocalStreamAtom,
-  peerRemoteStreamAtom,
-  peerSessionViewAtom,
-} from '../peer-session/state';
+import { mediaStreamValue } from '../peer-session/platform';
+
+const INDICATOR_TONE_CLASS = {
+  success: 'bg-success',
+  warning: 'bg-warning',
+  destructive: 'bg-destructive',
+  muted: 'bg-muted-foreground',
+} satisfies Record<PeerSessionStatusPresentation['tone'], string>;
+
+const statusIndicatorClassName = (presentation: PeerSessionStatusPresentation) =>
+  cn(INDICATOR_TONE_CLASS[presentation.tone], presentation.pulse && 'animate-pulse');
 
 function CallStatusScreen({
   indicatorClassName,
@@ -145,82 +159,6 @@ export function CallErrorScreen({
   );
 }
 
-const ERROR_STATUSES = new Set<PeerSessionView['status']>([
-  'room-full',
-  'peer-already-joined',
-  'disconnected',
-  'failed',
-]);
-
-function peerSessionStatusPresentation(status: PeerSessionView['status']): {
-  readonly indicatorClassName: string;
-  readonly label: string;
-  readonly hint: string;
-} {
-  switch (status) {
-    case 'connecting':
-      return {
-        indicatorClassName: 'animate-pulse bg-warning',
-        label: 'Connecting',
-        hint: 'Establishing a secure connection…',
-      };
-    case 'connected':
-      return {
-        indicatorClassName: 'bg-success',
-        label: 'Connected',
-        hint: 'You are connected.',
-      };
-    case 'reconnecting':
-      return {
-        indicatorClassName: 'animate-pulse bg-warning',
-        label: 'Reconnecting',
-        hint: 'Connection interrupted. Trying to recover…',
-      };
-    case 'transport-lost':
-      return {
-        indicatorClassName: 'bg-warning',
-        label: 'Connection dropped',
-        hint: 'Trying to get you reconnected. You can also leave and retry.',
-      };
-    case 'waiting-for-peer':
-      return {
-        indicatorClassName: 'animate-pulse bg-warning',
-        label: 'Waiting for the other person',
-        hint: 'Share this room to invite someone.',
-      };
-    case 'negotiation-stalled':
-      return {
-        indicatorClassName: 'bg-warning',
-        label: 'Taking longer than expected',
-        hint: 'Still connecting. You can leave and retry.',
-      };
-    case 'disconnected':
-      return {
-        indicatorClassName: 'bg-muted-foreground',
-        label: 'Connection lost',
-        hint: 'Lost contact with the room. Leave and rejoin to retry.',
-      };
-    case 'failed':
-      return {
-        indicatorClassName: 'bg-destructive',
-        label: 'Session failed',
-        hint: 'Something went wrong with the connection.',
-      };
-    case 'room-full':
-      return {
-        indicatorClassName: 'bg-destructive',
-        label: 'Room is full',
-        hint: 'This room already has two people.',
-      };
-    case 'peer-already-joined':
-      return {
-        indicatorClassName: 'bg-destructive',
-        label: 'Already joined',
-        hint: 'You already have this room open somewhere else, maybe another tab.',
-      };
-  }
-}
-
 function initials(id: string) {
   return (
     id
@@ -241,8 +179,10 @@ export function CallScreen({
     input: { roomId: session.roomId, selfId: session.selfId },
   });
   const view = useAtomValue(peerSessionViewAtom);
-  const localStream = useAtomValue(peerLocalStreamAtom);
-  const remoteStream = useAtomValue(peerRemoteStreamAtom);
+  const localStreamHandle = useAtomValue(peerLocalStreamAtom);
+  const remoteStreamHandle = useAtomValue(peerRemoteStreamAtom);
+  const localStream = localStreamHandle === null ? null : mediaStreamValue(localStreamHandle);
+  const remoteStream = remoteStreamHandle === null ? null : mediaStreamValue(remoteStreamHandle);
   const [draft, setDraft] = useState('');
   const [chatOpen, setChatOpen] = useState(false);
   const [micOn, setMicOn] = useState(true);
@@ -308,10 +248,10 @@ export function CallScreen({
     setCamOn(enabled);
   };
 
-  if (ERROR_STATUSES.has(view.status)) {
+  if (isPeerSessionErrorStatus(view.status)) {
     return (
       <CallStatusScreen
-        indicatorClassName={presentation.indicatorClassName}
+        indicatorClassName={statusIndicatorClassName(presentation)}
         pillLabel={presentation.label}
         icon={<AlertTriangle className='size-9' />}
         iconClassName='bg-destructive/15 text-destructive'
@@ -365,7 +305,10 @@ export function CallScreen({
                 className='border-border bg-background/70 flex min-w-0 items-center gap-2 rounded-md border px-3 py-1.5 backdrop-blur-sm max-sm:px-2'
               >
                 <span
-                  className={cn('size-2 shrink-0 rounded-full', presentation.indicatorClassName)}
+                  className={cn(
+                    'size-2 shrink-0 rounded-full',
+                    statusIndicatorClassName(presentation),
+                  )}
                 />
                 <span className='truncate font-mono text-[11px] tracking-[0.15em] uppercase max-sm:hidden'>
                   {presentation.label}
@@ -529,7 +472,7 @@ export function CallScreen({
                       >
                         {message.sender === 'self' ? 'you' : 'peer'}
                       </span>
-                      <p className='border-border border-l pl-3 text-sm wrap-break-word whitespace-pre-wrap'>
+                      <p className='border-border min-w-0 border-l pl-3 text-sm wrap-anywhere whitespace-pre-wrap'>
                         {message.text}
                       </p>
                     </li>

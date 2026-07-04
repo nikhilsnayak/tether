@@ -1,17 +1,46 @@
-import { describe, expect, it } from 'vitest';
+import { assert, describe, it } from '@effect/vitest';
+import { Crypto, Effect, Layer } from 'effect';
+import { expect } from 'vitest';
 
-import { formatRoomCodeInput, generatePeerId, generateRoomId } from './utils';
+import { formatRoomCodeInput, generatePeerId, generateRoomId } from './RoomCodes';
+
+// No DOM lib in this tsconfig, so the Web Crypto global is typed by hand.
+const webCryptoApi = (
+  globalThis as unknown as {
+    readonly crypto: {
+      readonly getRandomValues: <T extends Uint8Array>(array: T) => T;
+      readonly subtle: {
+        readonly digest: (algorithm: string, data: Uint8Array) => Promise<ArrayBuffer>;
+      };
+    };
+  }
+).crypto;
+
+const webCrypto = Layer.succeed(
+  Crypto.Crypto,
+  Crypto.make({
+    randomBytes: (size) => webCryptoApi.getRandomValues(new Uint8Array(size)),
+    digest: (algorithm, data) =>
+      Effect.promise(async () => new Uint8Array(await webCryptoApi.subtle.digest(algorithm, data))),
+  }),
+);
 
 describe('generateRoomId', () => {
-  it('produces the xxx-xxxx-xxx shape', () => {
-    expect(generateRoomId()).toMatch(/^[a-z]{3}-[a-z]{4}-[a-z]{3}$/);
-  });
+  it.effect('produces the xxx-xxxx-xxx shape', () =>
+    Effect.gen(function* () {
+      const roomId = yield* generateRoomId;
+      assert.match(roomId, /^[a-z]{3}-[a-z]{4}-[a-z]{3}$/);
+    }).pipe(Effect.provide(webCrypto)),
+  );
 });
 
 describe('generatePeerId', () => {
-  it('produces 12 lowercase letters', () => {
-    expect(generatePeerId()).toMatch(/^[a-z]{12}$/);
-  });
+  it.effect('produces 12 lowercase letters', () =>
+    Effect.gen(function* () {
+      const peerId = yield* generatePeerId;
+      assert.match(peerId, /^[a-z]{12}$/);
+    }).pipe(Effect.provide(webCrypto)),
+  );
 });
 
 describe('formatRoomCodeInput', () => {

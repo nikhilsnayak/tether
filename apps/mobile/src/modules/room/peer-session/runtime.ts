@@ -8,14 +8,14 @@ import { Atom } from 'effect/unstable/reactivity';
 
 import { appClientLayer } from '@/lib/app-client';
 
-import { webCryptoLayer, webPeerSessionPlatformLayer } from './platform';
+import { nativeCryptoLayer, nativePeerSessionPlatformLayer } from './platform';
 
 const peerSessionRuntime = Atom.runtime(
   Layer.mergeAll(
     appClientLayer,
-    webPeerSessionPlatformLayer,
+    nativePeerSessionPlatformLayer,
     peerSessionEventSinkLayer,
-    webCryptoLayer,
+    nativeCryptoLayer,
   ),
 );
 
