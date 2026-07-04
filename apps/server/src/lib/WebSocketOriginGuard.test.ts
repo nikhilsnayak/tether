@@ -32,10 +32,10 @@ describe('websocketOriginGuard', () => {
     }),
   );
 
-  it.effect('rejects a missing origin on the RPC endpoint', () =>
+  it.effect('allows a missing origin on the RPC endpoint for non-browser clients', () =>
     Effect.gen(function* () {
       const response = yield* runRequest('https://server.example/rpc');
-      assert.strictEqual(response.status, 403);
+      assert.strictEqual(response.status, 204);
     }),
   );
 
