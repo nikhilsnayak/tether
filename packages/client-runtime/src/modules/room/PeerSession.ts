@@ -827,8 +827,8 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
   const { iceServers } = yield* client
     .GetIceServers()
     .pipe(
-      Effect.catch(() =>
-        Effect.logWarning('Falling back to default ICE servers').pipe(
+      Effect.catch((error) =>
+        Effect.logWarning('Falling back to default ICE servers', error).pipe(
           Effect.as({ iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }] }),
         ),
       ),
@@ -916,14 +916,14 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
             }
 
             if (isPlatformError(error)) {
-              yield* Effect.logError('Peer session failed during platform operation').pipe(
+              yield* Effect.logError('Peer session failed during platform operation', error).pipe(
                 Effect.annotateLogs('operation', error.operation),
               );
               return yield* peerSessionEventSink.emit({ _tag: 'SessionFailed' });
             }
           }
 
-          yield* Effect.logError('Peer session failed');
+          yield* Effect.logError('Peer session failed', exit.cause);
           return yield* peerSessionEventSink.emit({ _tag: 'SessionFailed' });
         }
       }),
