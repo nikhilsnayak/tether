@@ -8,8 +8,8 @@ import {
 import { Effect, Layer } from 'effect';
 import { Atom, AtomRegistry } from 'effect/unstable/reactivity';
 
-// keepAlive: the sink writes these atoms before the suspended UI subscribes;
-// without it those early writes (e.g. the offerer's instant Connected) are lost.
+// The sink writes state before the suspended UI subscribes. Keeping these atoms
+// alive preserves early events such as the offerer's immediate Connected event.
 export const peerSessionViewAtom = Atom.make<PeerSessionView>(initialPeerSessionView).pipe(
   Atom.keepAlive,
 );

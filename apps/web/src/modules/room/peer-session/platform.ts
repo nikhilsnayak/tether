@@ -1,4 +1,4 @@
-/** Browser WebRTC adapter exposing native objects as opaque peer-session handles. */
+/** Browser service implementations required by the peer-session runtime. */
 import {
   PeerSessionPlatform,
   PlatformError,
@@ -8,7 +8,19 @@ import {
   type PlatformEventDispatch,
 } from '@tether/client-runtime/modules/room';
 import { IceCandidateSignal, type IceServer } from '@tether/contracts/modules/room';
-import { Effect, Layer } from 'effect';
+import { Crypto, Effect, Layer } from 'effect';
+
+export const webCryptoLayer = Layer.succeed(
+  Crypto.Crypto,
+  Crypto.make({
+    randomBytes: (size) => crypto.getRandomValues(new Uint8Array(size)),
+    // Fresh copy: BufferSource rejects Uint8Array<ArrayBufferLike>.
+    digest: (algorithm, data) =>
+      Effect.promise(
+        async () => new Uint8Array(await crypto.subtle.digest(algorithm, new Uint8Array(data))),
+      ),
+  }),
+);
 
 const peerConnectionValue = (handle: PeerConnectionHandle) => handle.value as RTCPeerConnection;
 const dataChannelValue = (handle: DataChannelHandle) => handle.value as RTCDataChannel;

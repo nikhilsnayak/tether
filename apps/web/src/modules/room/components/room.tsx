@@ -60,7 +60,7 @@ import {
   peerLocalStreamAtom,
   peerRemoteStreamAtom,
   peerSessionViewAtom,
-} from '../peer-session/view';
+} from '../peer-session/state';
 
 function PeerSessionStatusScreen({
   indicatorClassName,
