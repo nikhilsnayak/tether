@@ -192,12 +192,19 @@ export function CallScreen({
   const [speakerOn, setSpeakerOn] = useState(true);
   const deviceAspectRatio = useViewportAspectRatio();
   const stageRef = useRef<HTMLDivElement>(null);
+  const messageListEndRef = useRef<HTMLDivElement>(null);
   const [readCount, setReadCount] = useState(view.messages.length);
   // Compared against view.sas, so a new code (reconnect) is unconfirmed by construction.
   const [confirmedSas, setConfirmedSas] = useState<string | null>(null);
   const sasConfirmed = view.sas !== null && confirmedSas === view.sas;
   const messageCount = view.messages.length;
   const hasUnread = !chatOpen && messageCount > readCount;
+
+  useEffect(() => {
+    if (chatOpen) {
+      messageListEndRef.current?.scrollIntoView({ block: 'end' });
+    }
+  }, [chatOpen, messageCount]);
 
   // Labels are only populated once mic permission is granted, so re-enumerate
   // when the local stream arrives and on any device hot-plug.
@@ -432,7 +439,7 @@ export function CallScreen({
         }}
       >
         <DrawerContent>
-          <DrawerHeader className='relative border-b pr-14'>
+          <DrawerHeader className='relative shrink-0 border-b pr-14'>
             <DrawerTitle className='font-mono text-xs tracking-[0.2em] uppercase'>Chat</DrawerTitle>
             <DrawerDescription>
               Messages go straight to the other person and disappear when the call ends.
@@ -451,9 +458,7 @@ export function CallScreen({
             </DrawerClose>
           </DrawerHeader>
 
-          {/* column-reverse pins the scroller to the newest message; the DOM
-              stays chronological so reading order is unchanged. */}
-          <ScrollArea className='flex-1 **:data-[slot=scroll-area-viewport]:flex **:data-[slot=scroll-area-viewport]:flex-col-reverse'>
+          <ScrollArea className='min-h-0 flex-1'>
             <div className='min-h-full p-4'>
               {view.messages.length === 0 ? (
                 <p className='text-muted-foreground mt-8 text-center text-sm'>
@@ -478,10 +483,11 @@ export function CallScreen({
                   ))}
                 </ol>
               )}
+              <div ref={messageListEndRef} aria-hidden />
             </div>
           </ScrollArea>
 
-          <form className='flex gap-2 border-t p-4' onSubmit={handleSubmit}>
+          <form className='flex shrink-0 gap-2 border-t p-4' onSubmit={handleSubmit}>
             <Input
               aria-label='Message'
               disabled={!isConnected}
