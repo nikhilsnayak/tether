@@ -114,7 +114,7 @@ test('leaving a call and joining a new room starts with clean media', async ({
   }
 });
 
-test('a closed data channel reconnects with fresh peer connections', async ({
+test('a closed data channel disables chat without interrupting the call', async ({
   browser,
 }, testInfo) => {
   const baseURL = requireBaseURL(testInfo.project.use.baseURL);
@@ -126,6 +126,20 @@ test('a closed data channel reconnects with fresh peer connections', async ({
     const initialGuestConnections = await guest.evaluate(
       () => window.__tetherE2E.peerConnections.length,
     );
+    const safetyCode = (page: Page) => page.getByLabel('Safety code');
+    await Promise.all([
+      expect(safetyCode(host)).toBeVisible(),
+      expect(safetyCode(guest)).toBeVisible(),
+    ]);
+    const [hostCode, guestCode] = await Promise.all([
+      safetyCode(host).textContent(),
+      safetyCode(guest).textContent(),
+    ]);
+    expect(hostCode).toBe(guestCode);
+
+    await sendMessage(host, guest, 'message before chat closes');
+    const hostInput = host.getByRole('textbox', { name: 'Message' });
+    const guestInput = guest.getByRole('textbox', { name: 'Message' });
 
     await guest.evaluate(() => {
       const dataChannel = window.__tetherE2E.dataChannels.at(-1);
@@ -135,14 +149,20 @@ test('a closed data channel reconnects with fresh peer connections', async ({
       dataChannel.close();
     });
 
-    await expect
-      .poll(() => host.evaluate(() => window.__tetherE2E.peerConnections.length))
-      .toBeGreaterThan(initialHostConnections);
-    await expect
-      .poll(() => guest.evaluate(() => window.__tetherE2E.peerConnections.length))
-      .toBeGreaterThan(initialGuestConnections);
+    await Promise.all([expect(hostInput).toBeDisabled(), expect(guestInput).toBeDisabled()]);
     await Promise.all([expectConnected(host), expectConnected(guest)]);
-    await sendMessage(guest, host, 'message after reconnection');
+    await Promise.all([
+      expect(host.getByLabel('Remote video')).toBeVisible(),
+      expect(guest.getByLabel('Remote video')).toBeVisible(),
+    ]);
+    expect(await host.evaluate(() => window.__tetherE2E.peerConnections.length)).toBe(
+      initialHostConnections,
+    );
+    expect(await guest.evaluate(() => window.__tetherE2E.peerConnections.length)).toBe(
+      initialGuestConnections,
+    );
+    await expect(safetyCode(host)).toHaveText(hostCode ?? '');
+    await expect(safetyCode(guest)).toHaveText(guestCode ?? '');
   } finally {
     await cleanup();
   }

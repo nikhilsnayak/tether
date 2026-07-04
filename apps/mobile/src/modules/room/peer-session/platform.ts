@@ -122,27 +122,40 @@ const observePeerConnection = Effect.fnUntraced(function* (
     });
   };
 
-  // Tracks whether ICE connectivity has degraded so a return to 'connected' is
-  // reported as a restoration rather than the initial connect.
-  let interrupted = false;
+  // Distinguishes the initial connection from a recovery while rejecting
+  // duplicate and terminal native state notifications.
+  let observedConnectionState: 'initial' | 'connected' | 'interrupted' | 'failed' = 'initial';
   const handleConnectionStateChange = () => {
     switch (peerConnection.connectionState) {
       case 'failed':
+        if (observedConnectionState === 'failed') return;
+        observedConnectionState = 'failed';
         dispatch({
           _tag: 'PeerConnectionFailed',
           peerConnection: peerConnectionHandle,
         });
         return;
       case 'disconnected':
-        interrupted = true;
+        if (observedConnectionState !== 'connected') {
+          return;
+        }
+        observedConnectionState = 'interrupted';
         dispatch({
           _tag: 'PeerConnectionInterrupted',
           peerConnection: peerConnectionHandle,
         });
         return;
       case 'connected':
-        if (!interrupted) return;
-        interrupted = false;
+        if (observedConnectionState === 'connected' || observedConnectionState === 'failed') return;
+        if (observedConnectionState === 'initial') {
+          observedConnectionState = 'connected';
+          dispatch({
+            _tag: 'PeerConnectionConnected',
+            peerConnection: peerConnectionHandle,
+          });
+          return;
+        }
+        observedConnectionState = 'connected';
         dispatch({
           _tag: 'PeerConnectionRestored',
           peerConnection: peerConnectionHandle,

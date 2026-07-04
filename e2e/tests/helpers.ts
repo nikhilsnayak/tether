@@ -8,6 +8,7 @@ type WebRtcProbe = {
   addIceCandidateCalls: number;
   failNextIceCandidate: boolean;
   rejectedIceCandidates: number;
+  sasShownBeforeConnected: boolean;
 };
 
 declare global {
@@ -26,6 +27,7 @@ export const installWebRtcProbe = (context: BrowserContext) =>
       addIceCandidateCalls: 0,
       failNextIceCandidate: false,
       rejectedIceCandidates: 0,
+      sasShownBeforeConnected: false,
     };
     window.__tetherE2E = probe;
 
@@ -63,6 +65,18 @@ export const installWebRtcProbe = (context: BrowserContext) =>
       value: InstrumentedPeerConnection,
       writable: true,
     });
+
+    new MutationObserver(() => {
+      const safetyCheck = document.querySelector('[aria-label="Safety check"]');
+      if (
+        safetyCheck !== null &&
+        !probe.peerConnections.some(
+          (peerConnection) => peerConnection.connectionState === 'connected',
+        )
+      ) {
+        probe.sasShownBeforeConnected = true;
+      }
+    }).observe(document, { childList: true, subtree: true });
 
     const nativeGetUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
     navigator.mediaDevices.getUserMedia = async (constraints) => {

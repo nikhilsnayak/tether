@@ -33,7 +33,7 @@
 - **Peer-to-peer video and audio.** Camera and microphone media use WebRTC, with in-call mic, camera, speaker, and audio-output controls.
 - **Ephemeral chat.** Messages travel over the call's encrypted WebRTC data channel and disappear when the session ends.
 - **Verifiable safety codes.** Both callers can compare a code derived from the negotiated DTLS fingerprints to detect signaling-path fingerprint substitution.
-- **Resilient sessions.** Tether handles transient disconnects, failed peer connections, closed data channels, stale events, and stalled negotiation.
+- **Resilient sessions.** Tether reconnects failed peer connections, rejects stale events, recovers stalled negotiation, and isolates chat-channel closure without interrupting media or invalidating the safety code.
 - **Configurable connectivity.** STUN works out of the box; deployments can add TURN for networks that cannot establish a direct path.
 
 ## Privacy and security
@@ -181,7 +181,7 @@ bun run test
 bun run build
 ```
 
-The test suite covers room-capacity invariants, authenticated signaling, rate limits, ICE and TURN configuration, peer-session state transitions, resource cleanup, safety-code agreement, complete two-peer calls, chat, media controls, and reconnection.
+The test suite covers room-capacity invariants, authenticated signaling, rate limits, ICE and TURN configuration, peer-session state transitions, resource cleanup, safety-code agreement, complete two-peer calls, chat-channel isolation, media controls, and peer-connection recovery.
 
 ## Roadmap
 

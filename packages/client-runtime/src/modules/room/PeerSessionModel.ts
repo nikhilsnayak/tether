@@ -67,6 +67,7 @@ export type PlatformEvent =
       readonly data: unknown;
     }
   | { readonly _tag: 'PeerConnectionFailed'; readonly peerConnection: PeerConnectionHandle }
+  | { readonly _tag: 'PeerConnectionConnected'; readonly peerConnection: PeerConnectionHandle }
   | { readonly _tag: 'DataChannelClosed'; readonly dataChannel: DataChannelHandle }
   | { readonly _tag: 'PeerConnectionInterrupted'; readonly peerConnection: PeerConnectionHandle }
   | { readonly _tag: 'PeerConnectionRestored'; readonly peerConnection: PeerConnectionHandle }
@@ -107,6 +108,8 @@ export type PeerSessionEvent =
       readonly _tag: 'Connected';
       readonly peerId: PeerId;
     }
+  | { readonly _tag: 'ChatReady' }
+  | { readonly _tag: 'ChatUnavailable' }
   | {
       readonly _tag: 'ChatMessageAdded';
       readonly message: ChatMessage;
@@ -159,6 +162,7 @@ export interface PeerSessionView {
     | 'peer-already-joined'
     | 'waiting-for-peer';
   readonly messages: ReadonlyArray<ChatMessage>;
+  readonly chatReady: boolean;
   /** Safety code both peers compare aloud. */
   readonly sas: string | null;
 }
@@ -166,6 +170,7 @@ export interface PeerSessionView {
 export const initialPeerSessionView: PeerSessionView = {
   status: 'connecting',
   messages: [],
+  chatReady: false,
   sas: null,
 };
 
@@ -185,6 +190,10 @@ export const reducePeerSessionView = (
       return { ...view, status: 'waiting-for-peer' };
     case 'Connected':
       return { ...view, status: 'connected' };
+    case 'ChatReady':
+      return { ...view, chatReady: true };
+    case 'ChatUnavailable':
+      return { ...view, chatReady: false };
     case 'ChatMessageAdded':
       return { ...view, messages: [...view.messages, event.message] };
     case 'SasReady':
@@ -194,17 +203,18 @@ export const reducePeerSessionView = (
     case 'SessionFailed':
       return { ...view, status: 'failed' };
     case 'TransportLost':
-      return { ...view, status: 'transport-lost', sas: null };
+      return { ...view, status: 'transport-lost', chatReady: false, sas: null };
     case 'NegotiationStalled':
       return { ...view, status: 'negotiation-stalled' };
-    // Reconnects mint fresh certificates, so the old code is stale.
+    // Hide verification while transport is interrupted. A replacement
+    // connection mints fresh certificates; a transient recovery re-emits it.
     case 'PeerInterrupted':
-      return { ...view, status: 'reconnecting', sas: null };
+      return { ...view, status: 'reconnecting', chatReady: false, sas: null };
     case 'PeerRestored':
       return { ...view, status: 'connected' };
     case 'RoomJoinRejected':
       return { ...view, status: event.reason };
     case 'PeerDeparted':
-      return { ...view, status: 'waiting-for-peer', sas: null };
+      return { ...view, status: 'waiting-for-peer', chatReady: false, sas: null };
   }
 };

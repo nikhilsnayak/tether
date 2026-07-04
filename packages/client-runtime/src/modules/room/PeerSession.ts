@@ -40,6 +40,10 @@ type DataChannelState =
   | {
       readonly _tag: 'DataChannelOpen';
       readonly dataChannel: DataChannelHandle;
+    }
+  | {
+      readonly _tag: 'DataChannelClosed';
+      readonly dataChannel: DataChannelHandle;
     };
 
 type PeerSessionActorState =
@@ -55,11 +59,13 @@ type PeerSessionActorState =
       readonly generation: PeerConnectionGeneration;
       readonly peerId: PeerId;
       readonly role: PeerRole;
+      readonly peerConnectionState: 'connecting' | 'connected' | 'interrupted';
       readonly dataChannelState: DataChannelState;
       readonly remoteAnswerApplied: boolean;
       readonly reconnectAttempts: number;
-      /** Offerer only; kept to derive the SAS once the answer arrives. */
+      /** Handshake descriptions retained until the peer connection succeeds. */
       readonly offerSdp: string | null;
+      readonly answerSdp: string | null;
     }
   | { _tag: 'TransportLost'; peerId: PeerId };
 
@@ -176,7 +182,7 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
       const answer = yield* requireDescription(created, 'answer');
       yield* platform.setLocalDescription(peerConnection, answer);
       yield* sendSignal(new SessionDescriptionSignal(answer));
-      yield* emitSas(signal.sdp, answer.sdp);
+      return answer.sdp;
     },
   );
 
@@ -240,10 +246,12 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
         generation,
         peerId,
         role,
+        peerConnectionState: 'connecting',
         dataChannelState: { _tag: 'AwaitingRemoteDataChannel' },
         remoteAnswerApplied: false,
         reconnectAttempts: reconnectAttempts + 1,
         offerSdp: null,
+        answerSdp: null,
       };
       yield* armNegotiationDeadline(generation);
       return;
@@ -263,10 +271,12 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
       generation,
       peerId,
       role,
+      peerConnectionState: 'connecting',
       dataChannelState: { _tag: 'DataChannelConnecting', dataChannel },
       remoteAnswerApplied: false,
       reconnectAttempts: reconnectAttempts + 1,
       offerSdp,
+      answerSdp: null,
     };
   });
 
@@ -300,10 +310,12 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
       generation,
       peerId,
       role: 'offerer',
+      peerConnectionState: 'connecting',
       dataChannelState: { _tag: 'DataChannelConnecting', dataChannel },
       remoteAnswerApplied: false,
       reconnectAttempts: 0,
       offerSdp,
+      answerSdp: null,
     };
   });
 
@@ -319,10 +331,12 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
       generation,
       peerId,
       role: 'answerer',
+      peerConnectionState: 'connecting',
       dataChannelState: { _tag: 'AwaitingRemoteDataChannel' },
       remoteAnswerApplied: false,
       reconnectAttempts: 0,
       offerSdp: null,
+      answerSdp: null,
     };
     yield* armNegotiationDeadline(generation);
   });
@@ -341,7 +355,11 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
           if (state.role !== 'answerer') {
             return yield* Effect.logWarning('Ignored offer received in invalid role');
           }
-          yield* acceptOfferAndSendAnswer(state.generation.peerConnection, signal);
+          const answerSdp = yield* acceptOfferAndSendAnswer(
+            state.generation.peerConnection,
+            signal,
+          );
+          state = { ...state, offerSdp: signal.sdp, answerSdp };
           return;
         }
 
@@ -355,11 +373,7 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
           type: 'answer',
           sdp: signal.sdp,
         });
-        const { offerSdp } = state;
-        state = { ...state, remoteAnswerApplied: true };
-        if (offerSdp !== null) {
-          yield* emitSas(offerSdp, signal.sdp);
-        }
+        state = { ...state, remoteAnswerApplied: true, answerSdp: signal.sdp };
         return;
       }
       case '@tether/IceCandidateSignal':
@@ -490,17 +504,38 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
     }
   });
 
+  const handlePeerConnectionConnected = Effect.fnUntraced(function* (
+    peerConnection: PeerConnectionHandle,
+  ) {
+    if (
+      state._tag !== 'PeerKnown' ||
+      state.generation.peerConnection !== peerConnection ||
+      state.peerConnectionState !== 'connecting'
+    ) {
+      return;
+    }
+
+    state = { ...state, peerConnectionState: 'connected', reconnectAttempts: 0 };
+    yield* Effect.logInfo('Peer connection established');
+    yield* eventSink.emit({ _tag: 'Connected', peerId: state.peerId });
+    if (state.offerSdp !== null && state.answerSdp !== null) {
+      yield* emitSas(state.offerSdp, state.answerSdp);
+    }
+  });
+
   const handleDataChannelClosed = Effect.fnUntraced(function* (dataChannel: DataChannelHandle) {
     if (
       state._tag !== 'PeerKnown' ||
       state.dataChannelState._tag === 'AwaitingRemoteDataChannel' ||
+      state.dataChannelState._tag === 'DataChannelClosed' ||
       state.dataChannelState.dataChannel !== dataChannel
     ) {
       return;
     }
 
-    yield* Effect.logWarning('Data channel closed');
-    return yield* beginPeerReconnect();
+    state = { ...state, dataChannelState: { _tag: 'DataChannelClosed', dataChannel } };
+    yield* Effect.logWarning('Data channel closed; chat is unavailable');
+    yield* eventSink.emit({ _tag: 'ChatUnavailable' });
   });
 
   const handlePeerConnectionInterrupted = Effect.fnUntraced(function* (
@@ -509,11 +544,12 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
     if (
       state._tag !== 'PeerKnown' ||
       state.generation.peerConnection !== peerConnection ||
-      state.dataChannelState._tag !== 'DataChannelOpen'
+      state.peerConnectionState !== 'connected'
     ) {
       return;
     }
 
+    state = { ...state, peerConnectionState: 'interrupted' };
     yield* Effect.logWarning('Peer connection interrupted');
     yield* eventSink.emit({ _tag: 'PeerInterrupted', peerId: state.peerId });
   });
@@ -524,13 +560,20 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
     if (
       state._tag !== 'PeerKnown' ||
       state.generation.peerConnection !== peerConnection ||
-      state.dataChannelState._tag !== 'DataChannelOpen'
+      state.peerConnectionState !== 'interrupted'
     ) {
       return;
     }
 
+    state = { ...state, peerConnectionState: 'connected', reconnectAttempts: 0 };
     yield* Effect.logInfo('Peer connection restored');
     yield* eventSink.emit({ _tag: 'PeerRestored', peerId: state.peerId });
+    if (state.dataChannelState._tag === 'DataChannelOpen') {
+      yield* eventSink.emit({ _tag: 'ChatReady' });
+    }
+    if (state.offerSdp !== null && state.answerSdp !== null) {
+      yield* emitSas(state.offerSdp, state.answerSdp);
+    }
   });
 
   const handleDataChannelOpened = Effect.fnUntraced(function* (dataChannel: DataChannelHandle) {
@@ -553,10 +596,9 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
     state = {
       ...state,
       dataChannelState: { _tag: 'DataChannelOpen', dataChannel },
-      reconnectAttempts: 0,
     };
-    yield* Effect.logInfo('Peer connection established');
-    yield* eventSink.emit({ _tag: 'Connected', peerId: state.peerId });
+    yield* Effect.logInfo('Data channel opened');
+    yield* eventSink.emit({ _tag: 'ChatReady' });
   });
 
   const handleDataChannelMessage = Effect.fnUntraced(function* (
@@ -586,7 +628,7 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
     if (
       state._tag !== 'PeerKnown' ||
       state.generation.peerConnection !== peerConnection ||
-      state.dataChannelState._tag === 'DataChannelOpen'
+      state.peerConnectionState === 'connected'
     ) {
       return;
     }
@@ -627,6 +669,8 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
         return yield* handleDataChannelMessage(input.dataChannel, input.data);
       case 'PeerConnectionFailed':
         return yield* handlePeerConnectionFailed(input.peerConnection);
+      case 'PeerConnectionConnected':
+        return yield* handlePeerConnectionConnected(input.peerConnection);
       case 'DataChannelClosed':
         return yield* handleDataChannelClosed(input.dataChannel);
       case 'PeerConnectionInterrupted':
@@ -731,12 +775,21 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
  *          | - set remote answer
  *
  *
- * BOTH PATHS CONVERGE
+ * TRANSPORT CONNECTIVITY (independent of the chat data channel)
+ *
+ * [PeerKnown + connection: connecting]
+ *          |
+ *          | PeerConnectionConnected
+ *          | - emit Connected(peerId), then SasReady(code)
+ *          v
+ * [PeerKnown + connection: connected]
+ *
+ *
+ * CHAT CHANNEL
  *
  * [PeerKnown + DataChannelConnecting]
  *          |
  *          | DataChannelOpened
- *          | - emit Connected(peerId)
  *          v
  * [PeerKnown + DataChannelOpen]
  *          |
@@ -746,6 +799,10 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
  *          +-- SendMessage(text)
  *                - send over the data channel
  *                - emit self ChatMessageAdded
+ *          |
+ *          +-- DataChannelClosed
+ *                - emit ChatUnavailable
+ *                - keep the peer connection and media alive
  *
  *
  * ACTIVE PEER DEPARTURE
@@ -766,7 +823,6 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
  * AUTOMATIC RECONNECTION (generation-scoped, not session-scoped)
  *
  * PeerConnectionFailed(current generation while PeerKnown)
- *   OR DataChannelClosed(current owned channel)
  *   OR NegotiationDeadlineElapsed(mid-negotiation, retries remain)
  *          |
  *          | - close current generation
@@ -778,9 +834,9 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
  *          |
  *          +-- answerer: await the peer's offer and remote channel
  *
- * DataChannelOpened resets the reconnect-attempt budget.
+ * PeerConnectionConnected resets the reconnect-attempt budget.
  *
- * PeerConnectionFailed OR DataChannelClosed after 2 attempts
+ * PeerConnectionFailed after 2 attempts
  *          |
  *          | - close current generation
  *          | - emit TransportLost(peerId)

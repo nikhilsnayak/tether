@@ -4,7 +4,7 @@ import { connectPeers, requireBaseURL } from './helpers';
 
 test('peers confirm a matching safety code', async ({ browser }, testInfo) => {
   const baseURL = requireBaseURL(testInfo.project.use.baseURL);
-  const { host, guest, cleanup } = await connectPeers(browser, baseURL);
+  const { host, guest, cleanup } = await connectPeers(browser, baseURL, { probeWebRtc: true });
 
   const safetyCode = (page: Page) => page.getByLabel('Safety code');
   const safetyCheck = (page: Page) => page.getByRole('region', { name: 'Safety check' });
@@ -12,6 +12,12 @@ test('peers confirm a matching safety code', async ({ browser }, testInfo) => {
   try {
     await expect(safetyCheck(host)).toBeVisible();
     await expect(safetyCheck(guest)).toBeVisible();
+    const [hostShowedEarly, guestShowedEarly] = await Promise.all([
+      host.evaluate(() => window.__tetherE2E.sasShownBeforeConnected),
+      guest.evaluate(() => window.__tetherE2E.sasShownBeforeConnected),
+    ]);
+    expect(hostShowedEarly).toBe(false);
+    expect(guestShowedEarly).toBe(false);
 
     const [fromHost, fromGuest] = await Promise.all([
       safetyCode(host).textContent(),

@@ -1,8 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
 
 const CI = !!process.env.CI;
-const SERVER_PORT = 8018;
-const WEB_PORT = 5183;
 
 export default defineConfig({
   testDir: './tests',
@@ -15,7 +13,7 @@ export default defineConfig({
   // timeout flakes on navigation and status transitions under that load.
   expect: { timeout: 10_000 },
   use: {
-    baseURL: `http://localhost:${WEB_PORT}`,
+    baseURL: `http://localhost:5173`,
     trace: 'on-first-retry',
   },
   projects: [
@@ -35,25 +33,24 @@ export default defineConfig({
       cwd: '../apps/server',
       gracefulShutdown: { signal: 'SIGTERM', timeout: 5_000 },
       env: {
-        CORS_ORIGIN: `http://localhost:${WEB_PORT}`,
-        PORT: String(SERVER_PORT),
+        CORS_ORIGIN: `http://localhost:5173`,
         TURN_CREDENTIAL: 'e2e-turn-password',
         TURN_URL: 'turn:127.0.0.1:9?transport=udp',
         TURN_USERNAME: 'e2e-turn-user',
       },
-      url: `http://localhost:${SERVER_PORT}/health`,
-      reuseExistingServer: false,
+      url: `http://localhost:8008/health`,
+      reuseExistingServer: !CI,
       stdout: 'pipe',
     },
     {
-      command: `bun run dev -- --port ${WEB_PORT}`,
+      command: `bun run dev`,
       cwd: '../apps/web',
       gracefulShutdown: { signal: 'SIGTERM', timeout: 5_000 },
       env: {
-        VITE_SERVER_URL: `ws://localhost:${SERVER_PORT}/rpc`,
+        VITE_SERVER_URL: `ws://localhost:8008/rpc`,
       },
-      url: `http://localhost:${WEB_PORT}`,
-      reuseExistingServer: false,
+      url: `http://localhost:5173`,
+      reuseExistingServer: !CI,
       stdout: 'pipe',
     },
   ],

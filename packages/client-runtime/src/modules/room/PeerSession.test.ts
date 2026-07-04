@@ -537,7 +537,7 @@ describe('startPeerSession', () => {
     ),
   );
 
-  it.effect('processes PeerLeft while reconnecting after the data channel closes', () =>
+  it.effect('processes PeerLeft after chat becomes unavailable', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const roomEventQueue = yield* Queue.unbounded<{ readonly event: RoomEvent }>();
@@ -569,8 +569,7 @@ describe('startPeerSession', () => {
         });
         yield* Effect.yieldNow;
         assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), {
-          _tag: 'PeerInterrupted',
-          peerId: bob,
+          _tag: 'ChatUnavailable',
         });
 
         yield* Queue.offer(roomEventQueue, {
@@ -609,9 +608,8 @@ describe('startPeerSession', () => {
         yield* Queue.offer(roomEventQueue, {
           event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
         });
-        // The offer is sent, so the actor is now in DataChannelConnecting. The
-        // peer never answers and no DataChannelOpened arrives; because the remote
-        // description is never set, ICE never starts and the browser never fires
+        // The peer never answers, so the remote description is never set, ICE
+        // never starts, and the browser never reaches either 'connected' or
         // 'failed'. Only a negotiation deadline can initiate recovery.
         yield* Deferred.await(offerSent);
 
@@ -625,7 +623,7 @@ describe('startPeerSession', () => {
     ),
   );
 
-  it.effect('does not stall once the data channel opens before the deadline', () =>
+  it.effect('does not stall once the peer connection succeeds before the deadline', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const roomEventQueue = yield* Queue.unbounded<{ readonly event: RoomEvent }>();
@@ -652,8 +650,8 @@ describe('startPeerSession', () => {
         yield* Deferred.await(offerSent);
 
         fixture.dispatchPlatformEvent({
-          _tag: 'DataChannelOpened',
-          dataChannel: fixture.localDataChannel,
+          _tag: 'PeerConnectionConnected',
+          peerConnection: fixture.peerConnection,
         });
         assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), {
           _tag: 'Connected',
@@ -661,7 +659,7 @@ describe('startPeerSession', () => {
         });
 
         // The deadline is never cancelled; it still fires but the handler drops
-        // it because the channel is already open.
+        // it because the peer connection is already established.
         yield* TestClock.adjust('20 seconds');
         yield* Effect.yieldNow;
 
@@ -700,6 +698,14 @@ describe('peer-session actor', () => {
             signal: new SessionDescriptionSignal({ type: 'offer', sdp: remoteOfferSdp }),
           }),
         });
+        assert.lengthOf(
+          answererFixture.events.filter((event) => event._tag === 'SasReady'),
+          0,
+        );
+        yield* answererFixture.actor({
+          _tag: 'PeerConnectionConnected',
+          peerConnection: answererFixture.peerConnection,
+        });
 
         const offererFixture = yield* makeFixture(undefined, undefined, {
           createOffer: () => Effect.succeed({ type: 'offer', sdp: remoteOfferSdp }),
@@ -715,6 +721,14 @@ describe('peer-session actor', () => {
             peerId: bob,
             signal: new SessionDescriptionSignal({ type: 'answer', sdp: localAnswerSdp }),
           }),
+        });
+        assert.lengthOf(
+          offererFixture.events.filter((event) => event._tag === 'SasReady'),
+          0,
+        );
+        yield* offererFixture.actor({
+          _tag: 'PeerConnectionConnected',
+          peerConnection: offererFixture.peerConnection,
         });
 
         const sasCodes = (events: ReadonlyArray<PeerSessionEvent>) =>
@@ -744,6 +758,10 @@ describe('peer-session actor', () => {
             peerId: bob,
             signal: new SessionDescriptionSignal({ type: 'answer', sdp: 'remote-answer' }),
           }),
+        });
+        yield* fixture.actor({
+          _tag: 'PeerConnectionConnected',
+          peerConnection: fixture.peerConnection,
         });
 
         assert.include(fixture.operations, 'setRemoteDescription:answer:remote-answer');
@@ -830,8 +848,8 @@ describe('peer-session actor', () => {
           event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
         });
         yield* fixture.actor({
-          _tag: 'DataChannelOpened',
-          dataChannel: fixture.localDataChannel,
+          _tag: 'PeerConnectionConnected',
+          peerConnection: fixture.peerConnection,
         });
         yield* fixture.actor({
           _tag: 'PeerConnectionFailed',
@@ -870,21 +888,15 @@ describe('peer-session actor', () => {
     Effect.scoped(
       Effect.gen(function* () {
         const fixture = yield* makeFixture();
-        const remoteDataChannel: DataChannelHandle = {
-          value: { label: 'chat' } satisfies TestDataChannel,
-        };
-
         yield* fixture.actor({
           _tag: 'RoomEvent',
           event: new RoomSessionOpenedEvent({ peerId: null, sessionToken: testSessionToken }),
         });
         yield* fixture.actor({ _tag: 'RoomEvent', event: new PeerJoinedEvent({ peerId: bob }) });
         yield* fixture.actor({
-          _tag: 'RemoteDataChannel',
+          _tag: 'PeerConnectionConnected',
           peerConnection: fixture.peerConnection,
-          dataChannel: remoteDataChannel,
         });
-        yield* fixture.actor({ _tag: 'DataChannelOpened', dataChannel: remoteDataChannel });
         yield* fixture.actor({
           _tag: 'PeerConnectionFailed',
           peerConnection: fixture.peerConnection,
@@ -943,7 +955,7 @@ describe('peer-session actor', () => {
     ).pipe(Effect.orDie),
   );
 
-  it.effect('refills the reconnect budget after the replacement channel opens', () =>
+  it.effect('refills the reconnect budget after the replacement connection succeeds', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const fixture = yield* makeFixture();
@@ -953,16 +965,16 @@ describe('peer-session actor', () => {
           event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
         });
         yield* fixture.actor({
-          _tag: 'DataChannelOpened',
-          dataChannel: fixture.localDataChannel,
+          _tag: 'PeerConnectionConnected',
+          peerConnection: fixture.peerConnections[0]!,
         });
         yield* fixture.actor({
           _tag: 'PeerConnectionFailed',
           peerConnection: fixture.peerConnections[0]!,
         });
         yield* fixture.actor({
-          _tag: 'DataChannelOpened',
-          dataChannel: fixture.dataChannels[1]!,
+          _tag: 'PeerConnectionConnected',
+          peerConnection: fixture.peerConnections[1]!,
         });
         yield* fixture.actor({
           _tag: 'PeerConnectionFailed',
@@ -1091,6 +1103,10 @@ describe('peer-session actor', () => {
           }),
         });
         yield* fixture.actor({
+          _tag: 'PeerConnectionConnected',
+          peerConnection: fixture.peerConnection,
+        });
+        yield* fixture.actor({
           _tag: 'DataChannelOpened',
           dataChannel: fixture.localDataChannel,
         });
@@ -1106,7 +1122,10 @@ describe('peer-session actor', () => {
           'sendSignal:offer:offer-sdp',
           'setRemoteDescription:answer:remote-answer',
         ]);
-        assert.deepStrictEqual(fixture.events, [{ _tag: 'Connected', peerId: bob }]);
+        assert.deepStrictEqual(fixture.events, [
+          { _tag: 'Connected', peerId: bob },
+          { _tag: 'ChatReady' },
+        ]);
       }),
     ).pipe(Effect.orDie),
   );
@@ -1136,6 +1155,10 @@ describe('peer-session actor', () => {
           peerConnection: fixture.peerConnection,
           dataChannel: remoteDataChannel,
         });
+        yield* fixture.actor({
+          _tag: 'PeerConnectionConnected',
+          peerConnection: fixture.peerConnection,
+        });
         yield* fixture.actor({ _tag: 'DataChannelOpened', dataChannel: remoteDataChannel });
 
         assert.deepStrictEqual(fixture.operations, [
@@ -1151,6 +1174,7 @@ describe('peer-session actor', () => {
         assert.deepStrictEqual(fixture.events, [
           { _tag: 'WaitingForPeer' },
           { _tag: 'Connected', peerId: bob },
+          { _tag: 'ChatReady' },
         ]);
       }),
     ).pipe(Effect.orDie),
@@ -1185,6 +1209,10 @@ describe('peer-session actor', () => {
           }),
         });
         yield* fixture.actor({
+          _tag: 'PeerConnectionConnected',
+          peerConnection: fixture.peerConnection,
+        });
+        yield* fixture.actor({
           _tag: 'DataChannelOpened',
           dataChannel: fixture.localDataChannel,
         });
@@ -1211,6 +1239,7 @@ describe('peer-session actor', () => {
         ]);
         assert.deepStrictEqual(fixture.events, [
           { _tag: 'Connected', peerId: bob },
+          { _tag: 'ChatReady' },
           {
             _tag: 'ChatMessageAdded',
             message: { id: 'alice:self:0', sender: 'self', text: 'hello peer' },
@@ -1291,6 +1320,10 @@ describe('peer-session actor', () => {
           peerConnection: replacementPeerConnection,
           dataChannel: remoteDataChannel,
         });
+        yield* fixture.actor({
+          _tag: 'PeerConnectionConnected',
+          peerConnection: replacementPeerConnection,
+        });
         yield* fixture.actor({ _tag: 'DataChannelOpened', dataChannel: remoteDataChannel });
 
         assert.notInclude(fixture.operations, 'sendSignal:ice:stale-ice');
@@ -1298,6 +1331,7 @@ describe('peer-session actor', () => {
         assert.deepStrictEqual(fixture.events, [
           { _tag: 'PeerDeparted', peerId: bob },
           { _tag: 'Connected', peerId: charlie },
+          { _tag: 'ChatReady' },
         ]);
       }),
     ).pipe(Effect.orDie),
@@ -1423,8 +1457,8 @@ describe('peer-session actor', () => {
           event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
         });
         yield* fixture.actor({
-          _tag: 'DataChannelOpened',
-          dataChannel: fixture.localDataChannel,
+          _tag: 'PeerConnectionConnected',
+          peerConnection: fixture.peerConnection,
         });
 
         yield* fixture.actor({
@@ -1445,7 +1479,7 @@ describe('peer-session actor', () => {
     ).pipe(Effect.orDie),
   );
 
-  it.effect('ignores a disconnection before the data channel is open', () =>
+  it.effect('ignores a disconnection before the peer connection is established', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const fixture = yield* makeFixture();
@@ -1454,8 +1488,8 @@ describe('peer-session actor', () => {
           _tag: 'RoomEvent',
           event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
         });
-        // Still in DataChannelConnecting — a connectivity blip here is covered
-        // by negotiation/transport handling, not the reconnecting projection.
+        // A pre-connect connectivity blip is covered by negotiation/transport
+        // handling, not the reconnecting projection.
         yield* fixture.actor({
           _tag: 'PeerConnectionInterrupted',
           peerConnection: fixture.peerConnection,
@@ -1466,7 +1500,7 @@ describe('peer-session actor', () => {
     ).pipe(Effect.orDie),
   );
 
-  it.effect('reconnects when the current data channel closes', () =>
+  it.effect('marks chat unavailable without reconnecting when the data channel closes', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const fixture = yield* makeFixture();
@@ -1479,6 +1513,14 @@ describe('peer-session actor', () => {
           event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
         });
         yield* fixture.actor({
+          _tag: 'PeerConnectionConnected',
+          peerConnection: fixture.peerConnection,
+        });
+        yield* fixture.actor({
+          _tag: 'DataChannelOpened',
+          dataChannel: fixture.localDataChannel,
+        });
+        yield* fixture.actor({
           _tag: 'DataChannelClosed',
           dataChannel: staleDataChannel,
         });
@@ -1487,8 +1529,12 @@ describe('peer-session actor', () => {
           dataChannel: fixture.localDataChannel,
         });
 
-        assert.deepStrictEqual(fixture.events, [{ _tag: 'PeerInterrupted', peerId: bob }]);
-        assert.include(fixture.operations, 'closePeerConnection');
+        assert.deepStrictEqual(fixture.events, [
+          { _tag: 'Connected', peerId: bob },
+          { _tag: 'ChatReady' },
+          { _tag: 'ChatUnavailable' },
+        ]);
+        assert.notInclude(fixture.operations, 'closePeerConnection');
       }),
     ).pipe(Effect.orDie),
   );
@@ -1530,6 +1576,7 @@ describe('reducePeerSessionView', () => {
       {
         status: 'connected',
         messages: [{ id: 'message-1', sender: 'peer', text: 'from the previous session' }],
+        chatReady: true,
         sas: '11111 22222 33333 44444 55555',
       },
       { _tag: 'SessionStarted' },
@@ -1546,7 +1593,8 @@ describe('reducePeerSessionView', () => {
       _tag: 'Connected',
       peerId: bob,
     });
-    const withSas = reducePeerSessionView(connected, {
+    const withChat = reducePeerSessionView(connected, { _tag: 'ChatReady' });
+    const withSas = reducePeerSessionView(withChat, {
       _tag: 'SasReady',
       code: '11111 22222 33333 44444 55555',
     });
@@ -1558,6 +1606,7 @@ describe('reducePeerSessionView', () => {
     assert.deepStrictEqual(withMessage, {
       status: 'connected',
       messages: [{ id: 'message-1', sender: 'peer', text: 'hello' }],
+      chatReady: true,
       sas: '11111 22222 33333 44444 55555',
     });
   });
@@ -1567,6 +1616,7 @@ describe('reducePeerSessionView', () => {
       {
         status: 'connected',
         messages: [{ id: 'message-1', sender: 'peer', text: 'hello' }],
+        chatReady: true,
         sas: '11111 22222 33333 44444 55555',
       },
       { _tag: 'SignalingDisconnected' },
@@ -1575,6 +1625,26 @@ describe('reducePeerSessionView', () => {
     assert.deepStrictEqual(view, {
       status: 'disconnected',
       messages: [{ id: 'message-1', sender: 'peer', text: 'hello' }],
+      chatReady: true,
+      sas: '11111 22222 33333 44444 55555',
+    });
+  });
+
+  it('marks only chat unavailable when its data channel closes', () => {
+    const view = reducePeerSessionView(
+      {
+        status: 'connected',
+        messages: [],
+        chatReady: true,
+        sas: '11111 22222 33333 44444 55555',
+      },
+      { _tag: 'ChatUnavailable' },
+    );
+
+    assert.deepStrictEqual(view, {
+      status: 'connected',
+      messages: [],
+      chatReady: false,
       sas: '11111 22222 33333 44444 55555',
     });
   });
@@ -1584,6 +1654,7 @@ describe('reducePeerSessionView', () => {
       {
         status: 'connected',
         messages: [{ id: 'message-1', sender: 'self', text: 'hello' }],
+        chatReady: true,
         sas: null,
       },
       { _tag: 'SessionFailed' },
@@ -1592,6 +1663,7 @@ describe('reducePeerSessionView', () => {
     assert.deepStrictEqual(view, {
       status: 'failed',
       messages: [{ id: 'message-1', sender: 'self', text: 'hello' }],
+      chatReady: true,
       sas: null,
     });
   });
@@ -1601,6 +1673,7 @@ describe('reducePeerSessionView', () => {
       {
         status: 'connecting',
         messages: [{ id: 'message-1', sender: 'self', text: 'hello' }],
+        chatReady: false,
         sas: null,
       },
       { _tag: 'RoomJoinRejected', reason: 'room-full' },
@@ -1609,6 +1682,7 @@ describe('reducePeerSessionView', () => {
     assert.deepStrictEqual(view, {
       status: 'room-full',
       messages: [{ id: 'message-1', sender: 'self', text: 'hello' }],
+      chatReady: false,
       sas: null,
     });
   });
@@ -1618,6 +1692,7 @@ describe('reducePeerSessionView', () => {
       {
         status: 'connecting',
         messages: [{ id: 'message-1', sender: 'self', text: 'hello' }],
+        chatReady: false,
         sas: null,
       },
       { _tag: 'RoomJoinRejected', reason: 'peer-already-joined' },
@@ -1626,6 +1701,7 @@ describe('reducePeerSessionView', () => {
     assert.deepStrictEqual(view, {
       status: 'peer-already-joined',
       messages: [{ id: 'message-1', sender: 'self', text: 'hello' }],
+      chatReady: false,
       sas: null,
     });
   });
@@ -1635,6 +1711,7 @@ describe('reducePeerSessionView', () => {
       {
         status: 'connected',
         messages: [{ id: 'message-1', sender: 'peer', text: 'hello' }],
+        chatReady: true,
         sas: '11111 22222 33333 44444 55555',
       },
       { _tag: 'PeerDeparted', peerId: bob },
@@ -1643,6 +1720,7 @@ describe('reducePeerSessionView', () => {
     assert.deepStrictEqual(view, {
       status: 'waiting-for-peer',
       messages: [{ id: 'message-1', sender: 'peer', text: 'hello' }],
+      chatReady: false,
       sas: null,
     });
   });

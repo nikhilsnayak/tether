@@ -230,6 +230,7 @@ export function CallScreen({
 
   const presentation = peerSessionStatusPresentation(view.status);
   const isConnected = view.status === 'connected';
+  const canChat = isConnected && view.chatReady;
   const handleLeave = () => {
     void leave().then(onLeaveRoom, onLeaveRoom);
   };
@@ -274,7 +275,7 @@ export function CallScreen({
     event.preventDefault();
 
     const message = draft.trim();
-    if (message.length === 0 || !isConnected) {
+    if (message.length === 0 || !canChat) {
       return;
     }
     if (sendMessage(message)) {
@@ -490,14 +491,14 @@ export function CallScreen({
           <form className='flex shrink-0 gap-2 border-t p-4' onSubmit={handleSubmit}>
             <Input
               aria-label='Message'
-              disabled={!isConnected}
+              disabled={!canChat}
               onChange={(event) => setDraft(event.target.value)}
-              placeholder={isConnected ? 'Write a message' : 'You can chat once connected…'}
+              placeholder={canChat ? 'Write a message' : 'Chat is unavailable…'}
               value={draft}
             />
             <Button
               aria-label='Send message'
-              disabled={!isConnected || draft.trim().length === 0}
+              disabled={!canChat || draft.trim().length === 0}
               size='icon'
               type='submit'
             >

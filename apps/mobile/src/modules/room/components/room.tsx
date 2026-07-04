@@ -24,7 +24,7 @@ import {
   Volume2,
   X,
 } from 'lucide-react-native';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   FlatList,
   KeyboardAvoidingView,
@@ -153,6 +153,7 @@ export function CallScreen({
   const messageCount = view.messages.length;
   const hasUnread = !chatOpen && messageCount > readCount;
   const isConnected = view.status === 'connected';
+  const canChat = isConnected && view.chatReady;
 
   // Route call audio through the loudspeaker, like the web defaults to system
   // output. The try guards a dev client built without the native module.
@@ -328,7 +329,7 @@ export function CallScreen({
         open={chatOpen}
         onClose={closeChat}
         messages={view.messages}
-        isConnected={isConnected}
+        canChat={canChat}
         sendMessage={sendMessage}
       />
     </SafeAreaView>
@@ -339,21 +340,32 @@ function ChatModal({
   open,
   onClose,
   messages,
-  isConnected,
+  canChat,
   sendMessage,
 }: {
   readonly open: boolean;
   readonly onClose: () => void;
   readonly messages: PeerSessionView['messages'];
-  readonly isConnected: boolean;
+  readonly canChat: boolean;
   readonly sendMessage: (text: string) => boolean;
 }) {
   const [draft, setDraft] = useState('');
-  const canSend = isConnected && draft.trim().length > 0;
+  const listRef = useRef<FlatList<PeerSessionView['messages'][number]>>(null);
+  const { height: windowHeight } = useWindowDimensions();
+  const [sheetHeight, setSheetHeight] = useState(windowHeight * 0.55);
+  const canSend = canChat && draft.trim().length > 0;
+
+  // Android shortens the reported window while the keyboard is visible. Keep
+  // the pre-keyboard height so the sheet moves instead of shrinking behind it.
+  useEffect(() => {
+    if (!open) {
+      setSheetHeight(windowHeight * 0.55);
+    }
+  }, [open, windowHeight]);
 
   const handleSend = () => {
     const message = draft.trim();
-    if (message.length === 0 || !isConnected) {
+    if (message.length === 0 || !canChat) {
       return;
     }
     if (sendMessage(message)) {
@@ -362,13 +374,20 @@ function ChatModal({
   };
 
   return (
-    <Modal visible={open} transparent animationType='slide' onRequestClose={onClose}>
+    <Modal
+      visible={open}
+      transparent
+      statusBarTranslucent
+      navigationBarTranslucent
+      animationType='none'
+      onRequestClose={onClose}
+    >
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.chatBackdrop}
       >
         <Pressable accessibilityLabel='Close chat' onPress={onClose} style={styles.chatScrim} />
-        <View style={styles.chatSheet}>
+        <View style={[styles.chatSheet, { height: sheetHeight }]}>
           <View style={styles.chatHeader}>
             <View style={styles.chatHeaderText}>
               <Text style={styles.chatTitle}>Chat</Text>
@@ -389,11 +408,12 @@ function ChatModal({
             </View>
           ) : (
             <FlatList
-              // Inverted list sticks to the newest message without scroll math.
-              inverted
-              data={[...messages].reverse()}
+              ref={listRef}
+              data={messages}
               keyExtractor={(message) => message.id}
               contentContainerStyle={styles.chatList}
+              onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
+              onLayout={() => listRef.current?.scrollToEnd({ animated: false })}
               renderItem={({ item }) => (
                 <View style={styles.chatRow}>
                   <Text
@@ -410,10 +430,10 @@ function ChatModal({
           <View style={styles.chatComposer}>
             <TextInput
               accessibilityLabel='Message'
-              editable={isConnected}
+              editable={canChat}
               onChangeText={setDraft}
               onSubmitEditing={handleSend}
-              placeholder={isConnected ? 'Write a message' : 'You can chat once connected…'}
+              placeholder={canChat ? 'Write a message' : 'Chat is unavailable…'}
               placeholderTextColor={colors.mutedForeground}
               returnKeyType='send'
               submitBehavior='submit'
@@ -505,7 +525,13 @@ function SelfPreview({
     <GestureDetector gesture={pan}>
       <Animated.View style={[styles.selfTile, { width: tileWidth, aspectRatio }, animatedStyle]}>
         {stream !== null && cameraOn ? (
-          <RTCView streamURL={stream.toURL()} style={styles.selfVideo} objectFit='cover' mirror />
+          <RTCView
+            streamURL={stream.toURL()}
+            style={styles.selfVideo}
+            objectFit='cover'
+            mirror
+            zOrder={1}
+          />
         ) : (
           <View style={styles.selfVideoOff}>
             <Text style={styles.pillText}>cam off</Text>
@@ -770,8 +796,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
   chatSheet: {
-    maxHeight: '75%',
-    minHeight: '55%',
+    overflow: 'hidden',
     backgroundColor: colors.background,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderColor: colors.border,

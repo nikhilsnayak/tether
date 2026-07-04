@@ -39,7 +39,8 @@
     "doctor": {
       "reactNativeDirectoryCheck": {
         "exclude": [
-          "react-native-webrtc"
+          "react-native-webrtc",
+          "react-native-incall-manager"
         ]
       }
     }
