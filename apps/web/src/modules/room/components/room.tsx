@@ -62,7 +62,7 @@ import {
   peerSessionViewAtom,
 } from '../peer-session/state';
 
-function PeerSessionStatusScreen({
+function CallStatusScreen({
   indicatorClassName,
   pillLabel,
   icon,
@@ -107,9 +107,9 @@ function PeerSessionStatusScreen({
   );
 }
 
-export function PeerSessionLoading() {
+export function CallLoadingScreen() {
   return (
-    <PeerSessionStatusScreen
+    <CallStatusScreen
       indicatorClassName='animate-pulse bg-warning'
       pillLabel='Starting'
       icon={<LoaderCircle className='size-9 animate-spin' />}
@@ -119,7 +119,7 @@ export function PeerSessionLoading() {
   );
 }
 
-export function PeerSessionError({
+export function CallErrorScreen({
   error,
   reset,
 }: {
@@ -129,7 +129,7 @@ export function PeerSessionError({
   const message = error instanceof Error ? error.message : 'Unknown peer-session failure';
 
   return (
-    <PeerSessionStatusScreen
+    <CallStatusScreen
       indicatorClassName='bg-destructive'
       pillLabel='Failed'
       icon={<AlertTriangle className='size-9' />}
@@ -230,7 +230,7 @@ function initials(id: string) {
   );
 }
 
-export function RoomSessionScreen({
+export function CallScreen({
   onLeaveRoom,
   session,
 }: {
@@ -310,7 +310,7 @@ export function RoomSessionScreen({
 
   if (ERROR_STATUSES.has(view.status)) {
     return (
-      <PeerSessionStatusScreen
+      <CallStatusScreen
         indicatorClassName={presentation.indicatorClassName}
         pillLabel={presentation.label}
         icon={<AlertTriangle className='size-9' />}
@@ -343,7 +343,7 @@ export function RoomSessionScreen({
       <div className='relative z-40 grid h-svh grid-rows-[minmax(0,1fr)_auto]'>
         <div ref={stageRef} className='relative flex items-center justify-center overflow-hidden'>
           {remoteStream ? (
-            <RemoteVideoTile stream={remoteStream} sinkId={sinkId} muted={!speakerOn} />
+            <RemoteVideo stream={remoteStream} sinkId={sinkId} muted={!speakerOn} />
           ) : (
             <div className='grid justify-items-center gap-5 px-6 text-center'>
               <div className='border-border grid size-20 place-items-center border'>
@@ -406,9 +406,9 @@ export function RoomSessionScreen({
             </div>
           </div>
 
-          <SelfVideoTile boundaryRef={stageRef} aspectRatio={deviceAspectRatio}>
-            <LocalVideoTile localStream={localStream} camOn={camOn} selfId={session.selfId} />
-          </SelfVideoTile>
+          <DraggableSelfPreview boundaryRef={stageRef} aspectRatio={deviceAspectRatio}>
+            <SelfVideo stream={localStream} cameraOn={camOn} selfId={session.selfId} />
+          </DraggableSelfPreview>
 
           {view.sas !== null && !sasConfirmed && (
             <div className='absolute inset-x-0 bottom-4 z-50 flex justify-center px-4'>
@@ -444,32 +444,32 @@ export function RoomSessionScreen({
         </div>
 
         <div className='border-border flex items-center justify-center gap-2 border-t p-4 sm:gap-3'>
-          <ControlButton
+          <CallControlButton
             label={micOn ? 'Mute microphone' : 'Unmute microphone'}
             caption='mic'
             tone={micOn ? 'neutral' : 'danger'}
             onClick={handleMicToggle}
           >
             {micOn ? <Mic /> : <MicOff />}
-          </ControlButton>
-          <ControlButton
+          </CallControlButton>
+          <CallControlButton
             label={camOn ? 'Turn camera off' : 'Turn camera on'}
             caption='cam'
             tone={camOn ? 'neutral' : 'danger'}
             onClick={handleCameraToggle}
           >
             {camOn ? <Video /> : <VideoOff />}
-          </ControlButton>
-          <SpeakerControl
+          </CallControlButton>
+          <AudioOutputControl
             outputs={audioOutputs}
             sinkId={sinkId}
             speakerOn={speakerOn}
             onChange={handleAudioOutputChange}
           />
-          <ControlButton label='Leave call' caption='end' tone='danger' onClick={handleLeave}>
+          <CallControlButton label='Leave call' caption='end' tone='danger' onClick={handleLeave}>
             <PhoneOff />
-          </ControlButton>
-          <ControlButton
+          </CallControlButton>
+          <CallControlButton
             label={hasUnread ? 'Open chat (unread messages)' : 'Open chat'}
             caption='chat'
             tone='neutral'
@@ -477,7 +477,7 @@ export function RoomSessionScreen({
             onClick={() => setChatOpen(true)}
           >
             <MessageSquare />
-          </ControlButton>
+          </CallControlButton>
         </div>
       </div>
 
@@ -562,7 +562,7 @@ export function RoomSessionScreen({
   );
 }
 
-function RemoteVideoTile({
+function RemoteVideo({
   stream,
   sinkId,
   muted,
@@ -604,7 +604,7 @@ function RemoteVideoTile({
 
 const SPEAKER_OFF = '__off__';
 
-function SpeakerControl({
+function AudioOutputControl({
   outputs,
   sinkId,
   speakerOn,
@@ -664,7 +664,7 @@ type TileCorner = 'tl' | 'tr' | 'bl' | 'br';
 const TILE_MARGIN = 16;
 const TILE_SNAP = { type: 'spring', stiffness: 500, damping: 40 } as const;
 
-function SelfVideoTile({
+function DraggableSelfPreview({
   boundaryRef,
   aspectRatio,
   children,
@@ -741,13 +741,13 @@ function SelfVideoTile({
   );
 }
 
-function LocalVideoTile({
-  localStream,
-  camOn,
+function SelfVideo({
+  stream,
+  cameraOn,
   selfId,
 }: {
-  readonly localStream: MediaStream | null;
-  readonly camOn: boolean;
+  readonly stream: MediaStream | null;
+  readonly cameraOn: boolean;
   readonly selfId: string;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -757,8 +757,8 @@ function LocalVideoTile({
     if (video === null) {
       return;
     }
-    video.srcObject = localStream;
-  }, [localStream]);
+    video.srcObject = stream;
+  }, [stream]);
 
   return (
     <>
@@ -768,9 +768,9 @@ function LocalVideoTile({
         autoPlay
         muted
         playsInline
-        className={cn('size-full -scale-x-100 object-cover', !camOn && 'invisible')}
+        className={cn('size-full -scale-x-100 object-cover', !cameraOn && 'invisible')}
       />
-      {!camOn && (
+      {!cameraOn && (
         <div className='bg-card absolute inset-0 flex items-center justify-center'>
           <Avatar>
             <AvatarFallback>{initials(selfId)}</AvatarFallback>
@@ -784,7 +784,7 @@ function LocalVideoTile({
   );
 }
 
-function ControlButton({
+function CallControlButton({
   label,
   caption,
   tone,

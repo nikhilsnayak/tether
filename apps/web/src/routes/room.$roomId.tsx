@@ -8,11 +8,7 @@ import { Check, Copy, Share2, X } from 'lucide-react';
 import { Suspense, useState } from 'react';
 
 import { generatePeerId } from '@/lib/utils';
-import {
-  PeerSessionError,
-  PeerSessionLoading,
-  RoomSessionScreen,
-} from '@/modules/room/components/room';
+import { CallErrorScreen, CallLoadingScreen, CallScreen } from '@/modules/room/components/room';
 
 export const Route = createFileRoute('/room/$roomId')({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -29,9 +25,9 @@ function RoomPage() {
   const session: RoomSession = { roomId: RoomId.make(roomId), selfId };
 
   return (
-    <CatchBoundary errorComponent={PeerSessionError} getResetKey={() => roomId}>
-      <Suspense fallback={<PeerSessionLoading />}>
-        <RoomSessionScreen
+    <CatchBoundary errorComponent={CallErrorScreen} getResetKey={() => roomId}>
+      <Suspense fallback={<CallLoadingScreen />}>
+        <CallScreen
           session={session}
           onLeaveRoom={() => {
             void navigate({ to: '/' });
