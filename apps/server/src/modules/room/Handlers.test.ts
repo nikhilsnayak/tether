@@ -13,7 +13,7 @@ import {
   SessionDescriptionSignal,
   SignalReceivedEvent,
 } from '@tether/contracts/modules/room';
-import { ConfigProvider, Deferred, Effect, Fiber, Layer, Stream } from 'effect';
+import { Deferred, Effect, Fiber, Layer, Stream } from 'effect';
 import { RpcTest } from 'effect/unstable/rpc';
 
 import { RoomHandlers } from './Handlers';
@@ -29,54 +29,12 @@ const TestHandlers = RoomHandlers.pipe(Layer.provide(RoomService.layerTest));
 
 const makeClient = RpcTest.makeClient(RoomRpcs).pipe(Effect.provide(TestHandlers));
 
-const makeClientWithEnv = (env: Record<string, string>) =>
-  RpcTest.makeClient(RoomRpcs).pipe(
-    Effect.provide(
-      TestHandlers.pipe(Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env })))),
-    ),
-  );
-
 const requireOpenedEvent = (entry: { readonly event: unknown } | undefined) => {
   assert.instanceOf(entry?.event, RoomSessionOpenedEvent);
   return entry!.event as RoomSessionOpenedEvent;
 };
 
 describe('RoomHandlers', () => {
-  it.effect('returns the default STUN server', () =>
-    Effect.gen(function* () {
-      const client = yield* makeClientWithEnv({});
-
-      const result = yield* client.GetIceServers();
-
-      assert.deepStrictEqual(result, {
-        iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }],
-      });
-    }),
-  );
-
-  it.effect('returns configured TURN credentials', () =>
-    Effect.gen(function* () {
-      const client = yield* makeClientWithEnv({
-        TURN_URL: 'turn:turn.example.com:3478',
-        TURN_USERNAME: 'turn-user',
-        TURN_CREDENTIAL: 'turn-password',
-      });
-
-      const result = yield* client.GetIceServers();
-
-      assert.deepStrictEqual(result, {
-        iceServers: [
-          { urls: ['stun:stun.l.google.com:19302'] },
-          {
-            urls: ['turn:turn.example.com:3478'],
-            username: 'turn-user',
-            credential: 'turn-password',
-          },
-        ],
-      });
-    }),
-  );
-
   it.effect('acknowledges the session and leaves when its stream closes', () =>
     Effect.gen(function* () {
       const client = yield* makeClient;

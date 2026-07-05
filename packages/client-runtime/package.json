@@ -10,11 +10,13 @@
   },
   "scripts": {
     "test": "vitest run src",
+    "test:coverage": "vitest run src --coverage",
     "test:watch": "vitest --watch"
   },
   "dependencies": {
     "@effect/vitest": "catalog:",
     "@tether/contracts": "workspace:*",
+    "@vitest/coverage-v8": "catalog:",
     "effect": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

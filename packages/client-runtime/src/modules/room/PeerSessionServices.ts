@@ -1,8 +1,9 @@
-import type { IceCandidateSignal, IceServer } from '@tether/contracts/modules/room';
+import type { IceCandidateSignal } from '@tether/contracts/modules/room';
 import { Context, Effect, type Scope } from 'effect';
 
 import type {
   DataChannelHandle,
+  IceServer,
   MediaStreamHandle,
   PeerConnectionHandle,
   PeerSessionEvent,

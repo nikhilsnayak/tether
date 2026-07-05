@@ -3,6 +3,14 @@ import { Data, Predicate } from 'effect';
 
 export const CHAT_CHANNEL_LABEL = 'chat';
 
+export interface IceServer {
+  readonly urls: ReadonlyArray<string>;
+}
+
+export const GOOGLE_STUN_SERVERS: ReadonlyArray<IceServer> = [
+  { urls: ['stun:stun.l.google.com:19302'] },
+];
+
 export type PlatformOperation =
   | 'acquire-peer-connection'
   | 'acquire-local-media'

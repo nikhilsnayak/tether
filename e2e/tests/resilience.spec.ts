@@ -31,9 +31,7 @@ const emitIceCandidateBurst = (page: Page, count: number) =>
     }
   }, count);
 
-test('server ICE configuration including TURN reaches the browser', async ({
-  browser,
-}, testInfo) => {
+test('the Google public STUN configuration reaches the browser', async ({ browser }, testInfo) => {
   const baseURL = requireBaseURL(testInfo.project.use.baseURL);
   const { guest, cleanup } = await connectPeers(browser, baseURL, { probeWebRtc: true });
   try {
@@ -41,16 +39,7 @@ test('server ICE configuration including TURN reaches the browser', async ({
       () => window.__tetherE2E.configurations[0]?.iceServers ?? [],
     );
 
-    expect(iceServers).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ urls: ['stun:stun.l.google.com:19302'] }),
-        expect.objectContaining({
-          credential: 'e2e-turn-password',
-          urls: ['turn:127.0.0.1:9?transport=udp'],
-          username: 'e2e-turn-user',
-        }),
-      ]),
-    );
+    expect(iceServers).toEqual([{ urls: ['stun:stun.l.google.com:19302'] }]);
   } finally {
     await cleanup();
   }

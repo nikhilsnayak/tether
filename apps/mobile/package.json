@@ -7,13 +7,16 @@
     "dev": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "test": "vitest run src"
+    "test": "vitest run src",
+    "test:coverage": "vitest run src --coverage"
   },
   "dependencies": {
     "@config-plugins/react-native-webrtc": "^15.0.1",
+    "@effect/vitest": "catalog:",
     "@tether/client-runtime": "workspace:*",
     "@tether/contracts": "workspace:*",
     "@types/react": "~19.2.2",
+    "@vitest/coverage-v8": "catalog:",
     "effect": "catalog:",
     "expo": "~57.0.2",
     "expo-clipboard": "~57.0.0",

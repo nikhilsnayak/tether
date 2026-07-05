@@ -1,7 +1,6 @@
 import { Rpc, RpcGroup } from 'effect/unstable/rpc';
 
 import {
-  GetIceServersSuccess,
   LeaveRoomPayload,
   OpenRoomSessionError,
   OpenRoomSessionPayload,
@@ -26,13 +25,4 @@ const LeaveRoomRpc = Rpc.make('LeaveRoom', {
   payload: LeaveRoomPayload,
 });
 
-const GetIceServersRpc = Rpc.make('GetIceServers', {
-  success: GetIceServersSuccess,
-});
-
-export const RoomRpcs = RpcGroup.make(
-  OpenRoomSessionRpc,
-  SendSignalRpc,
-  LeaveRoomRpc,
-  GetIceServersRpc,
-);
+export const RoomRpcs = RpcGroup.make(OpenRoomSessionRpc, SendSignalRpc, LeaveRoomRpc);

@@ -35,14 +35,14 @@
 - **Ephemeral chat.** Messages travel over the call's encrypted WebRTC data channel and disappear when the session ends.
 - **Verifiable safety codes.** Both callers can compare a code derived from the negotiated DTLS fingerprints to detect signaling-path fingerprint substitution.
 - **Resilient sessions.** Tether reconnects failed peer connections, rejects stale events, recovers stalled negotiation, and isolates chat-channel closure without interrupting media or invalidating the safety code.
-- **Configurable connectivity.** STUN works out of the box; deployments can add TURN for networks that cannot establish a direct path.
+- **Public STUN discovery.** Calls use Google's public STUN server to establish a direct path.
 
 ## Privacy and security
 
 Tether separates signaling from call content:
 
 - The signaling server relays room membership, SDP, and ICE messages. It does not receive decoded camera, microphone, or chat content.
-- Audio, video, and chat are encrypted by WebRTC. They normally travel directly between callers; when TURN is configured, the relay forwards encrypted packets.
+- Audio, video, and chat are encrypted by WebRTC and travel directly between callers.
 - Rooms and signaling state are held in memory and removed when callers leave. Tether has no account system, call history, or message database.
 - Each room admits at most two peers. Private session tokens authorize signaling and leave operations after a caller joins.
 - The server validates RPC payloads, rate-limits signaling per member, and caps live rooms.
@@ -56,8 +56,6 @@ flowchart LR
     A[Caller A] <-->|Effect RPC over WebSocket| S[Signaling server]
     B[Caller B] <-->|Effect RPC over WebSocket| S
     A <-->|Encrypted WebRTC media and chat| B
-    A -.->|Optional encrypted relay| T[TURN server]
-    T -.-> B
 ```
 
 The Bun server exposes an Effect RPC endpoint over WebSocket. A streaming `OpenRoomSession` call represents both room membership and the server-to-client event channel; unary RPCs carry ICE and session-description signals and handle explicit departure.
@@ -87,17 +85,13 @@ The default configuration runs locally without additional services.
 
 ### Server
 
-| Variable          | Default                        | Purpose                                            |
-| ----------------- | ------------------------------ | -------------------------------------------------- |
-| `HOST`            | `0.0.0.0`                      | HTTP server bind address                           |
-| `PORT`            | `8008`                         | HTTP and WebSocket server port                     |
-| `CORS_ORIGIN`     | `http://localhost:5173`        | Comma-separated browser origins allowed to connect |
-| `STUN_URLS`       | `stun:stun.l.google.com:19302` | Comma-separated STUN server URLs                   |
-| `TURN_URL`        | unset                          | Optional TURN server URL                           |
-| `TURN_USERNAME`   | unset                          | Username for the configured TURN server            |
-| `TURN_CREDENTIAL` | unset                          | Credential for the configured TURN server          |
+| Variable | Default   | Purpose                        |
+| -------- | --------- | ------------------------------ |
+| `HOST`   | `0.0.0.0` | HTTP server bind address       |
+| `PORT`   | `8008`    | HTTP and WebSocket server port |
 
-Set all three TURN variables together. The current server distributes operator-managed TURN credentials to connected clients, so use scoped, short-lived credentials in exposed deployments where possible.
+ICE discovery is fixed to `stun:stun.l.google.com:19302`; there is no server-side ICE
+configuration. Calls that cannot establish a direct peer-to-peer path will fail.
 
 ### Web
 
@@ -202,19 +196,16 @@ bun run test
 bun run build
 ```
 
-The test suite covers room-capacity invariants, authenticated signaling, rate limits, ICE and TURN configuration, peer-session state transitions, resource cleanup, safety-code agreement, complete two-peer calls, chat-channel isolation, media controls, and peer-connection recovery.
+Run `bun run test:coverage` to generate unit coverage reports for the server, client runtime, and
+mobile utility tests. CI retains those reports as an artifact.
+
+The test suite covers room-capacity invariants, authenticated signaling, rate limits, STUN
+configuration, peer-session state transitions, resource cleanup, safety-code agreement, complete
+two-peer calls, chat-channel isolation, media controls, and peer-connection recovery.
 
 ## Roadmap
 
-- Release the Android app beyond internal development builds.
 - Add watch-along media as another negotiated track on the existing connection.
-- Support short-lived TURN credentials instead of static operator-managed secrets.
-
-## Contributing
-
-Issues and pull requests are welcome. For substantial changes, open an issue first so the behavior and scope can be agreed before implementation.
-
-Keep changes focused, follow the existing package boundaries, and run lint, formatting, tests, and the build before opening a pull request.
 
 ## License
 

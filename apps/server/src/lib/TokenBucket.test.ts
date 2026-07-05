@@ -1,10 +1,18 @@
 import { assert, describe, it } from '@effect/vitest';
-import { Effect } from 'effect';
+import { Effect, Exit } from 'effect';
 import { TestClock } from 'effect/testing';
 
 import { makeTokenBucket } from './TokenBucket';
 
 describe('TokenBucket', () => {
+  it.effect('rejects invalid configuration', () =>
+    Effect.gen(function* () {
+      const exit = yield* Effect.exit(makeTokenBucket({ capacity: 0, refillEvery: '1 second' }));
+
+      assert.isTrue(Exit.isFailure(exit));
+    }),
+  );
+
   it.effect('allows the initial burst up to capacity', () =>
     Effect.gen(function* () {
       const bucket = yield* makeTokenBucket({ capacity: 2, refillEvery: '1 second' });

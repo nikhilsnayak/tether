@@ -41,3 +41,17 @@ jobs:
 
       - name: Test
         run: bun run test
+
+      - name: Unit coverage
+        run: bun run test:coverage
+
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-${{ github.sha }}
+          path: |
+            apps/server/coverage
+            apps/mobile/coverage
+            apps/web/coverage
+            packages/client-runtime/coverage
+          if-no-files-found: error

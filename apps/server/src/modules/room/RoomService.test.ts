@@ -31,6 +31,15 @@ const requireOpenedEvent = (event: unknown): RoomSessionOpenedEvent => {
 };
 
 describe('RoomService', () => {
+  it.effect('ignores leave requests for rooms that do not exist', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const room = yield* RoomService;
+        yield* room.leave(roomId, alice, 'unknown-session');
+      }),
+    ),
+  );
+
   it.effect('returns the existing peer and rejects a third member', () =>
     withRoomService(
       Effect.gen(function* () {

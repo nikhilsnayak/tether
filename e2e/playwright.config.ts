@@ -32,12 +32,6 @@ export default defineConfig({
       command: 'bun run start',
       cwd: '../apps/server',
       gracefulShutdown: { signal: 'SIGTERM', timeout: 5_000 },
-      env: {
-        CORS_ORIGIN: `http://localhost:5173`,
-        TURN_CREDENTIAL: 'e2e-turn-password',
-        TURN_URL: 'turn:127.0.0.1:9?transport=udp',
-        TURN_USERNAME: 'e2e-turn-user',
-      },
       url: `http://localhost:8008/health`,
       reuseExistingServer: !CI,
       stdout: 'pipe',

@@ -1,7 +1,7 @@
 import { assert, describe, it } from '@effect/vitest';
 import { Crypto, Effect, Layer } from 'effect';
 
-import { deriveSasCode, FingerprintMissing } from './Sas';
+import { deriveSasCode, FingerprintMissing, formatSas } from './Sas';
 
 // No DOM lib in this tsconfig, so the Web Crypto global is typed by hand.
 const webCryptoApi = (
@@ -93,4 +93,17 @@ describe('deriveSasCode', () => {
       assert.strictEqual(error.description, 'answer');
     }).pipe(Effect.provide(webCrypto)),
   );
+
+  it.effect('identifies a missing offer fingerprint', () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(deriveSasCode({ offerSdp: 'v=0\r\n', answerSdp }));
+
+      assert.instanceOf(error, FingerprintMissing);
+      assert.strictEqual(error.description, 'offer');
+    }).pipe(Effect.provide(webCrypto)),
+  );
+
+  it('zero-fills a digest shorter than the spoken-code input', () => {
+    assert.strictEqual(formatSas(new Uint8Array()), '00000 00000 00000 00000 00000');
+  });
 });

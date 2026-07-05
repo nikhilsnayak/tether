@@ -12,20 +12,20 @@ import {
   SessionDescriptionSignal,
   SignalReceivedEvent,
   type RoomEvent,
-  type IceServer,
   type Signal,
 } from '@tether/contracts/modules/room';
 import { Crypto, Deferred, Effect, Exit, Layer, Queue, Scope, Stream } from 'effect';
 import { TestClock } from 'effect/testing';
-import { RpcClientError } from 'effect/unstable/rpc';
 
 import { AppClient } from '../../AppClient';
-import { makePeerSessionActor, startPeerSession } from './PeerSession';
+import { makePeerSessionActor } from './PeerSession';
+import { startPeerSession } from './PeerSessionHost';
 import {
   initialPeerSessionView,
   PlatformError,
   reducePeerSessionView,
   type DataChannelHandle,
+  type IceServer,
   type MediaStreamHandle,
   type PeerConnectionHandle,
   type PeerSessionEvent,
@@ -78,10 +78,6 @@ const makeFixture = Effect.fn('makeFixture')(function* (
     Stream.empty) as AppClient['Service']['OpenRoomSession'],
   sendSignal?: AppClient['Service']['SendSignal'],
   overrides?: Partial<PeerSessionPlatform['Service']>,
-  getIceServers?: () => Effect.Effect<
-    { readonly iceServers: ReadonlyArray<IceServer> },
-    RpcClientError.RpcClientError
-  >,
 ) {
   const peerConnections: Array<PeerConnectionHandle> = [];
   let nextPeerConnection = 0;
@@ -185,8 +181,6 @@ const makeFixture = Effect.fn('makeFixture')(function* (
     Layer.succeed(
       AppClient,
       AppClient.of({
-        GetIceServers: (getIceServers ??
-          (() => Effect.succeed({ iceServers: [] }))) as AppClient['Service']['GetIceServers'],
         LeaveRoom: () =>
           Effect.sync(() => {
             operations.push('leaveRoom');
@@ -248,39 +242,7 @@ const makeFixture = Effect.fn('makeFixture')(function* (
 });
 
 describe('startPeerSession', () => {
-  it.effect('passes fetched ICE servers to peer connection acquisition', () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const offerSent = yield* Deferred.make<void>();
-        const iceServers = [
-          {
-            urls: ['turn:turn.example.com:3478'],
-            username: 'turn-user',
-            credential: 'turn-password',
-          },
-        ];
-        const fixture = yield* makeFixture(
-          (() =>
-            Stream.make({
-              event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
-            }).pipe(Stream.concat(Stream.never))) as AppClient['Service']['OpenRoomSession'],
-          ({ signal }) =>
-            signal._tag === '@tether/SessionDescriptionSignal' && signal.type === 'offer'
-              ? Deferred.succeed(offerSent, undefined)
-              : Effect.void,
-          undefined,
-          () => Effect.succeed({ iceServers }),
-        );
-
-        yield* startPeerSession(session).pipe(Effect.provide(fixture.dependencies));
-        yield* Deferred.await(offerSent);
-
-        assert.deepStrictEqual(fixture.acquiredIceServers, [iceServers]);
-      }),
-    ),
-  );
-
-  it.effect('falls back to the default STUN server when ICE config fails', () =>
+  it.effect('uses the Google public STUN server for peer connection acquisition', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const offerSent = yield* Deferred.make<void>();
@@ -293,16 +255,6 @@ describe('startPeerSession', () => {
             signal._tag === '@tether/SessionDescriptionSignal' && signal.type === 'offer'
               ? Deferred.succeed(offerSent, undefined)
               : Effect.void,
-          undefined,
-          () =>
-            Effect.fail(
-              new RpcClientError.RpcClientError({
-                reason: new RpcClientError.RpcClientDefect({
-                  message: 'ICE config unavailable',
-                  cause: 'boom',
-                }),
-              }),
-            ),
         );
 
         yield* startPeerSession(session).pipe(Effect.provide(fixture.dependencies));
@@ -511,6 +463,49 @@ describe('startPeerSession', () => {
     ),
   );
 
+  it.effect('emits SessionFailed when the signaling stream fails unexpectedly', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture((() =>
+          Stream.fail(
+            new Error('signaling failed'),
+          )) as unknown as AppClient['Service']['OpenRoomSession']);
+
+        yield* startPeerSession(session).pipe(Effect.provide(fixture.dependencies));
+        assert.deepStrictEqual((yield* Queue.take(fixture.eventQueue))._tag, 'SessionStarted');
+        assert.deepStrictEqual((yield* Queue.take(fixture.eventQueue))._tag, 'LocalStreamReady');
+        assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), {
+          _tag: 'SessionFailed',
+        });
+      }),
+    ),
+  );
+
+  it.effect('emits SessionFailed when a platform operation fails', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture(
+          (() =>
+            Stream.make({
+              event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+            }).pipe(Stream.concat(Stream.never))) as AppClient['Service']['OpenRoomSession'],
+          undefined,
+          {
+            createOffer: () =>
+              Effect.fail(new PlatformError({ operation: 'create-offer', cause: 'failed' })),
+          },
+        );
+
+        yield* startPeerSession(session).pipe(Effect.provide(fixture.dependencies));
+        assert.deepStrictEqual((yield* Queue.take(fixture.eventQueue))._tag, 'SessionStarted');
+        assert.deepStrictEqual((yield* Queue.take(fixture.eventQueue))._tag, 'LocalStreamReady');
+        assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), {
+          _tag: 'SessionFailed',
+        });
+      }),
+    ),
+  );
+
   it.effect('emits SignalingDisconnected when SendSignal finds no room membership', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -665,6 +660,46 @@ describe('startPeerSession', () => {
 
         const stalled = fixture.events.filter((event) => event._tag === 'NegotiationStalled');
         assert.deepStrictEqual(stalled, []);
+      }),
+    ),
+  );
+
+  it.effect('emits SessionFailed when a created offer carries no SDP', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture(
+          (() =>
+            Stream.make({
+              event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+            }).pipe(Stream.concat(Stream.never))) as AppClient['Service']['OpenRoomSession'],
+          undefined,
+          { createOffer: () => Effect.succeed({ type: 'offer', sdp: undefined }) },
+        );
+
+        yield* startPeerSession(session).pipe(Effect.provide(fixture.dependencies));
+        assert.deepStrictEqual((yield* Queue.take(fixture.eventQueue))._tag, 'SessionStarted');
+        assert.deepStrictEqual((yield* Queue.take(fixture.eventQueue))._tag, 'LocalStreamReady');
+        assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), { _tag: 'SessionFailed' });
+      }),
+    ),
+  );
+
+  it.effect('emits SessionFailed when the actor loop dies with a defect', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture(
+          (() =>
+            Stream.make({
+              event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+            }).pipe(Stream.concat(Stream.never))) as AppClient['Service']['OpenRoomSession'],
+          undefined,
+          { addLocalTracks: () => Effect.die('boom') },
+        );
+
+        yield* startPeerSession(session).pipe(Effect.provide(fixture.dependencies));
+        assert.deepStrictEqual((yield* Queue.take(fixture.eventQueue))._tag, 'SessionStarted');
+        assert.deepStrictEqual((yield* Queue.take(fixture.eventQueue))._tag, 'LocalStreamReady');
+        assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), { _tag: 'SessionFailed' });
       }),
     ),
   );
@@ -1565,6 +1600,354 @@ describe('peer-session actor', () => {
         assert.deepStrictEqual(fixture.events, [
           { _tag: 'RemoteStreamReady', stream: remoteStream },
         ]);
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('ignores a duplicate room session open', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture();
+
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new RoomSessionOpenedEvent({ peerId: null, sessionToken: testSessionToken }),
+        });
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+        });
+
+        assert.lengthOf(
+          fixture.operations.filter((operation) => operation === 'acquirePeerConnection'),
+          1,
+        );
+        assert.deepStrictEqual(fixture.events, [{ _tag: 'WaitingForPeer' }]);
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('ignores PeerJoined before a room session opens', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture();
+
+        yield* fixture.actor({ _tag: 'RoomEvent', event: new PeerJoinedEvent({ peerId: bob }) });
+
+        assert.deepStrictEqual(fixture.events, []);
+        assert.notInclude(fixture.operations, 'acquirePeerConnection');
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('ignores an offer received while acting as the offerer', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture();
+
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+        });
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new SignalReceivedEvent({
+            peerId: bob,
+            signal: new SessionDescriptionSignal({ type: 'offer', sdp: 'remote-offer' }),
+          }),
+        });
+
+        assert.notInclude(fixture.operations, 'setRemoteDescription:offer:remote-offer');
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('ignores an answer received while acting as the answerer', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture();
+
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new RoomSessionOpenedEvent({ peerId: null, sessionToken: testSessionToken }),
+        });
+        yield* fixture.actor({ _tag: 'RoomEvent', event: new PeerJoinedEvent({ peerId: bob }) });
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new SignalReceivedEvent({
+            peerId: bob,
+            signal: new SessionDescriptionSignal({ type: 'answer', sdp: 'remote-answer' }),
+          }),
+        });
+
+        assert.notInclude(fixture.operations, 'setRemoteDescription:answer:remote-answer');
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('acquires a fresh generation when a peer departs after transport loss', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture();
+
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+        });
+        yield* fixture.actor({
+          _tag: 'PeerConnectionFailed',
+          peerConnection: fixture.peerConnections[0]!,
+        });
+        yield* fixture.actor({
+          _tag: 'PeerConnectionFailed',
+          peerConnection: fixture.peerConnections[1]!,
+        });
+        yield* fixture.actor({
+          _tag: 'PeerConnectionFailed',
+          peerConnection: fixture.peerConnections[2]!,
+        });
+        assert.deepStrictEqual(fixture.events.at(-1), { _tag: 'TransportLost', peerId: bob });
+
+        const acquiredBefore = fixture.operations.filter(
+          (operation) => operation === 'acquirePeerConnection',
+        ).length;
+        yield* fixture.actor({ _tag: 'RoomEvent', event: new PeerLeftEvent({ peerId: bob }) });
+
+        assert.deepStrictEqual(fixture.events.at(-1), { _tag: 'PeerDeparted', peerId: bob });
+        assert.strictEqual(
+          fixture.operations.filter((operation) => operation === 'acquirePeerConnection').length,
+          acquiredBefore + 1,
+        );
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('ignores connected events from a stale or inactive generation', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture();
+        const stalePeerConnection: PeerConnectionHandle = { value: { id: 'stale' } };
+
+        yield* fixture.actor({
+          _tag: 'PeerConnectionConnected',
+          peerConnection: stalePeerConnection,
+        });
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+        });
+        yield* fixture.actor({
+          _tag: 'PeerConnectionConnected',
+          peerConnection: stalePeerConnection,
+        });
+
+        assert.lengthOf(
+          fixture.events.filter((event) => event._tag === 'Connected'),
+          0,
+        );
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('ignores a duplicate connected event once established', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture();
+
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+        });
+        yield* fixture.actor({
+          _tag: 'PeerConnectionConnected',
+          peerConnection: fixture.peerConnection,
+        });
+        yield* fixture.actor({
+          _tag: 'PeerConnectionConnected',
+          peerConnection: fixture.peerConnection,
+        });
+
+        assert.deepStrictEqual(
+          fixture.events.filter((event) => event._tag === 'Connected'),
+          [{ _tag: 'Connected', peerId: bob }],
+        );
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('ignores a restore while the connection is not interrupted', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture();
+
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+        });
+        yield* fixture.actor({
+          _tag: 'PeerConnectionConnected',
+          peerConnection: fixture.peerConnection,
+        });
+        yield* fixture.actor({
+          _tag: 'PeerConnectionRestored',
+          peerConnection: fixture.peerConnection,
+        });
+
+        assert.lengthOf(
+          fixture.events.filter((event) => event._tag === 'PeerRestored'),
+          0,
+        );
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('re-signals chat readiness and the safety code when a connection is restored', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const offerSdp = fingerprintSdp('AA:BB:CC:DD');
+        const answerSdp = fingerprintSdp('11:22:33:44');
+        const fixture = yield* makeFixture(undefined, undefined, {
+          createOffer: () => Effect.succeed({ type: 'offer', sdp: offerSdp }),
+        });
+
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+        });
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new SignalReceivedEvent({
+            peerId: bob,
+            signal: new SessionDescriptionSignal({ type: 'answer', sdp: answerSdp }),
+          }),
+        });
+        yield* fixture.actor({
+          _tag: 'PeerConnectionConnected',
+          peerConnection: fixture.peerConnection,
+        });
+        yield* fixture.actor({
+          _tag: 'DataChannelOpened',
+          dataChannel: fixture.localDataChannel,
+        });
+        yield* fixture.actor({
+          _tag: 'PeerConnectionInterrupted',
+          peerConnection: fixture.peerConnection,
+        });
+        yield* fixture.actor({
+          _tag: 'PeerConnectionRestored',
+          peerConnection: fixture.peerConnection,
+        });
+
+        assert.deepStrictEqual(
+          fixture.events.map((event) => event._tag),
+          [
+            'Connected',
+            'SasReady',
+            'ChatReady',
+            'PeerInterrupted',
+            'PeerRestored',
+            'ChatReady',
+            'SasReady',
+          ],
+        );
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('ignores a duplicate data-channel opened event', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture();
+
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+        });
+        yield* fixture.actor({
+          _tag: 'DataChannelOpened',
+          dataChannel: fixture.localDataChannel,
+        });
+        yield* fixture.actor({
+          _tag: 'DataChannelOpened',
+          dataChannel: fixture.localDataChannel,
+        });
+
+        assert.lengthOf(
+          fixture.events.filter((event) => event._tag === 'ChatReady'),
+          1,
+        );
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('ignores a data-channel opened event for an unknown channel', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture();
+        const unknownDataChannel: DataChannelHandle = {
+          value: { label: 'chat' } satisfies TestDataChannel,
+        };
+
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+        });
+        yield* fixture.actor({ _tag: 'DataChannelOpened', dataChannel: unknownDataChannel });
+
+        assert.lengthOf(
+          fixture.events.filter((event) => event._tag === 'ChatReady'),
+          0,
+        );
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('ignores a chat message before the data channel opens', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture();
+
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+        });
+        yield* fixture.actor({
+          _tag: 'DataChannelMessageReceived',
+          dataChannel: fixture.localDataChannel,
+          data: 'too early',
+        });
+
+        assert.lengthOf(
+          fixture.events.filter((event) => event._tag === 'ChatMessageAdded'),
+          0,
+        );
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('ignores a non-text chat payload', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture();
+
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+        });
+        yield* fixture.actor({
+          _tag: 'DataChannelOpened',
+          dataChannel: fixture.localDataChannel,
+        });
+        yield* fixture.actor({
+          _tag: 'DataChannelMessageReceived',
+          dataChannel: fixture.localDataChannel,
+          data: new Uint8Array([1, 2, 3]),
+        });
+
+        assert.lengthOf(
+          fixture.events.filter((event) => event._tag === 'ChatMessageAdded'),
+          0,
+        );
       }),
     ).pipe(Effect.orDie),
   );

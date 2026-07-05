@@ -27,17 +27,6 @@ export class IceCandidateSignal extends Schema.TaggedClass<IceCandidateSignal>()
 export const Signal = Schema.Union([SessionDescriptionSignal, IceCandidateSignal]);
 export type Signal = typeof Signal.Type;
 
-export const IceServer = Schema.Struct({
-  urls: Schema.Array(Schema.String),
-  username: Schema.optional(Schema.String),
-  credential: Schema.optional(Schema.String),
-});
-export type IceServer = typeof IceServer.Type;
-
-export const GetIceServersSuccess = Schema.Struct({
-  iceServers: Schema.Array(IceServer),
-});
-
 export class RoomSessionOpenedEvent extends Schema.TaggedClass<RoomSessionOpenedEvent>()(
   '@tether/RoomSessionOpenedEvent',
   {

@@ -7,7 +7,8 @@ import {
   type PeerConnectionHandle,
   type PlatformEventDispatch,
 } from '@tether/client-runtime/modules/room';
-import { IceCandidateSignal, type IceServer } from '@tether/contracts/modules/room';
+import type { IceServer } from '@tether/client-runtime/modules/room';
+import { IceCandidateSignal } from '@tether/contracts/modules/room';
 import { Crypto, Effect, Layer } from 'effect';
 import * as ExpoCrypto from 'expo-crypto';
 import { MediaStream, RTCPeerConnection, mediaDevices } from 'react-native-webrtc';
@@ -62,8 +63,6 @@ const acquirePeerConnection = (iceServers: ReadonlyArray<IceServer>) =>
         value: new RTCPeerConnection({
           iceServers: iceServers.map((server) => ({
             urls: [...server.urls],
-            username: server.username,
-            credential: server.credential,
           })),
         }),
       }),

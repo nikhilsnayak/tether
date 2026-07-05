@@ -101,7 +101,7 @@ function HomePage() {
         </div>
 
         <p className='text-muted-foreground mt-6 font-mono text-[11px] tracking-[0.2em] uppercase'>
-          peer-to-peer · no accounts · calls never touch a server
+          private video calls · no accounts · no call history
         </p>
       </main>
     </div>

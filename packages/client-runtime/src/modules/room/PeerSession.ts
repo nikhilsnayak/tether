@@ -1,90 +1,32 @@
 import {
-  isPeerAlreadyJoined,
-  isPeerNotInRoom,
-  isRoomFull,
   SessionDescriptionSignal,
   type IceCandidateSignal,
-  type IceServer,
   type PeerId,
   type RoomEvent,
   type SessionDescriptionSignal as SessionDescriptionSignalType,
   type Signal,
 } from '@tether/contracts/modules/room';
-import { Cause, Crypto, Duration, Effect, Exit, Option, Queue, Ref, Scope, Stream } from 'effect';
+import { Crypto, Duration, Effect, Exit, Ref, Scope } from 'effect';
 
 import { AppClient } from '../../AppClient';
+import type {
+  PeerConnectionGeneration,
+  PeerSessionActorState,
+  PeerSessionInput,
+  PeerSessionLocalInputDispatch,
+} from './PeerSessionActorModel';
 import {
   CHAT_CHANNEL_LABEL,
-  isPlatformError,
   type ChatMessage,
   type DataChannelHandle,
+  type IceServer,
   type MediaStreamHandle,
   type PeerConnectionHandle,
-  type PlatformEvent,
   type RoomSession,
   type SessionDescription,
 } from './PeerSessionModel';
 import { PeerSessionEventSink, PeerSessionPlatform } from './PeerSessionServices';
 import { deriveSasCode } from './Sas';
-
-type PeerRole = 'offerer' | 'answerer';
-
-type DataChannelState =
-  | {
-      readonly _tag: 'AwaitingRemoteDataChannel';
-    }
-  | {
-      readonly _tag: 'DataChannelConnecting';
-      readonly dataChannel: DataChannelHandle;
-    }
-  | {
-      readonly _tag: 'DataChannelOpen';
-      readonly dataChannel: DataChannelHandle;
-    }
-  | {
-      readonly _tag: 'DataChannelClosed';
-      readonly dataChannel: DataChannelHandle;
-    };
-
-type PeerSessionActorState =
-  | {
-      readonly _tag: 'AwaitingRoomSession';
-    }
-  | {
-      readonly _tag: 'WaitingForPeer';
-      readonly generation: PeerConnectionGeneration;
-    }
-  | {
-      readonly _tag: 'PeerKnown';
-      readonly generation: PeerConnectionGeneration;
-      readonly peerId: PeerId;
-      readonly role: PeerRole;
-      readonly peerConnectionState: 'connecting' | 'connected' | 'interrupted';
-      readonly dataChannelState: DataChannelState;
-      readonly remoteAnswerApplied: boolean;
-      readonly reconnectAttempts: number;
-      /** Handshake descriptions retained until the peer connection succeeds. */
-      readonly offerSdp: string | null;
-      readonly answerSdp: string | null;
-    }
-  | { _tag: 'TransportLost'; peerId: PeerId };
-
-type PeerSessionUiCommand = {
-  readonly _tag: 'SendMessage';
-  readonly message: string;
-};
-
-/**
- * Internal input raised by the negotiation deadline timer. It carries the
- * connection it was armed for so a deadline from a superseded generation is
- * rejected by the same identity check used for stale platform callbacks.
- */
-type PeerSessionTimerInput = {
-  readonly _tag: 'NegotiationDeadlineElapsed';
-  readonly peerConnection: PeerConnectionHandle;
-};
-
-type PeerSessionLocalInput = PlatformEvent | PeerSessionUiCommand | PeerSessionTimerInput;
 
 /**
  * How long a peer may stay mid-negotiation (offer/answer/data-channel opening)
@@ -95,36 +37,16 @@ type PeerSessionLocalInput = PlatformEvent | PeerSessionUiCommand | PeerSessionT
 const NEGOTIATION_DEADLINE = Duration.seconds(20);
 const MAX_RECONNECT_ATTEMPTS = 2;
 
-type PeerSessionLocalInputDispatch = (input: PeerSessionLocalInput) => void;
-
-type PeerSessionInput =
-  | {
-      readonly _tag: 'RoomEvent';
-      readonly event: RoomEvent;
-    }
-  | PeerSessionLocalInput;
-
-type PeerConnectionGeneration = {
-  readonly scope: Scope.Closeable;
-  readonly peerConnection: PeerConnectionHandle;
-};
-
 const requireDescription = (description: SessionDescription, type: 'offer' | 'answer') =>
   description.sdp === undefined
     ? Effect.fail(new Error(`Failed to create ${type}: SDP is undefined`))
     : Effect.succeed({ type, sdp: description.sdp } as const);
 
 /**
- * Builds the stateful input handler for one peer session.
- *
- * The handler deliberately has no browser or React knowledge. It mutates one
- * private state value and interprets each input using the injected RPC,
- * platform, and event-sink services. Its returned `handleInput` function must
- * be called serially; {@link startPeerSession} provides that serialization in
- * production, while tests can drive it directly. The returned session-token
- * ref is actor-owned and exposed read-only to the session's leave operation.
+ * Builds the platform-neutral actor for a peer session.
+ * Inputs must be handled serially; PeerSessionHost owns that serialization.
  */
-export const makePeerSessionActor = Effect.fnUntraced(function* (
+const makePeerSessionActorInternal = Effect.fnUntraced(function* (
   session: RoomSession,
   localStream: MediaStreamHandle,
   iceServers: ReadonlyArray<IceServer>,
@@ -224,6 +146,10 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
     );
 
   const beginPeerReconnect = Effect.fnUntraced(function* () {
+    // Unreachable: both callers (peer-connection failure and negotiation
+    // deadline) narrow to PeerKnown first. This guard only narrows the state
+    // for the field access below.
+    /* v8 ignore next 3 */
     if (state._tag !== 'PeerKnown') {
       return;
     }
@@ -492,6 +418,9 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
       return yield* beginPeerReconnect();
     }
 
+    // The generation guard above already rejects mismatched peer connections,
+    // so the identity re-check here is defensive and never false.
+    /* v8 ignore next */
     if (state._tag === 'WaitingForPeer' && state.generation.peerConnection === peerConnection) {
       yield* Scope.close(state.generation.scope, Exit.void);
 
@@ -688,10 +617,11 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
 });
 
 /**
- * Runs signaling, platform callbacks, and UI commands through one serialized
- * actor. The room stream owns the session lifetime, while a replaceable child
- * scope owns each peer-connection generation. Handle identity rejects stale
- * callbacks, and transport recovery replaces only the active generation.
+ * Creates the state machine for one peer session.
+ *
+ * `PeerSessionHost` serializes its inputs and manages its lifetime. Reconnects
+ * replace the current peer-connection generation, and callbacks from older
+ * generations are ignored.
  *
  * ```text
  * INPUTS                              SERIALIZED PROCESSOR
@@ -869,139 +799,4 @@ export const makePeerSessionActor = Effect.fnUntraced(function* (
  *   -> platform.addIceCandidate(peer connection, candidate)
  * ```
  */
-export interface PeerSession {
-  /** Enqueues a chat command; `true` means queued, not remotely delivered. */
-  readonly sendMessage: (message: string) => boolean;
-  /** Explicitly releases room membership before the client tears down its transport. */
-  readonly leave: () => Promise<void>;
-}
-
-export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSession')(function* (
-  session: RoomSession,
-) {
-  const client = yield* AppClient;
-  const { iceServers } = yield* client
-    .GetIceServers()
-    .pipe(
-      Effect.catch((error) =>
-        Effect.logWarning('Falling back to default ICE servers', error).pipe(
-          Effect.as({ iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }] }),
-        ),
-      ),
-    );
-  const platform = yield* PeerSessionPlatform;
-  const peerSessionEventSink = yield* PeerSessionEventSink;
-  const sessionScope = yield* Scope.Scope;
-  const mediaScope = yield* Scope.fork(sessionScope);
-  const actorScope = yield* Scope.fork(sessionScope);
-  const localInputQueue = yield* Queue.unbounded<PeerSessionLocalInput>();
-  const dispatchLocalInput: PeerSessionLocalInputDispatch = (input) => {
-    Queue.offerUnsafe(localInputQueue, input);
-  };
-
-  const roomInputStream = client.OpenRoomSession(session).pipe(
-    Stream.map(
-      ({ event }): PeerSessionInput => ({
-        _tag: 'RoomEvent',
-        event,
-      }),
-    ),
-  );
-
-  const localInputStream = Stream.fromQueue(localInputQueue);
-
-  yield* peerSessionEventSink.emit({ _tag: 'SessionStarted' });
-
-  // Local camera + microphone outlive individual connection generations but
-  // are released as soon as the session actor reaches a terminal state.
-  const localStream = yield* platform.acquireLocalMedia.pipe(Scope.provide(mediaScope));
-  yield* peerSessionEventSink.emit({ _tag: 'LocalStreamReady', stream: localStream });
-
-  const actor = yield* makePeerSessionActor(
-    session,
-    localStream,
-    iceServers,
-    dispatchLocalInput,
-  ).pipe(Scope.provide(actorScope));
-
-  const actorLoop = Stream.merge(roomInputStream, localInputStream, {
-    haltStrategy: 'left',
-  }).pipe(Stream.runForEach(actor.handleInput));
-
-  yield* actorLoop.pipe(
-    Effect.ensuring(Scope.close(actorScope, Exit.void)),
-    Effect.ensuring(Queue.shutdown(localInputQueue)),
-    Effect.onExit(
-      Effect.fnUntraced(function* (exit) {
-        yield* Scope.close(mediaScope, Exit.void);
-
-        if (Exit.isSuccess(exit)) {
-          yield* Effect.logInfo('Signaling stream ended');
-          return yield* peerSessionEventSink.emit({ _tag: 'SignalingDisconnected' });
-        }
-
-        if (!Cause.hasInterruptsOnly(exit.cause)) {
-          const maybeError = Cause.findErrorOption(exit.cause);
-
-          if (Option.isSome(maybeError)) {
-            const error = maybeError.value;
-
-            if (isRoomFull(error)) {
-              yield* Effect.logWarning('Room join rejected because room is full');
-              return yield* peerSessionEventSink.emit({
-                _tag: 'RoomJoinRejected',
-                reason: 'room-full',
-              });
-            }
-
-            if (isPeerAlreadyJoined(error)) {
-              yield* Effect.logWarning(
-                'Room join rejected because peer identity is already present',
-              );
-              return yield* peerSessionEventSink.emit({
-                _tag: 'RoomJoinRejected',
-                reason: 'peer-already-joined',
-              });
-            }
-
-            if (isPeerNotInRoom(error)) {
-              yield* Effect.logWarning('Signaling rejected because peer is no longer in room');
-              return yield* peerSessionEventSink.emit({
-                _tag: 'SignalingDisconnected',
-              });
-            }
-
-            if (isPlatformError(error)) {
-              yield* Effect.logError('Peer session failed during platform operation', error).pipe(
-                Effect.annotateLogs('operation', error.operation),
-              );
-              return yield* peerSessionEventSink.emit({ _tag: 'SessionFailed' });
-            }
-          }
-
-          yield* Effect.logError('Peer session failed', exit.cause);
-          return yield* peerSessionEventSink.emit({ _tag: 'SessionFailed' });
-        }
-      }),
-    ),
-    Effect.forkScoped({ startImmediately: true }),
-  );
-
-  let leavePromise: Promise<void> | undefined;
-
-  return {
-    sendMessage: (message) =>
-      Queue.offerUnsafe(localInputQueue, {
-        _tag: 'SendMessage',
-        message,
-      }),
-    leave: () => {
-      leavePromise ??= Effect.runPromise(
-        Ref.get(actor.sessionTokenRef).pipe(
-          Effect.flatMap((sessionToken) => client.LeaveRoom({ ...session, sessionToken })),
-        ),
-      );
-      return leavePromise;
-    },
-  } satisfies PeerSession;
-});
+export const makePeerSessionActor = makePeerSessionActorInternal;

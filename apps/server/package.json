@@ -8,6 +8,7 @@
     "dev": "bun run --watch src/index.ts",
     "start": "bun run src/index.ts",
     "test": "vitest run src",
+    "test:coverage": "vitest run src --coverage",
     "test:watch": "vitest --watch"
   },
   "dependencies": {
@@ -15,6 +16,7 @@
     "@effect/vitest": "catalog:",
     "@tether/contracts": "workspace:*",
     "@types/bun": "catalog:",
+    "@vitest/coverage-v8": "catalog:",
     "effect": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
