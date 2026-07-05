@@ -2,7 +2,8 @@
 
 - No dev dependencies — everything goes under `dependencies`.
 - Shared deps live in the root `package.json` catalog and are consumed via `catalog:`.
-- Exception: `apps/mobile` pins `react`, `react-native`, and `@types/react` to the versions its Expo SDK ships (Expo controls them), not the catalog. Safe because `@tether/client-runtime` is React-free, so web and mobile can run different React versions.
+- `apps/mobile` pins `react-native` and `@types/react`; its catalog React version must remain aligned with Expo.
+- Keep Bun's hoisted linker: Expo autolinking requires one physical copy of native modules.
 
 ## Vendored Repositories (`repos/`)
 

@@ -20,6 +20,8 @@
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
     "noUncheckedSideEffectImports": true,
     "paths": {
       "@/*": ["../web/src/*"]

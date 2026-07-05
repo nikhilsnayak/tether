@@ -1,26 +1,33 @@
 import { Schema } from 'effect';
 
-export const PeerId = Schema.String.pipe(Schema.brand('PeerId'));
+const PeerIdString = Schema.String.check(Schema.isPattern(/^[a-z]{12}$/));
+const RoomIdString = Schema.String.check(Schema.isPattern(/^[a-z]{3}-[a-z]{4}-[a-z]{3}$/));
+const SessionToken = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
+const SessionDescription = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(262_144));
+const IceCandidate = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(8_192));
+const IceCandidateAttribute = Schema.String.check(Schema.isMinLength(0), Schema.isMaxLength(256));
+
+export const PeerId = PeerIdString.pipe(Schema.brand('PeerId'));
 export type PeerId = typeof PeerId.Type;
 
-export const RoomId = Schema.String.pipe(Schema.brand('RoomId'));
+export const RoomId = RoomIdString.pipe(Schema.brand('RoomId'));
 export type RoomId = typeof RoomId.Type;
 
 export class SessionDescriptionSignal extends Schema.TaggedClass<SessionDescriptionSignal>()(
   '@tether/SessionDescriptionSignal',
   {
     type: Schema.Literals(['offer', 'answer']),
-    sdp: Schema.String,
+    sdp: SessionDescription,
   },
 ) {}
 
 export class IceCandidateSignal extends Schema.TaggedClass<IceCandidateSignal>()(
   '@tether/IceCandidateSignal',
   {
-    candidate: Schema.String,
-    sdpMid: Schema.NullOr(Schema.String),
+    candidate: IceCandidate,
+    sdpMid: Schema.NullOr(IceCandidateAttribute),
     sdpMLineIndex: Schema.NullOr(Schema.Number),
-    usernameFragment: Schema.NullOr(Schema.String),
+    usernameFragment: Schema.NullOr(IceCandidateAttribute),
   },
 ) {}
 
@@ -31,7 +38,7 @@ export class RoomSessionOpenedEvent extends Schema.TaggedClass<RoomSessionOpened
   '@tether/RoomSessionOpenedEvent',
   {
     peerId: Schema.NullOr(PeerId),
-    sessionToken: Schema.String,
+    sessionToken: SessionToken,
   },
 ) {}
 
@@ -59,6 +66,13 @@ export class RoomFull extends Schema.TaggedErrorClass<RoomFull>()('@tether/RoomF
 }) {}
 
 export const isRoomFull = Schema.is(RoomFull);
+
+export class ServerAtCapacity extends Schema.TaggedErrorClass<ServerAtCapacity>()(
+  '@tether/ServerAtCapacity',
+  {},
+) {}
+
+export const isServerAtCapacity = Schema.is(ServerAtCapacity);
 
 export class PeerAlreadyJoined extends Schema.TaggedErrorClass<PeerAlreadyJoined>()(
   '@tether/PeerAlreadyJoined',
@@ -97,18 +111,18 @@ export const OpenRoomSessionSuccess = Schema.Struct({
   event: RoomEvent,
 });
 
-export const OpenRoomSessionError = Schema.Union([RoomFull, PeerAlreadyJoined]);
+export const OpenRoomSessionError = Schema.Union([RoomFull, ServerAtCapacity, PeerAlreadyJoined]);
 
 export const LeaveRoomPayload = Schema.Struct({
   selfId: PeerId,
   roomId: RoomId,
-  sessionToken: Schema.String,
+  sessionToken: SessionToken,
 });
 
 export const SendSignalPayload = Schema.Struct({
   selfId: PeerId,
   roomId: RoomId,
-  sessionToken: Schema.String,
+  sessionToken: SessionToken,
   signal: Signal,
 });
 

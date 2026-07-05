@@ -5,6 +5,8 @@
     "moduleResolution": "bundler",
     "skipLibCheck": true,
     "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
 
     "plugins": [
       {

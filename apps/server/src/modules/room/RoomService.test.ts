@@ -8,6 +8,7 @@ import {
   RoomFull,
   RoomId,
   RoomSessionOpenedEvent,
+  ServerAtCapacity,
   SessionDescriptionSignal,
   SignalReceivedEvent,
 } from '@tether/contracts/modules/room';
@@ -17,10 +18,24 @@ import { TestClock } from 'effect/testing';
 import { MAX_LIVE_ROOMS, SIGNAL_BUCKET_CAPACITY } from './Constants';
 import { RoomService } from './RoomService';
 
-const roomId = RoomId.make('room-1');
-const alice = PeerId.make('alice');
-const bob = PeerId.make('bob');
-const charlie = PeerId.make('charlie');
+const roomId = RoomId.make('abc-defg-hij');
+const alice = PeerId.make('aaaaaaaaaaaa');
+const bob = PeerId.make('bbbbbbbbbbbb');
+const charlie = PeerId.make('cccccccccccc');
+
+const letters = (length: number, index: number) => {
+  const value = Array.from({ length }, () => 'a');
+  for (let position = length - 1; position >= 0; position--) {
+    value[position] = String.fromCharCode(97 + (index % 26));
+    index = Math.floor(index / 26);
+  }
+  return value.join('');
+};
+const randomRoomId = (index: number) => {
+  const value = letters(10, index);
+  return RoomId.make(`${value.slice(0, 3)}-${value.slice(3, 7)}-${value.slice(7)}`);
+};
+const randomPeerId = (index: number) => PeerId.make(letters(12, index));
 
 const withRoomService = <A, E, R>(effect: Effect.Effect<A, E, R | RoomService>) =>
   effect.pipe(Effect.provide(RoomService.layerTest));
@@ -306,22 +321,18 @@ describe('RoomService', () => {
 
         yield* Effect.forEach(
           Array.from({ length: MAX_LIVE_ROOMS }, (_, index) => index),
-          (index) =>
-            room.openSession(RoomId.make(`capacity-room-${index}`), PeerId.make(`peer-${index}`)),
+          (index) => room.openSession(randomRoomId(index), randomPeerId(index)),
           { discard: true },
         );
 
-        const error = yield* room
-          .openSession(RoomId.make('over-capacity'), alice)
-          .pipe(Effect.flip);
-        const existingRoomEvents = yield* room.openSession(RoomId.make('capacity-room-0'), bob);
+        const error = yield* room.openSession(RoomId.make('zzz-zzzz-zzz'), alice).pipe(Effect.flip);
+        const existingRoomEvents = yield* room.openSession(randomRoomId(0), bob);
         const existingRoomOpened = requireOpenedEvent(
           (yield* existingRoomEvents.pipe(Stream.take(1), Stream.runCollect))[0],
         );
 
-        assert.instanceOf(error, RoomFull);
-        assert.strictEqual(error.roomId, RoomId.make('over-capacity'));
-        assert.strictEqual(existingRoomOpened.peerId, PeerId.make('peer-0'));
+        assert.instanceOf(error, ServerAtCapacity);
+        assert.strictEqual(existingRoomOpened.peerId, randomPeerId(0));
       }),
     ),
   );

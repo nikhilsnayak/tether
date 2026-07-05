@@ -15,9 +15,9 @@ test('web app loads', async ({ page }) => {
 });
 
 test('web app opens a signaling session', async ({ page }) => {
-  await page.goto('/room/e2e-smoke-room');
+  await page.goto('/room/eet-smoo-kee');
   await continueInBrowser(page);
 
   await expect(page.getByText('Share this room to invite someone.')).toBeVisible();
-  await expect(page.getByText('Room e2e-smoke-room')).toBeVisible();
+  await expect(page.getByText('Room eet-smoo-kee')).toBeVisible();
 });

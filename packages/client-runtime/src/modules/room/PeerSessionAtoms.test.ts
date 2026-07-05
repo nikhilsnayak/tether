@@ -20,7 +20,7 @@ it.effect('projects session events into the atom registry', () =>
     );
     const localStream: MediaStreamHandle = { value: { id: 'local' } };
     const remoteStream: MediaStreamHandle = { value: { id: 'remote' } };
-    const peerId = PeerId.make('peer');
+    const peerId = PeerId.make('pppppppppppp');
 
     yield* Effect.gen(function* () {
       const sink = yield* PeerSessionEventSink;
@@ -45,6 +45,7 @@ it.effect('projects session events into the atom registry', () =>
         { _tag: 'SessionFailed' },
         { _tag: 'SignalingDisconnected' },
         { _tag: 'RoomJoinRejected', reason: 'room-full' },
+        { _tag: 'RoomJoinRejected', reason: 'server-at-capacity' },
         { _tag: 'SessionStarted' },
       ];
 

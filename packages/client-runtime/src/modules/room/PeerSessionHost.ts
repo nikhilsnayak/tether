@@ -1,4 +1,9 @@
-import { isPeerAlreadyJoined, isPeerNotInRoom, isRoomFull } from '@tether/contracts/modules/room';
+import {
+  isPeerAlreadyJoined,
+  isPeerNotInRoom,
+  isRoomFull,
+  isServerAtCapacity,
+} from '@tether/contracts/modules/room';
 import { Cause, Effect, Exit, Option, Queue, Ref, Scope, Stream } from 'effect';
 
 import { AppClient } from '../../AppClient';
@@ -88,6 +93,14 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
               return yield* peerSessionEventSink.emit({
                 _tag: 'RoomJoinRejected',
                 reason: 'room-full',
+              });
+            }
+
+            if (isServerAtCapacity(error)) {
+              yield* Effect.logWarning('Room join rejected because server is at capacity');
+              return yield* peerSessionEventSink.emit({
+                _tag: 'RoomJoinRejected',
+                reason: 'server-at-capacity',
               });
             }
 

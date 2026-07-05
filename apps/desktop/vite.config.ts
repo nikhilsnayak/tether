@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 
 import babel from '@rolldown/plugin-babel';
 import tailwindcss from '@tailwindcss/vite';
+import { tanstackRouter } from '@tanstack/router-plugin/vite';
 import react, { reactCompilerPreset } from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
@@ -30,6 +31,17 @@ export default defineConfig(async () => {
       outDir: resolve(__dirname, 'dist/renderer'),
       emptyOutDir: true,
     },
-    plugins: [devtools(), react(), babel({ presets: [reactCompilerPreset()] }), tailwindcss()],
+    plugins: [
+      devtools(),
+      tanstackRouter({
+        target: 'react',
+        autoCodeSplitting: true,
+        routesDirectory: resolve(__dirname, '../web/src/routes'),
+        generatedRouteTree: resolve(__dirname, '../web/src/routeTree.gen.ts'),
+      }),
+      react(),
+      babel({ presets: [reactCompilerPreset()] }),
+      tailwindcss(),
+    ],
   };
 });

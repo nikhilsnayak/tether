@@ -10,20 +10,36 @@ import {
   RoomId,
   RoomRpcs,
   RoomSessionOpenedEvent,
+  ServerAtCapacity,
   SessionDescriptionSignal,
   SignalReceivedEvent,
 } from '@tether/contracts/modules/room';
 import { Deferred, Effect, Fiber, Layer, Stream } from 'effect';
 import { RpcTest } from 'effect/unstable/rpc';
 
+import { MAX_LIVE_ROOMS } from './Constants';
 import { RoomHandlers } from './Handlers';
 import { RoomService } from './RoomService';
 
-const roomId = RoomId.make('room-1');
-const alice = PeerId.make('alice');
-const bob = PeerId.make('bob');
-const charlie = PeerId.make('charlie');
-const mallory = PeerId.make('mallory');
+const roomId = RoomId.make('abc-defg-hij');
+const alice = PeerId.make('aaaaaaaaaaaa');
+const bob = PeerId.make('bbbbbbbbbbbb');
+const charlie = PeerId.make('cccccccccccc');
+const mallory = PeerId.make('mmmmmmmmmmmm');
+
+const letters = (length: number, index: number) => {
+  const value = Array.from({ length }, () => 'a');
+  for (let position = length - 1; position >= 0; position--) {
+    value[position] = String.fromCharCode(97 + (index % 26));
+    index = Math.floor(index / 26);
+  }
+  return value.join('');
+};
+const randomRoomId = (index: number) => {
+  const value = letters(10, index);
+  return RoomId.make(`${value.slice(0, 3)}-${value.slice(3, 7)}-${value.slice(7)}`);
+};
+const randomPeerId = (index: number) => PeerId.make(letters(12, index));
 
 const TestHandlers = RoomHandlers.pipe(Layer.provide(RoomService.layerTest));
 
@@ -286,6 +302,27 @@ describe('RoomHandlers', () => {
 
       assert.instanceOf(error, RoomFull);
       assert.strictEqual(error.roomId, roomId);
+    }),
+  );
+
+  it.effect('returns ServerAtCapacity through the RPC error channel', () =>
+    Effect.gen(function* () {
+      const client = yield* makeClient;
+
+      yield* Effect.forEach(
+        Array.from({ length: MAX_LIVE_ROOMS }, (_, index) => index),
+        (index) =>
+          client
+            .OpenRoomSession({ roomId: randomRoomId(index), selfId: randomPeerId(index) })
+            .pipe(Stream.runDrain, Effect.forkChild({ startImmediately: true })),
+        { discard: true },
+      );
+
+      const error = yield* client
+        .OpenRoomSession({ roomId: RoomId.make('zzz-zzzz-zzz'), selfId: alice })
+        .pipe(Stream.runDrain, Effect.flip);
+
+      assert.instanceOf(error, ServerAtCapacity);
     }),
   );
 

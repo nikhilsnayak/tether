@@ -17,7 +17,7 @@ test('home page fits the viewport', async ({ page }) => {
 });
 
 test('room waiting screen fits the viewport', async ({ page }) => {
-  await page.goto('/room/layout-waiting');
+  await page.goto('/room/lay-outw-ait');
   await continueInBrowser(page);
   await expect(page.getByText('Share this room to invite someone.')).toBeVisible();
   expect(await fitsViewport(page)).toBe(true);

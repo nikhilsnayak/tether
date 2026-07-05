@@ -2,6 +2,7 @@ import type { PeerSessionView } from './PeerSessionModel';
 
 const ERROR_STATUSES = new Set<PeerSessionView['status']>([
   'room-full',
+  'server-at-capacity',
   'peer-already-joined',
   'disconnected',
   'failed',
@@ -85,6 +86,13 @@ export function peerSessionStatusPresentation(
         pulse: false,
         label: 'Room is full',
         hint: 'This room already has two people.',
+      };
+    case 'server-at-capacity':
+      return {
+        tone: 'destructive',
+        pulse: false,
+        label: 'Service is busy',
+        hint: 'Tether has reached its current call capacity. Try again shortly.',
       };
     case 'peer-already-joined':
       return {

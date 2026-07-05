@@ -14,7 +14,7 @@ FROM base AS installer
 
 COPY --from=pruner /app/out/json/ .
 
-RUN bun install --frozen-lockfile --production --ignore-scripts
+RUN bun install --frozen-lockfile --ignore-scripts
 
 COPY --from=pruner /app/out/full/ .
 

@@ -150,7 +150,7 @@ export type PeerSessionEvent =
     }
   | {
       readonly _tag: 'RoomJoinRejected';
-      readonly reason: 'room-full' | 'peer-already-joined';
+      readonly reason: 'room-full' | 'server-at-capacity' | 'peer-already-joined';
     }
   | {
       readonly _tag: 'PeerDeparted';
@@ -167,6 +167,7 @@ export interface PeerSessionView {
     | 'transport-lost'
     | 'negotiation-stalled'
     | 'room-full'
+    | 'server-at-capacity'
     | 'peer-already-joined'
     | 'waiting-for-peer';
   readonly messages: ReadonlyArray<ChatMessage>;

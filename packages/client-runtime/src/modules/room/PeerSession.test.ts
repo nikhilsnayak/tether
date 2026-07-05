@@ -9,6 +9,7 @@ import {
   RoomId,
   RoomFull,
   RoomSessionOpenedEvent,
+  ServerAtCapacity,
   SessionDescriptionSignal,
   SignalReceivedEvent,
   type RoomEvent,
@@ -65,12 +66,12 @@ const webCrypto = Layer.succeed(
 );
 
 const session: RoomSession = {
-  roomId: RoomId.make('room-1'),
-  selfId: PeerId.make('alice'),
+  roomId: RoomId.make('abc-defg-hij'),
+  selfId: PeerId.make('aaaaaaaaaaaa'),
 };
-const bob = PeerId.make('bob');
-const charlie = PeerId.make('charlie');
-const mallory = PeerId.make('mallory');
+const bob = PeerId.make('bbbbbbbbbbbb');
+const charlie = PeerId.make('cccccccccccc');
+const mallory = PeerId.make('mmmmmmmmmmmm');
 const testSessionToken = 'test-session-token';
 
 const makeFixture = Effect.fn('makeFixture')(function* (
@@ -410,6 +411,27 @@ describe('startPeerSession', () => {
         });
 
         assert.include(fixture.operations, 'releaseLocalMedia');
+      }),
+    ),
+  );
+
+  it.effect('emits RoomJoinRejected when the server is at capacity', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture((() =>
+          Stream.fail(new ServerAtCapacity())) as AppClient['Service']['OpenRoomSession']);
+
+        yield* startPeerSession(session).pipe(Effect.provide(fixture.dependencies));
+        const started = yield* Queue.take(fixture.eventQueue);
+        const localStream = yield* Queue.take(fixture.eventQueue);
+        const event = yield* Queue.take(fixture.eventQueue);
+
+        assert.deepStrictEqual(started, { _tag: 'SessionStarted' });
+        assert.strictEqual(localStream._tag, 'LocalStreamReady');
+        assert.deepStrictEqual(event, {
+          _tag: 'RoomJoinRejected',
+          reason: 'server-at-capacity',
+        });
       }),
     ),
   );
@@ -1277,11 +1299,11 @@ describe('peer-session actor', () => {
           { _tag: 'ChatReady' },
           {
             _tag: 'ChatMessageAdded',
-            message: { id: 'alice:self:0', sender: 'self', text: 'hello peer' },
+            message: { id: 'aaaaaaaaaaaa:self:0', sender: 'self', text: 'hello peer' },
           },
           {
             _tag: 'ChatMessageAdded',
-            message: { id: 'alice:peer:1', sender: 'peer', text: 'hello self' },
+            message: { id: 'aaaaaaaaaaaa:peer:1', sender: 'peer', text: 'hello self' },
           },
         ]);
       }),

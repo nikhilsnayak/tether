@@ -8,8 +8,13 @@
     ".": "./src/index.ts",
     "./modules/*": "./src/modules/*/index.ts"
   },
+  "scripts": {
+    "test": "vitest run src"
+  },
   "dependencies": {
+    "@effect/vitest": "catalog:",
     "effect": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

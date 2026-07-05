@@ -5,6 +5,7 @@ import {
   PeerNotInRoom,
   RoomSessionOpenedEvent,
   RoomFull,
+  ServerAtCapacity,
   SignalReceivedEvent,
   type PeerId,
   type RoomEvent,
@@ -96,7 +97,7 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
                 yield* Effect.logWarning('Room join rejected').pipe(
                   Effect.annotateLogs('reason', 'server-at-capacity'),
                 );
-                return yield* new RoomFull({ roomId });
+                return yield* new ServerAtCapacity();
               }
 
               const pubsub = yield* PubSub.unbounded<RoomEvent>();

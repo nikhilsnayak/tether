@@ -18,6 +18,7 @@
     "@rolldown/plugin-babel": "catalog:",
     "@tailwindcss/vite": "catalog:",
     "@tanstack/devtools-vite": "catalog:",
+    "@tanstack/router-plugin": "catalog:",
     "@tether/ui": "workspace:*",
     "@types/node": "catalog:",
     "@types/react": "catalog:",

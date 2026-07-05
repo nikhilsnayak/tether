@@ -60,13 +60,15 @@ flowchart LR
 
 The Bun server exposes an Effect RPC endpoint over WebSocket. A streaming `OpenRoomSession` call represents both room membership and the server-to-client event channel; unary RPCs carry ICE and session-description signals and handle explicit departure.
 
+Signaling is intentionally single-process and in-memory. Active calls end when the server process restarts or is redeployed, and the room registry only coordinates one live replica at a time. Running multiple replicas requires either shared signaling state or deterministic room affinity. That tradeoff keeps the system ephemeral and simple, and it does not imply that media ever transits the server.
+
 On the client, room events, WebRTC callbacks, timers, and UI commands enter one serialized peer-session actor. That actor owns negotiation state and scoped resources, preventing concurrent callbacks from racing connection state. The implementation is React-free and platform-neutral; the web and mobile apps each supply a thin WebRTC adapter and UI on top of the shared runtime.
 
 ## Quick start
 
 ### Requirements
 
-- [Bun](https://bun.sh/) 1.3.14 or newer
+- [Bun](https://bun.sh/) 1.3.14
 - A modern browser with WebRTC and camera/microphone access
 
 ```sh
@@ -98,6 +100,7 @@ configuration. Calls that cannot establish a direct peer-to-peer path will fail.
 | Variable          | Default                   | Purpose                                          |
 | ----------------- | ------------------------- | ------------------------------------------------ |
 | `VITE_SERVER_URL` | `ws://localhost:8008/rpc` | Full WebSocket URL of the signaling RPC endpoint |
+| `VITE_WEB_URL`    | current web origin        | Base URL used for shareable room links           |
 
 Production browser deployments require HTTPS and a corresponding `wss://` signaling URL for camera and microphone access.
 
@@ -196,8 +199,8 @@ bun run test
 bun run build
 ```
 
-Run `bun run test:coverage` to generate unit coverage reports for the server, client runtime, and
-mobile utility tests. CI retains those reports as an artifact.
+Run `bun run test:coverage` to generate unit coverage reports for the server, web, mobile, and
+client runtime. CI retains those reports as an artifact.
 
 The test suite covers room-capacity invariants, authenticated signaling, rate limits, STUN
 configuration, peer-session state transitions, resource cleanup, safety-code agreement, complete

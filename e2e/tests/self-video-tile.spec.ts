@@ -41,7 +41,7 @@ const dragTileTo = async (page: Page, x: number, y: number) => {
 const NEAR = 24;
 
 test('self-video tile snaps to whichever corner it is dragged to', async ({ page }) => {
-  await page.goto('/room/tile-drag');
+  await page.goto('/room/til-edra-gxx');
   await continueInBrowser(page);
   await expect(page.getByLabel('Local video preview')).toBeVisible();
 

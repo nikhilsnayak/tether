@@ -17,7 +17,7 @@ const connectedView: PeerSessionView = {
   chatReady: true,
   sas: '11111 22222 33333 44444 55555',
 };
-const peerId = PeerId.make('peer');
+const peerId = PeerId.make('pppppppppppp');
 
 describe('reducePeerSessionView', () => {
   it('identifies platform errors', () => {
@@ -81,6 +81,16 @@ describe('reducePeerSessionView', () => {
     assert.strictEqual(
       reducePeerSessionView(connectedView, { _tag: 'SessionStarted' }),
       initialPeerSessionView,
+    );
+  });
+
+  it('projects a server-capacity rejection', () => {
+    assert.strictEqual(
+      reducePeerSessionView(connectedView, {
+        _tag: 'RoomJoinRejected',
+        reason: 'server-at-capacity',
+      }).status,
+      'server-at-capacity',
     );
   });
 });

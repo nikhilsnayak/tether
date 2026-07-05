@@ -12,6 +12,7 @@ const statuses: ReadonlyArray<PeerSessionView['status']> = [
   'transport-lost',
   'negotiation-stalled',
   'room-full',
+  'server-at-capacity',
   'peer-already-joined',
   'waiting-for-peer',
 ];
@@ -31,7 +32,17 @@ describe('PeerSessionPresentation', () => {
       'disconnected',
       'failed',
       'room-full',
+      'server-at-capacity',
       'peer-already-joined',
     ]);
+  });
+
+  it('presents server capacity without room-specific guidance', () => {
+    assert.deepStrictEqual(peerSessionStatusPresentation('server-at-capacity'), {
+      tone: 'destructive',
+      pulse: false,
+      label: 'Service is busy',
+      hint: 'Tether has reached its current call capacity. Try again shortly.',
+    });
   });
 });
