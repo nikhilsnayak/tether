@@ -752,7 +752,11 @@ describe('peer-session actor', () => {
           _tag: 'RoomEvent',
           event: new SignalReceivedEvent({
             peerId: bob,
-            signal: new SessionDescriptionSignal({ type: 'offer', sdp: remoteOfferSdp }),
+            signal: new SessionDescriptionSignal({
+              negotiationEpoch: 0,
+              type: 'offer',
+              sdp: remoteOfferSdp,
+            }),
           }),
         });
         assert.lengthOf(
@@ -776,7 +780,11 @@ describe('peer-session actor', () => {
           _tag: 'RoomEvent',
           event: new SignalReceivedEvent({
             peerId: bob,
-            signal: new SessionDescriptionSignal({ type: 'answer', sdp: localAnswerSdp }),
+            signal: new SessionDescriptionSignal({
+              negotiationEpoch: 0,
+              type: 'answer',
+              sdp: localAnswerSdp,
+            }),
           }),
         });
         assert.lengthOf(
@@ -813,7 +821,11 @@ describe('peer-session actor', () => {
           _tag: 'RoomEvent',
           event: new SignalReceivedEvent({
             peerId: bob,
-            signal: new SessionDescriptionSignal({ type: 'answer', sdp: 'remote-answer' }),
+            signal: new SessionDescriptionSignal({
+              negotiationEpoch: 0,
+              type: 'answer',
+              sdp: 'remote-answer',
+            }),
           }),
         });
         yield* fixture.actor({
@@ -838,6 +850,7 @@ describe('peer-session actor', () => {
             Effect.fail(new PlatformError({ operation: 'add-ice-candidate', cause: 'boom' })),
         });
         const remoteIce = new IceCandidateSignal({
+          negotiationEpoch: 0,
           candidate: 'invalid-ice',
           sdpMid: '0',
           sdpMLineIndex: 0,
@@ -856,7 +869,11 @@ describe('peer-session actor', () => {
           _tag: 'RoomEvent',
           event: new SignalReceivedEvent({
             peerId: bob,
-            signal: new SessionDescriptionSignal({ type: 'answer', sdp: 'remote-answer' }),
+            signal: new SessionDescriptionSignal({
+              negotiationEpoch: 0,
+              type: 'answer',
+              sdp: 'remote-answer',
+            }),
           }),
         });
 
@@ -875,7 +892,11 @@ describe('peer-session actor', () => {
         const fixture = yield* makeFixture();
         const answer = new SignalReceivedEvent({
           peerId: bob,
-          signal: new SessionDescriptionSignal({ type: 'answer', sdp: 'remote-answer' }),
+          signal: new SessionDescriptionSignal({
+            negotiationEpoch: 0,
+            type: 'answer',
+            sdp: 'remote-answer',
+          }),
         });
 
         yield* fixture.actor({
@@ -1052,7 +1073,7 @@ describe('peer-session actor', () => {
     ).pipe(Effect.orDie),
   );
 
-  it.effect('accepts a fresh answer after reconnecting', () =>
+  it.effect('rejects a delayed old answer and accepts the current answer after reconnecting', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const fixture = yield* makeFixture();
@@ -1065,7 +1086,11 @@ describe('peer-session actor', () => {
           _tag: 'RoomEvent',
           event: new SignalReceivedEvent({
             peerId: bob,
-            signal: new SessionDescriptionSignal({ type: 'answer', sdp: 'initial-answer' }),
+            signal: new SessionDescriptionSignal({
+              negotiationEpoch: 0,
+              type: 'answer',
+              sdp: 'initial-answer',
+            }),
           }),
         });
         yield* fixture.actor({
@@ -1076,10 +1101,26 @@ describe('peer-session actor', () => {
           _tag: 'RoomEvent',
           event: new SignalReceivedEvent({
             peerId: bob,
-            signal: new SessionDescriptionSignal({ type: 'answer', sdp: 'reconnect-answer' }),
+            signal: new SessionDescriptionSignal({
+              negotiationEpoch: 0,
+              type: 'answer',
+              sdp: 'delayed-old-answer',
+            }),
+          }),
+        });
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new SignalReceivedEvent({
+            peerId: bob,
+            signal: new SessionDescriptionSignal({
+              negotiationEpoch: 1,
+              type: 'answer',
+              sdp: 'reconnect-answer',
+            }),
           }),
         });
 
+        assert.notInclude(fixture.operations, 'setRemoteDescription:answer:delayed-old-answer');
         assert.include(fixture.operations, 'setRemoteDescription:answer:reconnect-answer');
         assert.lengthOf(
           fixture.operations.filter((operation) =>
@@ -1087,6 +1128,60 @@ describe('peer-session actor', () => {
           ),
           2,
         );
+        assert.deepStrictEqual(
+          fixture.signals.flatMap((signal) =>
+            signal._tag === '@tether/SessionDescriptionSignal' && signal.type === 'offer'
+              ? [signal.negotiationEpoch]
+              : [],
+          ),
+          [0, 1],
+        );
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('applies only ICE from the active reconnect epoch', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture();
+
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+        });
+        yield* fixture.actor({
+          _tag: 'PeerConnectionFailed',
+          peerConnection: fixture.peerConnections[0]!,
+        });
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new SignalReceivedEvent({
+            peerId: bob,
+            signal: new IceCandidateSignal({
+              negotiationEpoch: 0,
+              candidate: 'stale-ice',
+              sdpMid: '0',
+              sdpMLineIndex: 0,
+              usernameFragment: null,
+            }),
+          }),
+        });
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new SignalReceivedEvent({
+            peerId: bob,
+            signal: new IceCandidateSignal({
+              negotiationEpoch: 1,
+              candidate: 'current-ice',
+              sdpMid: '0',
+              sdpMLineIndex: 0,
+              usernameFragment: null,
+            }),
+          }),
+        });
+
+        assert.notInclude(fixture.operations, 'addIceCandidate:stale-ice');
+        assert.include(fixture.operations, 'addIceCandidate:current-ice');
       }),
     ).pipe(Effect.orDie),
   );
@@ -1156,7 +1251,11 @@ describe('peer-session actor', () => {
           _tag: 'RoomEvent',
           event: new SignalReceivedEvent({
             peerId: bob,
-            signal: new SessionDescriptionSignal({ type: 'answer', sdp: 'remote-answer' }),
+            signal: new SessionDescriptionSignal({
+              negotiationEpoch: 0,
+              type: 'answer',
+              sdp: 'remote-answer',
+            }),
           }),
         });
         yield* fixture.actor({
@@ -1204,7 +1303,11 @@ describe('peer-session actor', () => {
           _tag: 'RoomEvent',
           event: new SignalReceivedEvent({
             peerId: bob,
-            signal: new SessionDescriptionSignal({ type: 'offer', sdp: 'remote-offer' }),
+            signal: new SessionDescriptionSignal({
+              negotiationEpoch: 0,
+              type: 'offer',
+              sdp: 'remote-offer',
+            }),
           }),
         });
         yield* fixture.actor({
@@ -1237,17 +1340,104 @@ describe('peer-session actor', () => {
     ).pipe(Effect.orDie),
   );
 
+  it.effect('answers only newer offer epochs', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture();
+
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new RoomSessionOpenedEvent({ peerId: null, sessionToken: testSessionToken }),
+        });
+        yield* fixture.actor({ _tag: 'RoomEvent', event: new PeerJoinedEvent({ peerId: bob }) });
+
+        for (const [negotiationEpoch, sdp] of [
+          [4, 'first-offer'],
+          [4, 'duplicate-offer'],
+          [3, 'older-offer'],
+          [5, 'newer-offer'],
+        ] as const) {
+          yield* fixture.actor({
+            _tag: 'RoomEvent',
+            event: new SignalReceivedEvent({
+              peerId: bob,
+              signal: new SessionDescriptionSignal({ negotiationEpoch, type: 'offer', sdp }),
+            }),
+          });
+        }
+
+        assert.include(fixture.operations, 'setRemoteDescription:offer:first-offer');
+        assert.notInclude(fixture.operations, 'setRemoteDescription:offer:duplicate-offer');
+        assert.notInclude(fixture.operations, 'setRemoteDescription:offer:older-offer');
+        assert.include(fixture.operations, 'setRemoteDescription:offer:newer-offer');
+        assert.deepStrictEqual(
+          fixture.signals.flatMap((signal) =>
+            signal._tag === '@tether/SessionDescriptionSignal' && signal.type === 'answer'
+              ? [signal.negotiationEpoch]
+              : [],
+          ),
+          [4, 5],
+        );
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('accepts a lower offer epoch after the active peer departs', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture();
+
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new RoomSessionOpenedEvent({ peerId: null, sessionToken: testSessionToken }),
+        });
+        yield* fixture.actor({ _tag: 'RoomEvent', event: new PeerJoinedEvent({ peerId: bob }) });
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new SignalReceivedEvent({
+            peerId: bob,
+            signal: new SessionDescriptionSignal({
+              negotiationEpoch: 7,
+              type: 'offer',
+              sdp: 'old-peer-offer',
+            }),
+          }),
+        });
+        yield* fixture.actor({ _tag: 'RoomEvent', event: new PeerLeftEvent({ peerId: bob }) });
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new PeerJoinedEvent({ peerId: charlie }),
+        });
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new SignalReceivedEvent({
+            peerId: charlie,
+            signal: new SessionDescriptionSignal({
+              negotiationEpoch: 0,
+              type: 'offer',
+              sdp: 'replacement-offer',
+            }),
+          }),
+        });
+
+        assert.include(fixture.operations, 'setRemoteDescription:offer:old-peer-offer');
+        assert.include(fixture.operations, 'setRemoteDescription:offer:replacement-offer');
+      }),
+    ).pipe(Effect.orDie),
+  );
+
   it.effect('routes ICE and chat through the active peer and owned channel', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const fixture = yield* makeFixture();
-        const localIce = new IceCandidateSignal({
+        const localIce = {
           candidate: 'local-ice',
           sdpMid: '0',
           sdpMLineIndex: 0,
           usernameFragment: null,
-        });
+        };
         const remoteIce = new IceCandidateSignal({
+          negotiationEpoch: 0,
           candidate: 'remote-ice',
           sdpMid: '0',
           sdpMLineIndex: 0,
@@ -1262,7 +1452,11 @@ describe('peer-session actor', () => {
           _tag: 'RoomEvent',
           event: new SignalReceivedEvent({
             peerId: bob,
-            signal: new SessionDescriptionSignal({ type: 'answer', sdp: 'remote-answer' }),
+            signal: new SessionDescriptionSignal({
+              negotiationEpoch: 0,
+              type: 'answer',
+              sdp: 'remote-answer',
+            }),
           }),
         });
         yield* fixture.actor({
@@ -1294,6 +1488,13 @@ describe('peer-session actor', () => {
           'addIceCandidate:remote-ice',
           'sendDataChannelMessage:hello peer',
         ]);
+        assert.strictEqual(
+          fixture.signals.find(
+            (signal) =>
+              signal._tag === '@tether/IceCandidateSignal' && signal.candidate === 'local-ice',
+          )?.negotiationEpoch,
+          0,
+        );
         assert.deepStrictEqual(fixture.events, [
           { _tag: 'Connected', peerId: bob },
           { _tag: 'ChatReady' },
@@ -1314,18 +1515,18 @@ describe('peer-session actor', () => {
     Effect.scoped(
       Effect.gen(function* () {
         const fixture = yield* makeFixture();
-        const staleIce = new IceCandidateSignal({
+        const staleIce = {
           candidate: 'stale-ice',
           sdpMid: '0',
           sdpMLineIndex: 0,
           usernameFragment: null,
-        });
-        const currentIce = new IceCandidateSignal({
+        };
+        const currentIce = {
           candidate: 'current-ice',
           sdpMid: '0',
           sdpMLineIndex: 0,
           usernameFragment: null,
-        });
+        };
         const remoteDataChannel: DataChannelHandle = {
           value: { label: 'chat' } satisfies TestDataChannel,
         };
@@ -1363,6 +1564,17 @@ describe('peer-session actor', () => {
           event: new PeerJoinedEvent({ peerId: charlie }),
         });
         yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new SignalReceivedEvent({
+            peerId: charlie,
+            signal: new SessionDescriptionSignal({
+              negotiationEpoch: 0,
+              type: 'offer',
+              sdp: 'replacement-offer',
+            }),
+          }),
+        });
+        yield* fixture.actor({
           _tag: 'LocalIceCandidate',
           peerConnection: fixture.peerConnection,
           candidate: staleIce,
@@ -1398,12 +1610,12 @@ describe('peer-session actor', () => {
     Effect.scoped(
       Effect.gen(function* () {
         const fixture = yield* makeFixture();
-        const ice = new IceCandidateSignal({
+        const ice = {
           candidate: 'too-early',
           sdpMid: null,
           sdpMLineIndex: null,
           usernameFragment: null,
-        });
+        };
 
         yield* fixture.actor({
           _tag: 'LocalIceCandidate',
@@ -1419,7 +1631,11 @@ describe('peer-session actor', () => {
           _tag: 'RoomEvent',
           event: new SignalReceivedEvent({
             peerId: mallory,
-            signal: new SessionDescriptionSignal({ type: 'answer', sdp: 'wrong-peer' }),
+            signal: new SessionDescriptionSignal({
+              negotiationEpoch: 0,
+              type: 'answer',
+              sdp: 'wrong-peer',
+            }),
           }),
         });
         yield* fixture.actor({
@@ -1436,6 +1652,32 @@ describe('peer-session actor', () => {
     ).pipe(Effect.orDie),
   );
 
+  it.effect('ignores local ICE before the answerer adopts an offer epoch', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture();
+
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new RoomSessionOpenedEvent({ peerId: null, sessionToken: testSessionToken }),
+        });
+        yield* fixture.actor({ _tag: 'RoomEvent', event: new PeerJoinedEvent({ peerId: bob }) });
+        yield* fixture.actor({
+          _tag: 'LocalIceCandidate',
+          peerConnection: fixture.peerConnection,
+          candidate: {
+            candidate: 'epochless-ice',
+            sdpMid: '0',
+            sdpMLineIndex: 0,
+            usernameFragment: null,
+          },
+        });
+
+        assert.deepStrictEqual(fixture.signals, []);
+      }),
+    ).pipe(Effect.orDie),
+  );
+
   it.effect('ignores platform events from an unowned peer connection', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -1444,12 +1686,12 @@ describe('peer-session actor', () => {
         const staleDataChannel: DataChannelHandle = {
           value: { label: 'chat' } satisfies TestDataChannel,
         };
-        const staleIce = new IceCandidateSignal({
+        const staleIce = {
           candidate: 'stale-ice',
           sdpMid: '0',
           sdpMLineIndex: 0,
           usernameFragment: null,
-        });
+        };
 
         yield* fixture.actor({
           _tag: 'RoomEvent',
@@ -1675,7 +1917,11 @@ describe('peer-session actor', () => {
           _tag: 'RoomEvent',
           event: new SignalReceivedEvent({
             peerId: bob,
-            signal: new SessionDescriptionSignal({ type: 'offer', sdp: 'remote-offer' }),
+            signal: new SessionDescriptionSignal({
+              negotiationEpoch: 0,
+              type: 'offer',
+              sdp: 'remote-offer',
+            }),
           }),
         });
 
@@ -1698,7 +1944,11 @@ describe('peer-session actor', () => {
           _tag: 'RoomEvent',
           event: new SignalReceivedEvent({
             peerId: bob,
-            signal: new SessionDescriptionSignal({ type: 'answer', sdp: 'remote-answer' }),
+            signal: new SessionDescriptionSignal({
+              negotiationEpoch: 0,
+              type: 'answer',
+              sdp: 'remote-answer',
+            }),
           }),
         });
 
@@ -1840,7 +2090,11 @@ describe('peer-session actor', () => {
           _tag: 'RoomEvent',
           event: new SignalReceivedEvent({
             peerId: bob,
-            signal: new SessionDescriptionSignal({ type: 'answer', sdp: answerSdp }),
+            signal: new SessionDescriptionSignal({
+              negotiationEpoch: 0,
+              type: 'answer',
+              sdp: answerSdp,
+            }),
           }),
         });
         yield* fixture.actor({

@@ -179,7 +179,11 @@ describe('RoomService', () => {
         );
         const event = new SignalReceivedEvent({
           peerId: bob,
-          signal: new SessionDescriptionSignal({ type: 'offer', sdp: 'test-offer' }),
+          signal: new SessionDescriptionSignal({
+            negotiationEpoch: 37,
+            type: 'offer',
+            sdp: 'test-offer',
+          }),
         });
 
         yield* room.sendSignal(roomId, bob, bobOpened.sessionToken, event.signal);
@@ -206,7 +210,8 @@ describe('RoomService', () => {
         );
 
         const signals = ['one', 'two', 'three'].map(
-          (sdp) => new SessionDescriptionSignal({ type: 'offer' as const, sdp }),
+          (sdp) =>
+            new SessionDescriptionSignal({ negotiationEpoch: 0, type: 'offer' as const, sdp }),
         );
 
         yield* Effect.forEach(signals, (signal) =>
@@ -234,7 +239,11 @@ describe('RoomService', () => {
           (yield* aliceEvents.pipe(Stream.take(1), Stream.runCollect))[0],
         );
         const bobEvents = yield* room.openSession(roomId, bob);
-        const signal = new SessionDescriptionSignal({ type: 'offer', sdp: 'flood' });
+        const signal = new SessionDescriptionSignal({
+          negotiationEpoch: 0,
+          type: 'offer',
+          sdp: 'flood',
+        });
 
         const results = yield* Effect.forEach(
           Array.from({ length: SIGNAL_BUCKET_CAPACITY + 10 }),
@@ -263,7 +272,11 @@ describe('RoomService', () => {
           (yield* aliceEvents.pipe(Stream.take(1), Stream.runCollect))[0],
         );
         const bobEvents = yield* room.openSession(roomId, bob);
-        const signal = new SessionDescriptionSignal({ type: 'offer', sdp: 'refill' });
+        const signal = new SessionDescriptionSignal({
+          negotiationEpoch: 0,
+          type: 'offer',
+          sdp: 'refill',
+        });
 
         yield* Effect.forEach(Array.from({ length: SIGNAL_BUCKET_CAPACITY }), () =>
           room.sendSignal(roomId, alice, aliceOpened.sessionToken, signal),
@@ -297,8 +310,16 @@ describe('RoomService', () => {
         const bobOpened = requireOpenedEvent(
           (yield* bobEvents.pipe(Stream.take(1), Stream.runCollect))[0],
         );
-        const aliceSignal = new SessionDescriptionSignal({ type: 'offer', sdp: 'alice' });
-        const bobSignal = new SessionDescriptionSignal({ type: 'answer', sdp: 'bob' });
+        const aliceSignal = new SessionDescriptionSignal({
+          negotiationEpoch: 0,
+          type: 'offer',
+          sdp: 'alice',
+        });
+        const bobSignal = new SessionDescriptionSignal({
+          negotiationEpoch: 0,
+          type: 'answer',
+          sdp: 'bob',
+        });
 
         yield* Effect.forEach(Array.from({ length: SIGNAL_BUCKET_CAPACITY }), () =>
           room.sendSignal(roomId, alice, aliceOpened.sessionToken, aliceSignal),
@@ -349,7 +370,11 @@ describe('RoomService', () => {
 
         const signal = new SignalReceivedEvent({
           peerId: alice,
-          signal: new SessionDescriptionSignal({ type: 'offer', sdp: 'immediate-offer' }),
+          signal: new SessionDescriptionSignal({
+            negotiationEpoch: 0,
+            type: 'offer',
+            sdp: 'immediate-offer',
+          }),
         });
         yield* room.sendSignal(roomId, alice, aliceOpened.sessionToken, signal.signal);
 
@@ -377,6 +402,7 @@ describe('RoomService', () => {
           (yield* bobEvents.pipe(Stream.take(1), Stream.runCollect))[0],
         );
         const signal = new SessionDescriptionSignal({
+          negotiationEpoch: 0,
           type: 'offer',
           sdp: 'still-a-member',
         });
@@ -404,7 +430,11 @@ describe('RoomService', () => {
         const aliceOpened = requireOpenedEvent(
           (yield* aliceEvents.pipe(Stream.take(1), Stream.runCollect))[0],
         );
-        const signal = new SessionDescriptionSignal({ type: 'offer', sdp: 'authenticated' });
+        const signal = new SessionDescriptionSignal({
+          negotiationEpoch: 0,
+          type: 'offer',
+          sdp: 'authenticated',
+        });
 
         const error = yield* room
           .sendSignal(roomId, alice, 'wrong-session-token', signal)
@@ -435,7 +465,11 @@ describe('RoomService', () => {
             roomId,
             alice,
             opened.sessionToken,
-            new SessionDescriptionSignal({ type: 'offer', sdp: 'after-close' }),
+            new SessionDescriptionSignal({
+              negotiationEpoch: 0,
+              type: 'offer',
+              sdp: 'after-close',
+            }),
           )
           .pipe(Effect.flip);
         assert.instanceOf(error, PeerNotInRoom);
@@ -474,7 +508,11 @@ describe('RoomService', () => {
             roomId,
             alice,
             'invalid-session-token',
-            new SessionDescriptionSignal({ type: 'offer', sdp: 'missing-room' }),
+            new SessionDescriptionSignal({
+              negotiationEpoch: 0,
+              type: 'offer',
+              sdp: 'missing-room',
+            }),
           )
           .pipe(Effect.flip);
         yield* room.openSession(roomId, bob);

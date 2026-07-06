@@ -4,7 +4,6 @@ import {
   PlatformError,
   type PlatformEvent,
 } from '@tether/client-runtime/modules/room';
-import { IceCandidateSignal } from '@tether/contracts/modules/room';
 import { Crypto, Effect } from 'effect';
 import { vi } from 'vitest';
 
@@ -162,15 +161,12 @@ describe('web peer-session platform', () => {
             type: 'answer',
             sdp: 'answer',
           });
-          yield* platform.addIceCandidate(
-            peerConnection,
-            new IceCandidateSignal({
-              candidate: 'candidate',
-              sdpMid: '0',
-              sdpMLineIndex: 0,
-              usernameFragment: 'ufrag',
-            }),
-          );
+          yield* platform.addIceCandidate(peerConnection, {
+            candidate: 'candidate',
+            sdpMid: '0',
+            sdpMLineIndex: 0,
+            usernameFragment: 'ufrag',
+          });
           yield* platform.sendDataChannelMessage(dataChannel, 'hello');
 
           assert.deepStrictEqual(nativePeer.configuration, {
@@ -310,12 +306,12 @@ describe('web peer-session platform', () => {
           platform.setRemoteDescription({ value: {} }, { type: 'answer', sdp: 'answer' }),
           platform.addIceCandidate(
             { value: {} },
-            new IceCandidateSignal({
+            {
               candidate: 'candidate',
               sdpMid: null,
               sdpMLineIndex: null,
               usernameFragment: null,
-            }),
+            },
           ),
           platform.sendDataChannelMessage({ value: {} }, 'hello'),
         ];

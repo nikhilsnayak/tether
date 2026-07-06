@@ -21,6 +21,7 @@ const sessionDescription = (sdp: string) => ({
   _tag: '@tether/SessionDescriptionSignal',
   type: 'offer',
   sdp,
+  negotiationEpoch: 0,
 });
 
 const iceCandidate = (
@@ -33,6 +34,7 @@ const iceCandidate = (
   sdpMid,
   sdpMLineIndex: 0,
   usernameFragment,
+  negotiationEpoch: 0,
 });
 
 const sendSignalPayload = (sessionToken: string) => ({
@@ -87,6 +89,45 @@ describe('room wire schemas', () => {
   it('keeps nullable ICE fields nullable and permits empty non-null values', () => {
     assert.isTrue(succeeds(IceCandidateSignal, iceCandidate('candidate:1', null, null)));
     assert.isTrue(succeeds(IceCandidateSignal, iceCandidate('candidate:1', '', '')));
+  });
+
+  it('requires a bounded non-negative integer negotiation epoch', () => {
+    for (const negotiationEpoch of [0, 1, Number.MAX_SAFE_INTEGER]) {
+      assert.isTrue(
+        succeeds(SessionDescriptionSignal, {
+          ...sessionDescription('v=0'),
+          negotiationEpoch,
+        }),
+      );
+      assert.isTrue(
+        succeeds(IceCandidateSignal, {
+          ...iceCandidate('candidate:1'),
+          negotiationEpoch,
+        }),
+      );
+    }
+
+    for (const negotiationEpoch of [-1, 0.5, Number.MAX_SAFE_INTEGER + 1]) {
+      assert.isFalse(
+        succeeds(SessionDescriptionSignal, {
+          ...sessionDescription('v=0'),
+          negotiationEpoch,
+        }),
+      );
+      assert.isFalse(
+        succeeds(IceCandidateSignal, {
+          ...iceCandidate('candidate:1'),
+          negotiationEpoch,
+        }),
+      );
+    }
+
+    const { negotiationEpoch: _descriptionEpoch, ...descriptionWithoutEpoch } =
+      sessionDescription('v=0');
+    const { negotiationEpoch: _candidateEpoch, ...candidateWithoutEpoch } =
+      iceCandidate('candidate:1');
+    assert.isFalse(succeeds(SessionDescriptionSignal, descriptionWithoutEpoch));
+    assert.isFalse(succeeds(IceCandidateSignal, candidateWithoutEpoch));
   });
 
   it('decodes complete RPC payloads and events', () => {

@@ -26,7 +26,7 @@ export type PeerSessionActorState =
       readonly role: PeerRole;
       readonly peerConnectionState: 'connecting' | 'connected' | 'interrupted';
       readonly dataChannelState: DataChannelState;
-      readonly remoteAnswerApplied: boolean;
+      readonly negotiationEpoch: number | null;
       readonly reconnectAttempts: number;
       /** Handshake descriptions retained until the peer connection succeeds. */
       readonly offerSdp: string | null;

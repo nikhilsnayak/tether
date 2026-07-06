@@ -8,7 +8,6 @@ import {
   type PlatformEventDispatch,
 } from '@tether/client-runtime/modules/room';
 import type { IceServer } from '@tether/client-runtime/modules/room';
-import { IceCandidateSignal } from '@tether/contracts/modules/room';
 import { Crypto, Effect, Layer } from 'effect';
 import * as ExpoCrypto from 'expo-crypto';
 import { MediaStream, RTCPeerConnection, mediaDevices } from 'react-native-webrtc';
@@ -92,13 +91,13 @@ const observePeerConnection = Effect.fnUntraced(function* (
     dispatch({
       _tag: 'LocalIceCandidate',
       peerConnection: peerConnectionHandle,
-      candidate: new IceCandidateSignal({
+      candidate: {
         candidate: event.candidate.candidate,
         sdpMid: event.candidate.sdpMid ?? null,
         sdpMLineIndex: event.candidate.sdpMLineIndex ?? null,
         // react-native-webrtc does not expose usernameFragment on candidates.
         usernameFragment: null,
-      }),
+      },
     });
   };
 

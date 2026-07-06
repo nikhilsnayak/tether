@@ -1,9 +1,8 @@
 import {
+  IceCandidateSignal,
   SessionDescriptionSignal,
-  type IceCandidateSignal,
   type PeerId,
   type RoomEvent,
-  type SessionDescriptionSignal as SessionDescriptionSignalType,
   type Signal,
 } from '@tether/contracts/modules/room';
 import { Crypto, Duration, Effect, Exit, Ref, Scope } from 'effect';
@@ -19,6 +18,7 @@ import {
   CHAT_CHANNEL_LABEL,
   type ChatMessage,
   type DataChannelHandle,
+  type IceCandidate,
   type IceServer,
   type MediaStreamHandle,
   type PeerConnectionHandle,
@@ -59,6 +59,8 @@ const makePeerSessionActorInternal = Effect.fnUntraced(function* (
   const actorScope = yield* Scope.Scope;
   const sessionTokenRef = yield* Ref.make('');
   let nextMessageSequence = 0;
+  let nextOfferEpoch = 0;
+  let latestRemoteOfferEpoch: number | null = null;
   let state: PeerSessionActorState = {
     _tag: 'AwaitingRoomSession',
   };
@@ -85,16 +87,17 @@ const makePeerSessionActorInternal = Effect.fnUntraced(function* (
 
   const createAndSendOffer = Effect.fn('@tether/client-runtime/createAndSendOffer')(function* (
     peerConnection: PeerConnectionHandle,
+    negotiationEpoch: number,
   ) {
     const created = yield* platform.createOffer(peerConnection);
     const offer = yield* requireDescription(created, 'offer');
     yield* platform.setLocalDescription(peerConnection, offer);
-    yield* sendSignal(new SessionDescriptionSignal(offer));
+    yield* sendSignal(new SessionDescriptionSignal({ ...offer, negotiationEpoch }));
     return offer.sdp;
   });
 
   const acceptOfferAndSendAnswer = Effect.fn('@tether/client-runtime/acceptOfferAndSendAnswer')(
-    function* (peerConnection: PeerConnectionHandle, signal: SessionDescriptionSignalType) {
+    function* (peerConnection: PeerConnectionHandle, signal: SessionDescriptionSignal) {
       yield* platform.setRemoteDescription(peerConnection, {
         type: 'offer',
         sdp: signal.sdp,
@@ -103,7 +106,12 @@ const makePeerSessionActorInternal = Effect.fnUntraced(function* (
       const created = yield* platform.createAnswer(peerConnection);
       const answer = yield* requireDescription(created, 'answer');
       yield* platform.setLocalDescription(peerConnection, answer);
-      yield* sendSignal(new SessionDescriptionSignal(answer));
+      yield* sendSignal(
+        new SessionDescriptionSignal({
+          ...answer,
+          negotiationEpoch: signal.negotiationEpoch,
+        }),
+      );
       return answer.sdp;
     },
   );
@@ -174,7 +182,7 @@ const makePeerSessionActorInternal = Effect.fnUntraced(function* (
         role,
         peerConnectionState: 'connecting',
         dataChannelState: { _tag: 'AwaitingRemoteDataChannel' },
-        remoteAnswerApplied: false,
+        negotiationEpoch: null,
         reconnectAttempts: reconnectAttempts + 1,
         offerSdp: null,
         answerSdp: null,
@@ -191,7 +199,8 @@ const makePeerSessionActorInternal = Effect.fnUntraced(function* (
       .observeDataChannel(dataChannel, dispatchLocalInput)
       .pipe(Scope.provide(generation.scope));
     yield* armNegotiationDeadline(generation);
-    const offerSdp = yield* createAndSendOffer(generation.peerConnection);
+    const negotiationEpoch = nextOfferEpoch++;
+    const offerSdp = yield* createAndSendOffer(generation.peerConnection, negotiationEpoch);
     state = {
       _tag: 'PeerKnown',
       generation,
@@ -199,7 +208,7 @@ const makePeerSessionActorInternal = Effect.fnUntraced(function* (
       role,
       peerConnectionState: 'connecting',
       dataChannelState: { _tag: 'DataChannelConnecting', dataChannel },
-      remoteAnswerApplied: false,
+      negotiationEpoch,
       reconnectAttempts: reconnectAttempts + 1,
       offerSdp,
       answerSdp: null,
@@ -229,7 +238,8 @@ const makePeerSessionActorInternal = Effect.fnUntraced(function* (
       .pipe(Scope.provide(generation.scope));
 
     yield* armNegotiationDeadline(generation);
-    const offerSdp = yield* createAndSendOffer(generation.peerConnection);
+    const negotiationEpoch = nextOfferEpoch++;
+    const offerSdp = yield* createAndSendOffer(generation.peerConnection, negotiationEpoch);
 
     state = {
       _tag: 'PeerKnown',
@@ -238,7 +248,7 @@ const makePeerSessionActorInternal = Effect.fnUntraced(function* (
       role: 'offerer',
       peerConnectionState: 'connecting',
       dataChannelState: { _tag: 'DataChannelConnecting', dataChannel },
-      remoteAnswerApplied: false,
+      negotiationEpoch,
       reconnectAttempts: 0,
       offerSdp,
       answerSdp: null,
@@ -259,7 +269,7 @@ const makePeerSessionActorInternal = Effect.fnUntraced(function* (
       role: 'answerer',
       peerConnectionState: 'connecting',
       dataChannelState: { _tag: 'AwaitingRemoteDataChannel' },
-      remoteAnswerApplied: false,
+      negotiationEpoch: null,
       reconnectAttempts: 0,
       offerSdp: null,
       answerSdp: null,
@@ -269,7 +279,7 @@ const makePeerSessionActorInternal = Effect.fnUntraced(function* (
 
   const handleSignal = Effect.fnUntraced(function* (
     peerId: PeerId,
-    signal: SessionDescriptionSignalType | IceCandidateSignal,
+    signal: SessionDescriptionSignal | IceCandidateSignal,
   ) {
     if (state._tag !== 'PeerKnown' || peerId !== state.peerId) {
       return;
@@ -281,28 +291,63 @@ const makePeerSessionActorInternal = Effect.fnUntraced(function* (
           if (state.role !== 'answerer') {
             return yield* Effect.logWarning('Ignored offer received in invalid role');
           }
+          if (
+            latestRemoteOfferEpoch !== null &&
+            signal.negotiationEpoch <= latestRemoteOfferEpoch
+          ) {
+            return yield* Effect.logWarning('Ignored stale offer negotiation epoch').pipe(
+              Effect.annotateLogs({
+                activeEpoch: latestRemoteOfferEpoch,
+                receivedEpoch: signal.negotiationEpoch,
+              }),
+            );
+          }
           const answerSdp = yield* acceptOfferAndSendAnswer(
             state.generation.peerConnection,
             signal,
           );
-          state = { ...state, offerSdp: signal.sdp, answerSdp };
+          latestRemoteOfferEpoch = signal.negotiationEpoch;
+          state = {
+            ...state,
+            negotiationEpoch: signal.negotiationEpoch,
+            offerSdp: signal.sdp,
+            answerSdp,
+          };
           return;
         }
 
         if (state.role !== 'offerer') {
           return yield* Effect.logWarning('Ignored answer received in invalid role');
         }
-        if (state.remoteAnswerApplied) {
+        if (signal.negotiationEpoch !== state.negotiationEpoch) {
+          return yield* Effect.logWarning('Ignored answer for inactive negotiation epoch').pipe(
+            Effect.annotateLogs({
+              activeEpoch: state.negotiationEpoch,
+              receivedEpoch: signal.negotiationEpoch,
+            }),
+          );
+        }
+        if (state.answerSdp !== null) {
           return yield* Effect.logWarning('Ignored duplicate answer');
         }
         yield* platform.setRemoteDescription(state.generation.peerConnection, {
           type: 'answer',
           sdp: signal.sdp,
         });
-        state = { ...state, remoteAnswerApplied: true, answerSdp: signal.sdp };
+        state = { ...state, answerSdp: signal.sdp };
         return;
       }
-      case '@tether/IceCandidateSignal':
+      case '@tether/IceCandidateSignal': {
+        if (signal.negotiationEpoch !== state.negotiationEpoch) {
+          return yield* Effect.logWarning(
+            'Ignored ICE candidate for inactive negotiation epoch',
+          ).pipe(
+            Effect.annotateLogs({
+              activeEpoch: state.negotiationEpoch,
+              receivedEpoch: signal.negotiationEpoch,
+            }),
+          );
+        }
         return yield* platform
           .addIceCandidate(state.generation.peerConnection, signal)
           .pipe(
@@ -312,12 +357,14 @@ const makePeerSessionActorInternal = Effect.fnUntraced(function* (
               ),
             ),
           );
+      }
     }
   });
 
   const handlePeerLeft = Effect.fnUntraced(function* (peerId: PeerId) {
     if (state._tag === 'TransportLost' && peerId === state.peerId) {
       const newGeneration = yield* acquirePeerConnectionGeneration();
+      latestRemoteOfferEpoch = null;
 
       state = {
         _tag: 'WaitingForPeer',
@@ -332,11 +379,10 @@ const makePeerSessionActorInternal = Effect.fnUntraced(function* (
       return;
     }
 
-    const currentGeneration = state.generation;
-
-    yield* Scope.close(currentGeneration.scope, Exit.void);
+    yield* Scope.close(state.generation.scope, Exit.void);
 
     const newGeneration = yield* acquirePeerConnectionGeneration();
+    latestRemoteOfferEpoch = null;
 
     state = {
       _tag: 'WaitingForPeer',
@@ -394,12 +440,17 @@ const makePeerSessionActorInternal = Effect.fnUntraced(function* (
 
   const handleLocalIceCandidate = Effect.fnUntraced(function* (
     peerConnection: PeerConnectionHandle,
-    candidate: IceCandidateSignal,
+    candidate: IceCandidate,
   ) {
     if (state._tag !== 'PeerKnown' || state.generation.peerConnection !== peerConnection) {
       return;
     }
-    yield* sendSignal(candidate);
+    if (state.negotiationEpoch === null) {
+      return yield* Effect.logWarning('Ignored local ICE candidate without an active epoch');
+    }
+    yield* sendSignal(
+      new IceCandidateSignal({ ...candidate, negotiationEpoch: state.negotiationEpoch }),
+    );
   });
 
   const handlePeerConnectionFailed = Effect.fnUntraced(function* (
@@ -413,24 +464,17 @@ const makePeerSessionActorInternal = Effect.fnUntraced(function* (
       return;
     }
 
-    if (state._tag === 'PeerKnown' && state.generation.peerConnection === peerConnection) {
+    if (state._tag === 'PeerKnown') {
       yield* Effect.logWarning('Peer connection failed');
       return yield* beginPeerReconnect();
     }
 
-    // The generation guard above already rejects mismatched peer connections,
-    // so the identity re-check here is defensive and never false.
-    /* v8 ignore next */
-    if (state._tag === 'WaitingForPeer' && state.generation.peerConnection === peerConnection) {
-      yield* Scope.close(state.generation.scope, Exit.void);
-
-      const newGeneration = yield* acquirePeerConnectionGeneration();
-
-      state = {
-        _tag: 'WaitingForPeer',
-        generation: newGeneration,
-      };
-    }
+    yield* Scope.close(state.generation.scope, Exit.void);
+    const newGeneration = yield* acquirePeerConnectionGeneration();
+    state = {
+      _tag: 'WaitingForPeer',
+      generation: newGeneration,
+    };
   });
 
   const handlePeerConnectionConnected = Effect.fnUntraced(function* (
@@ -676,10 +720,10 @@ const makePeerSessionActorInternal = Effect.fnUntraced(function* (
  *   role: answerer
  *   channel: AwaitingRemoteDataChannel
  *          |
- *          +-- SignalReceived(offer)
- *          |     - set remote offer
+ *          +-- SignalReceived(newer offer epoch)
+ *          |     - adopt the epoch and set the remote offer
  *          |     - create and set local answer
- *          |     - SendSignal(answer)
+ *          |     - SendSignal(answer with the same epoch)
  *          |
  *          +-- RemoteDataChannel(label = "chat")
  *                - observe channel events
@@ -694,14 +738,15 @@ const makePeerSessionActorInternal = Effect.fnUntraced(function* (
  * RoomSessionOpened(peerId = existing peer)
  *          |
  *          | - create and observe local "chat" data channel
+ *          | - allocate the next session-local negotiation epoch
  *          | - create and set local offer
- *          | - SendSignal(offer)
+ *          | - SendSignal(offer with the allocated epoch)
  *          v
  * [PeerKnown]
  *   role: offerer
  *   channel: DataChannelConnecting
  *          |
- *          | SignalReceived(answer)
+ *          | SignalReceived(answer with the active epoch)
  *          | - set remote answer
  *
  *
@@ -760,7 +805,7 @@ const makePeerSessionActorInternal = Effect.fnUntraced(function* (
  *          | - emit PeerInterrupted(peerId)
  *          | - preserve role and increment reconnect attempts
  *          |
- *          +-- offerer: create a fresh channel and send a new offer
+ *          +-- offerer: allocate a new epoch, create a fresh channel, and send a new offer
  *          |
  *          +-- answerer: await the peer's offer and remote channel
  *
@@ -792,10 +837,10 @@ const makePeerSessionActorInternal = Effect.fnUntraced(function* (
  *
  * ICE EXCHANGE (while PeerKnown)
  *
- * LocalIceCandidate
- *   -> SendSignal(ice candidate)
+ * LocalIceCandidate(active epoch)
+ *   -> SendSignal(ice candidate with the active epoch)
  *
- * SignalReceived(active peer, ice candidate)
+ * SignalReceived(active peer, ice candidate with the active epoch)
  *   -> platform.addIceCandidate(peer connection, candidate)
  * ```
  */

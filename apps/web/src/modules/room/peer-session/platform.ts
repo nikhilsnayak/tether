@@ -8,7 +8,6 @@ import {
   type PlatformEventDispatch,
 } from '@tether/client-runtime/modules/room';
 import type { IceServer } from '@tether/client-runtime/modules/room';
-import { IceCandidateSignal } from '@tether/contracts/modules/room';
 import { Crypto, Effect, Layer } from 'effect';
 
 export const webCryptoLayer = Layer.succeed(
@@ -72,12 +71,12 @@ const observePeerConnection = Effect.fnUntraced(function* (
     dispatch({
       _tag: 'LocalIceCandidate',
       peerConnection: peerConnectionHandle,
-      candidate: new IceCandidateSignal({
+      candidate: {
         candidate: event.candidate.candidate,
         sdpMid: event.candidate.sdpMid,
         sdpMLineIndex: event.candidate.sdpMLineIndex,
         usernameFragment: event.candidate.usernameFragment,
-      }),
+      },
     });
   };
 

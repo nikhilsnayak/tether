@@ -1,8 +1,8 @@
-import type { IceCandidateSignal } from '@tether/contracts/modules/room';
 import { Context, Effect, type Scope } from 'effect';
 
 import type {
   DataChannelHandle,
+  IceCandidate,
   IceServer,
   MediaStreamHandle,
   PeerConnectionHandle,
@@ -53,7 +53,7 @@ export class PeerSessionPlatform extends Context.Service<
     ) => Effect.Effect<void, PlatformError>;
     readonly addIceCandidate: (
       peerConnection: PeerConnectionHandle,
-      candidate: IceCandidateSignal,
+      candidate: IceCandidate,
     ) => Effect.Effect<void, PlatformError>;
     readonly sendDataChannelMessage: (
       dataChannel: DataChannelHandle,

@@ -142,7 +142,11 @@ describe('RoomHandlers', () => {
         roomId,
         selfId: alice,
         sessionToken: yield* Deferred.await(aliceToken),
-        signal: new SessionDescriptionSignal({ type: 'offer', sdp: 'self-offer' }),
+        signal: new SessionDescriptionSignal({
+          negotiationEpoch: 0,
+          type: 'offer',
+          sdp: 'self-offer',
+        }),
       });
       const bobFiber = yield* client
         .OpenRoomSession({ roomId, selfId: bob })
@@ -186,6 +190,7 @@ describe('RoomHandlers', () => {
         selfId: bob,
         sessionToken: yield* Deferred.await(bobToken),
         signal: new IceCandidateSignal({
+          negotiationEpoch: 23,
           candidate: 'candidate:integration-test',
           sdpMid: '0',
           sdpMLineIndex: 0,
@@ -209,6 +214,7 @@ describe('RoomHandlers', () => {
           event: new SignalReceivedEvent({
             peerId: bob,
             signal: new IceCandidateSignal({
+              negotiationEpoch: 23,
               candidate: 'candidate:integration-test',
               sdpMid: '0',
               sdpMLineIndex: 0,
@@ -243,6 +249,7 @@ describe('RoomHandlers', () => {
           selfId: mallory,
           sessionToken: 'invalid-session-token',
           signal: new SessionDescriptionSignal({
+            negotiationEpoch: 0,
             type: 'offer',
             sdp: 'unauthorized-offer',
           }),
@@ -252,7 +259,11 @@ describe('RoomHandlers', () => {
         roomId,
         selfId: bob,
         sessionToken: yield* Deferred.await(bobToken),
-        signal: new SessionDescriptionSignal({ type: 'answer', sdp: 'authorized-answer' }),
+        signal: new SessionDescriptionSignal({
+          negotiationEpoch: 0,
+          type: 'answer',
+          sdp: 'authorized-answer',
+        }),
       });
 
       const aliceEvents = yield* Fiber.join(aliceFiber);
@@ -274,6 +285,7 @@ describe('RoomHandlers', () => {
           event: new SignalReceivedEvent({
             peerId: bob,
             signal: new SessionDescriptionSignal({
+              negotiationEpoch: 0,
               type: 'answer',
               sdp: 'authorized-answer',
             }),

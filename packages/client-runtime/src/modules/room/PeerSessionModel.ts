@@ -1,4 +1,4 @@
-import type { IceCandidateSignal, PeerId, RoomId } from '@tether/contracts/modules/room';
+import type { PeerId, RoomId } from '@tether/contracts/modules/room';
 import { Data, Predicate } from 'effect';
 
 export const CHAT_CHANNEL_LABEL = 'chat';
@@ -42,6 +42,14 @@ export interface SessionDescription {
   readonly sdp?: string;
 }
 
+/** Platform candidate data before the actor adds its signaling envelope. */
+export interface IceCandidate {
+  readonly candidate: string;
+  readonly sdpMid: string | null;
+  readonly sdpMLineIndex: number | null;
+  readonly usernameFragment: string | null;
+}
+
 export interface PeerConnectionHandle {
   readonly value: unknown;
 }
@@ -63,7 +71,7 @@ export type PlatformEvent =
   | {
       readonly _tag: 'LocalIceCandidate';
       readonly peerConnection: PeerConnectionHandle;
-      readonly candidate: IceCandidateSignal;
+      readonly candidate: IceCandidate;
     }
   | {
       readonly _tag: 'DataChannelOpened';
