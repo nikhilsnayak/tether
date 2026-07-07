@@ -39,6 +39,8 @@
 
 ## Privacy and security
 
+Tether is an experimental project provided as-is, without warranty or any commitment to uptime or support. See the [Terms & Acceptable Use](https://tether.nikhilsnayak.dev/terms) page for the full terms.
+
 Tether separates signaling from call content:
 
 - The signaling server relays room membership, SDP, and ICE messages. It does not receive decoded camera, microphone, or chat content.
@@ -48,6 +50,8 @@ Tether separates signaling from call content:
 - The server validates RPC payloads, rate-limits signaling per member, and caps live rooms.
 
 The safety code is meaningful only when both callers compare it through a separate trusted channel, such as reading it aloud. It does not protect a compromised browser, device, or copy of the client application.
+
+To report abuse, email [nikhilsnayak3473@gmail.com](mailto:nikhilsnayak3473@gmail.com) or [open an issue](https://github.com/nikhilsnayak/tether/issues). Because Tether keeps no call history, reports should include the room code and approximate time; enforcement is limited to forward-looking measures.
 
 ## How it works
 

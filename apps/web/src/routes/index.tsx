@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from '@tanstack/react-router';
+import { Link, createFileRoute, useNavigate } from '@tanstack/react-router';
 import { type SubmitEvent, useState } from 'react';
 
 import { LogoMark } from '@/components/logo';
@@ -100,9 +100,28 @@ function HomePage() {
           </section>
         </div>
 
-        <p className='text-muted-foreground mt-6 font-mono text-[11px] tracking-[0.2em] uppercase'>
-          private video calls · no accounts · no call history
-        </p>
+        <div className='border-border mt-6 grid gap-4 border-t pt-4 sm:grid-cols-[1fr_auto] sm:items-center'>
+          <div className='text-muted-foreground flex flex-wrap gap-x-4 gap-y-2 font-mono text-[11px] tracking-[0.2em] uppercase'>
+            <span className='flex items-center gap-1.5'>
+              <span className='bg-primary size-1.5 rounded-full' />
+              private video calls
+            </span>
+            <span className='flex items-center gap-1.5'>
+              <span className='bg-primary size-1.5 rounded-full' />
+              no accounts
+            </span>
+            <span className='flex items-center gap-1.5'>
+              <span className='bg-primary size-1.5 rounded-full' />
+              no call history
+            </span>
+          </div>
+          <Link
+            to='/terms'
+            className='text-muted-foreground hover:text-primary font-mono text-[11px] tracking-[0.2em] uppercase underline underline-offset-4 sm:justify-self-end'
+          >
+            terms &amp; acceptable use
+          </Link>
+        </div>
       </main>
     </div>
   );
