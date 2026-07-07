@@ -15,7 +15,13 @@ import {
 import { Context, Effect, Layer, PubSub, Stream, SynchronizedRef } from 'effect';
 
 import { makeTokenBucket, type TokenBucket } from '../../lib/TokenBucket';
-import { MAX_LIVE_ROOMS, SIGNAL_BUCKET_CAPACITY, SIGNAL_BUCKET_REFILL_EVERY } from './Constants';
+import {
+  MAX_LIVE_ROOMS,
+  ROOM_CREATE_BUCKET_CAPACITY,
+  ROOM_CREATE_BUCKET_REFILL_EVERY,
+  SIGNAL_BUCKET_CAPACITY,
+  SIGNAL_BUCKET_REFILL_EVERY,
+} from './Constants';
 
 type Member = {
   readonly peerId: PeerId;
@@ -27,6 +33,10 @@ type Registry = Map<RoomId, { members: Member[]; pubsub: PubSub.PubSub<RoomEvent
 export class RoomService extends Context.Service<RoomService>()('@tether/RoomService', {
   make: Effect.gen(function* () {
     const registryRef = yield* SynchronizedRef.make<Registry>(new Map());
+    const roomCreateBucket = yield* makeTokenBucket({
+      capacity: ROOM_CREATE_BUCKET_CAPACITY,
+      refillEvery: ROOM_CREATE_BUCKET_REFILL_EVERY,
+    });
 
     const removeMember = Effect.fnUntraced(function* (
       roomId: RoomId,
@@ -96,6 +106,14 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
               if (newRegistry.size >= MAX_LIVE_ROOMS) {
                 yield* Effect.logWarning('Room join rejected').pipe(
                   Effect.annotateLogs('reason', 'server-at-capacity'),
+                );
+                return yield* new ServerAtCapacity();
+              }
+
+              const allowed = yield* roomCreateBucket.tryTake;
+              if (!allowed) {
+                yield* Effect.logWarning('Room join rejected').pipe(
+                  Effect.annotateLogs('reason', 'room-creation-rate-limited'),
                 );
                 return yield* new ServerAtCapacity();
               }

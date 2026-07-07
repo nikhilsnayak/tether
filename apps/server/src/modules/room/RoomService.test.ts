@@ -15,7 +15,12 @@ import {
 import { Effect, Exit, Scope, Stream } from 'effect';
 import { TestClock } from 'effect/testing';
 
-import { MAX_LIVE_ROOMS, SIGNAL_BUCKET_CAPACITY } from './Constants';
+import {
+  MAX_LIVE_ROOMS,
+  ROOM_CREATE_BUCKET_CAPACITY,
+  ROOM_CREATE_BUCKET_REFILL_EVERY,
+  SIGNAL_BUCKET_CAPACITY,
+} from './Constants';
 import { RoomService } from './RoomService';
 
 const roomId = RoomId.make('abc-defg-hij');
@@ -342,7 +347,12 @@ describe('RoomService', () => {
 
         yield* Effect.forEach(
           Array.from({ length: MAX_LIVE_ROOMS }, (_, index) => index),
-          (index) => room.openSession(randomRoomId(index), randomPeerId(index)),
+          (index) =>
+            // Refill the creation bucket each iteration so this cap test is not
+            // gated by the room-creation rate limit.
+            room
+              .openSession(randomRoomId(index), randomPeerId(index))
+              .pipe(Effect.tap(() => TestClock.adjust(ROOM_CREATE_BUCKET_REFILL_EVERY))),
           { discard: true },
         );
 
@@ -354,6 +364,88 @@ describe('RoomService', () => {
 
         assert.instanceOf(error, ServerAtCapacity);
         assert.strictEqual(existingRoomOpened.peerId, randomPeerId(0));
+      }),
+    ),
+  );
+
+  it.effect('rejects new rooms once the creation bucket is drained', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const room = yield* RoomService;
+
+        yield* Effect.forEach(
+          Array.from({ length: ROOM_CREATE_BUCKET_CAPACITY }, (_, index) => index),
+          (index) => room.openSession(randomRoomId(index), randomPeerId(index)),
+          { discard: true },
+        );
+
+        const error = yield* room
+          .openSession(
+            randomRoomId(ROOM_CREATE_BUCKET_CAPACITY),
+            randomPeerId(ROOM_CREATE_BUCKET_CAPACITY),
+          )
+          .pipe(Effect.flip);
+
+        assert.instanceOf(error, ServerAtCapacity);
+      }),
+    ),
+  );
+
+  it.effect('refills the room-creation bucket over time', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const room = yield* RoomService;
+
+        yield* Effect.forEach(
+          Array.from({ length: ROOM_CREATE_BUCKET_CAPACITY }, (_, index) => index),
+          (index) => room.openSession(randomRoomId(index), randomPeerId(index)),
+          { discard: true },
+        );
+
+        const rejected = yield* room
+          .openSession(randomRoomId(100), randomPeerId(100))
+          .pipe(Effect.flip);
+        assert.instanceOf(rejected, ServerAtCapacity);
+
+        yield* TestClock.adjust(ROOM_CREATE_BUCKET_REFILL_EVERY);
+
+        const events = yield* room.openSession(randomRoomId(101), randomPeerId(101));
+        const opened = requireOpenedEvent(
+          (yield* events.pipe(Stream.take(1), Stream.runCollect))[0],
+        );
+        assert.isNull(opened.peerId);
+      }),
+    ),
+  );
+
+  it.effect('allows joining an existing room when the creation bucket is empty', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const room = yield* RoomService;
+
+        // Create the room to join later while a creation token is still available.
+        const aliceEvents = yield* room.openSession(roomId, alice);
+        yield* aliceEvents.pipe(Stream.take(1), Stream.runCollect);
+
+        // Drain the remaining creation tokens with fresh-room attempts.
+        yield* Effect.forEach(
+          Array.from({ length: ROOM_CREATE_BUCKET_CAPACITY - 1 }, (_, index) => index),
+          (index) => room.openSession(randomRoomId(index), randomPeerId(index)),
+          { discard: true },
+        );
+
+        // A brand-new room is now rejected...
+        const rejected = yield* room
+          .openSession(RoomId.make('zzz-zzzz-zzz'), charlie)
+          .pipe(Effect.flip);
+        assert.instanceOf(rejected, ServerAtCapacity);
+
+        // ...but joining the earlier room as the second peer still succeeds.
+        const bobEvents = yield* room.openSession(roomId, bob);
+        const bobOpened = requireOpenedEvent(
+          (yield* bobEvents.pipe(Stream.take(1), Stream.runCollect))[0],
+        );
+        assert.strictEqual(bobOpened.peerId, alice);
       }),
     ),
   );
