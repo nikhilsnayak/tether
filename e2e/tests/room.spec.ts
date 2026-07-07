@@ -8,6 +8,7 @@ import {
   joinRoom,
   requireBaseURL,
 } from './helpers';
+import { seededStorageState } from './storage-seed';
 
 const expectMessage = (page: Page, message: string) =>
   expect(page.getByRole('list', { name: 'Chat messages' }).getByText(message)).toBeVisible();
@@ -53,8 +54,11 @@ test('complete room flow', async ({ browser, page }, testInfo) => {
   const baseURL = requireBaseURL(testInfo.project.use.baseURL);
 
   await installWebRtcProbe(page.context());
-  const guestContext = await browser.newContext({ baseURL });
-  const replacementContext = await browser.newContext({ baseURL });
+  const guestContext = await browser.newContext({ baseURL, storageState: seededStorageState });
+  const replacementContext = await browser.newContext({
+    baseURL,
+    storageState: seededStorageState,
+  });
   await Promise.all([installWebRtcProbe(guestContext), installWebRtcProbe(replacementContext)]);
   const guestPage = await guestContext.newPage();
   const replacementPage = await replacementContext.newPage();

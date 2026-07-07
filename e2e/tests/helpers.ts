@@ -1,5 +1,7 @@
 import { expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
 
+import { seededStorageState } from './storage-seed';
+
 type WebRtcProbe = {
   readonly configurations: RTCConfiguration[];
   readonly dataChannels: RTCDataChannel[];
@@ -124,8 +126,8 @@ export const connectPeers = async (
   baseURL: string,
   options: { readonly probeWebRtc?: boolean } = {},
 ) => {
-  const hostContext = await browser.newContext({ baseURL });
-  const guestContext = await browser.newContext({ baseURL });
+  const hostContext = await browser.newContext({ baseURL, storageState: seededStorageState });
+  const guestContext = await browser.newContext({ baseURL, storageState: seededStorageState });
   if (options.probeWebRtc) {
     await Promise.all([installWebRtcProbe(hostContext), installWebRtcProbe(guestContext)]);
   }
