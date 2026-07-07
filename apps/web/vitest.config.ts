@@ -17,6 +17,7 @@ export default defineConfig({
         'src/routeTree.gen.ts',
         'src/vite-env.d.ts',
         'src/lib/app-client.ts',
+        'src/lib/constants.ts',
         'src/lib/runtime.ts',
         'src/modules/room/peer-session/runtime.ts',
       ],
