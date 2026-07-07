@@ -1,3 +1,4 @@
+import { Link, useLocation } from '@tanstack/react-router';
 import { type ReactNode, useState } from 'react';
 
 import { DISCLAIMER_ACCEPTED_KEY } from '@/lib/constants';
@@ -20,8 +21,10 @@ function PanelLabel({ children }: { readonly children: string }) {
 
 export function DisclaimerGate({ children }: { readonly children: ReactNode }) {
   const [accepted, setAccepted] = useState(readAccepted);
+  const { pathname } = useLocation();
 
-  if (accepted) {
+  // Terms stay readable before acceptance — the gate itself links there.
+  if (accepted || pathname === '/terms') {
     return children;
   }
 
@@ -55,6 +58,13 @@ export function DisclaimerGate({ children }: { readonly children: ReactNode }) {
           <p>
             The operator is not liable for any damages, losses, or issues arising from use of the
             service.
+          </p>
+          <p>
+            See the{' '}
+            <Link to='/terms' className='hover:text-primary underline'>
+              Terms &amp; Acceptable Use
+            </Link>{' '}
+            for the full terms.
           </p>
         </div>
 
