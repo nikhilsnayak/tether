@@ -4,6 +4,8 @@ import { Outlet, createRootRoute } from '@tanstack/react-router';
 import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools';
 import { TooltipProvider } from '@tether/ui/components/tooltip';
 
+import { DisclaimerGate } from '@/components/disclaimer-gate';
+
 export const Route = createRootRoute({
   component: RootLayout,
 });
@@ -12,7 +14,9 @@ function RootLayout() {
   return (
     <RegistryProvider>
       <TooltipProvider delay={200}>
-        <Outlet />
+        <DisclaimerGate>
+          <Outlet />
+        </DisclaimerGate>
       </TooltipProvider>
       <TanStackDevtools
         plugins={[

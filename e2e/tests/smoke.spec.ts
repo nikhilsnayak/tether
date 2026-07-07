@@ -14,6 +14,24 @@ test('web app loads', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Connect' })).toBeDisabled();
 });
 
+test('a fresh visitor must accept the disclaimer before the app renders', async ({ browser }) => {
+  const context = await browser.newContext({
+    baseURL: 'http://localhost:5173',
+    storageState: { cookies: [], origins: [] },
+  });
+  const page = await context.newPage();
+  await page.goto('/');
+  await expect(page.getByRole('button', { name: 'I understand and accept' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Call' })).toBeHidden();
+
+  await page.getByRole('button', { name: 'I understand and accept' }).click();
+  await expect(page.getByRole('button', { name: 'Call' })).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'I understand and accept' })).toBeHidden();
+  await context.close();
+});
+
 test('web app opens a signaling session', async ({ page }) => {
   await page.goto('/room/eet-smoo-kee');
   await continueInBrowser(page);

@@ -1,5 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
+import { seededStorageState } from './tests/storage-seed';
+
 const CI = !!process.env.CI;
 
 export default defineConfig({
@@ -15,6 +17,7 @@ export default defineConfig({
   use: {
     baseURL: `http://localhost:5173`,
     trace: 'on-first-retry',
+    storageState: seededStorageState,
   },
   projects: [
     {
