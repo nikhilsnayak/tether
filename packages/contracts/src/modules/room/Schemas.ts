@@ -17,6 +17,10 @@ export type PeerId = typeof PeerId.Type;
 export const RoomId = RoomIdString.pipe(Schema.brand('RoomId'));
 export type RoomId = typeof RoomId.Type;
 
+const DisplayNameString = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(32));
+export const DisplayName = DisplayNameString.pipe(Schema.brand('DisplayName'));
+export type DisplayName = typeof DisplayName.Type;
+
 export class SessionDescriptionSignal extends Schema.TaggedClass<SessionDescriptionSignal>()(
   '@tether/SessionDescriptionSignal',
   {
@@ -45,7 +49,21 @@ export class RoomSessionOpenedEvent extends Schema.TaggedClass<RoomSessionOpened
   {
     peerId: Schema.NullOr(PeerId),
     sessionToken: SessionToken,
+    roomId: RoomId,
   },
+) {}
+
+export class JoinRequestedEvent extends Schema.TaggedClass<JoinRequestedEvent>()(
+  '@tether/JoinRequestedEvent',
+  {
+    peerId: PeerId,
+    displayName: DisplayName,
+  },
+) {}
+
+export class JoinPendingEvent extends Schema.TaggedClass<JoinPendingEvent>()(
+  '@tether/JoinPendingEvent',
+  {},
 ) {}
 
 export class PeerJoinedEvent extends Schema.TaggedClass<PeerJoinedEvent>()(
@@ -100,30 +118,74 @@ export class PeerNotInRoom extends Schema.TaggedErrorClass<PeerNotInRoom>()(
 
 export const isPeerNotInRoom = Schema.is(PeerNotInRoom);
 
+export class RoomNotFound extends Schema.TaggedErrorClass<RoomNotFound>()('@tether/RoomNotFound', {
+  roomId: RoomId,
+}) {}
+
+export const isRoomNotFound = Schema.is(RoomNotFound);
+
+export class JoinDenied extends Schema.TaggedErrorClass<JoinDenied>()('@tether/JoinDenied', {}) {}
+
+export const isJoinDenied = Schema.is(JoinDenied);
+
+export class NoPendingJoin extends Schema.TaggedErrorClass<NoPendingJoin>()(
+  '@tether/NoPendingJoin',
+  {
+    roomId: RoomId,
+    peerId: PeerId,
+  },
+) {}
+
+export const isNoPendingJoin = Schema.is(NoPendingJoin);
+
 export const RoomEvent = Schema.Union([
   RoomSessionOpenedEvent,
   PeerJoinedEvent,
   PeerLeftEvent,
   SignalReceivedEvent,
+  JoinRequestedEvent,
+  JoinPendingEvent,
 ]);
 export type RoomEvent = typeof RoomEvent.Type;
 
-export const OpenRoomSessionPayload = Schema.Struct({
-  selfId: PeerId,
-  roomId: RoomId,
-});
+// A host mints a fresh room; a joiner must name the room and itself. Modelling
+// this as a discriminated union makes the requirement structural — the wire
+// schema rejects a join with no roomId, so no runtime null-checks are needed.
+export const OpenRoomSessionPayload = Schema.Union([
+  Schema.Struct({
+    intent: Schema.Literal('host'),
+    selfId: PeerId,
+  }),
+  Schema.Struct({
+    intent: Schema.Literal('join'),
+    selfId: PeerId,
+    roomId: RoomId,
+    displayName: DisplayName,
+  }),
+]);
+export type OpenRoomSessionPayload = typeof OpenRoomSessionPayload.Type;
 
 export const OpenRoomSessionSuccess = Schema.Struct({
   event: RoomEvent,
 });
 
-export const OpenRoomSessionError = Schema.Union([RoomFull, ServerAtCapacity, PeerAlreadyJoined]);
+export const OpenRoomSessionError = Schema.Union([
+  RoomFull,
+  ServerAtCapacity,
+  PeerAlreadyJoined,
+  RoomNotFound,
+  JoinDenied,
+]);
 
-export const LeaveRoomPayload = Schema.Struct({
-  selfId: PeerId,
+export const RespondToJoinPayload = Schema.Struct({
   roomId: RoomId,
+  selfId: PeerId,
   sessionToken: SessionToken,
+  peerId: PeerId,
+  decision: Schema.Literals(['allow', 'deny']),
 });
+
+export const RespondToJoinError = Schema.Union([PeerNotInRoom, NoPendingJoin]);
 
 export const SendSignalPayload = Schema.Struct({
   selfId: PeerId,
@@ -133,3 +195,9 @@ export const SendSignalPayload = Schema.Struct({
 });
 
 export const SendSignalError = Schema.Union([PeerNotInRoom]);
+
+export const LeaveRoomPayload = Schema.Struct({
+  selfId: PeerId,
+  roomId: RoomId,
+  sessionToken: SessionToken,
+});

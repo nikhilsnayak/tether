@@ -1,19 +1,26 @@
 import { assert, describe, it } from '@effect/vitest';
 import {
+  DisplayName,
+  JoinDenied,
+  JoinPendingEvent,
+  JoinRequestedEvent,
+  NoPendingJoin,
   PeerId,
-  PeerAlreadyJoined,
   PeerJoinedEvent,
   PeerLeftEvent,
   PeerNotInRoom,
   RoomFull,
   RoomId,
+  RoomNotFound,
   RoomSessionOpenedEvent,
   ServerAtCapacity,
   SessionDescriptionSignal,
   SignalReceivedEvent,
 } from '@tether/contracts/modules/room';
-import { Effect, Exit, Scope, Stream } from 'effect';
+import { Deferred, Effect, Exit, Fiber, Schema, Scope, Stream } from 'effect';
 import { TestClock } from 'effect/testing';
+
+import * as ServerCrypto from '@/lib/ServerCrypto';
 
 import {
   MAX_LIVE_ROOMS,
@@ -23,10 +30,13 @@ import {
 } from './Constants';
 import { RoomService } from './RoomService';
 
-const roomId = RoomId.make('abc-defg-hij');
 const alice = PeerId.make('aaaaaaaaaaaa');
 const bob = PeerId.make('bbbbbbbbbbbb');
 const charlie = PeerId.make('cccccccccccc');
+
+const name = (value: string) => Schema.decodeUnknownSync(DisplayName)(value);
+const bobName = name('Bob');
+const charlieName = name('Charlie');
 
 const letters = (length: number, index: number) => {
   const value = Array.from({ length }, () => 'a');
@@ -36,201 +46,472 @@ const letters = (length: number, index: number) => {
   }
   return value.join('');
 };
-const randomRoomId = (index: number) => {
-  const value = letters(10, index);
-  return RoomId.make(`${value.slice(0, 3)}-${value.slice(3, 7)}-${value.slice(7)}`);
-};
 const randomPeerId = (index: number) => PeerId.make(letters(12, index));
 
 const withRoomService = <A, E, R>(effect: Effect.Effect<A, E, R | RoomService>) =>
-  effect.pipe(Effect.provide(RoomService.layerTest));
+  effect.pipe(Effect.provide(RoomService.layer), Effect.provide(ServerCrypto.layer));
 
 const requireOpenedEvent = (event: unknown): RoomSessionOpenedEvent => {
   assert.instanceOf(event, RoomSessionOpenedEvent);
   return event as RoomSessionOpenedEvent;
 };
 
-describe('RoomService', () => {
-  it.effect('ignores leave requests for rooms that do not exist', () =>
-    withRoomService(
-      Effect.gen(function* () {
-        const room = yield* RoomService;
-        yield* room.leave(roomId, alice, 'unknown-session');
-      }),
+const isOpened = (event: { readonly _tag: string }) =>
+  event._tag === '@tether/RoomSessionOpenedEvent';
+
+// Opens a host session and returns its minted roomId, keeping the room alive
+// via a forked drain fiber for the rest of the test.
+const openHostRoomId = Effect.fnUntraced(function* (self: PeerId) {
+  const room = yield* RoomService;
+  const roomIdDeferred = yield* Deferred.make<RoomId>();
+  const stream = yield* room.host(self);
+  yield* stream.pipe(
+    Stream.tap((event) =>
+      isOpened(event)
+        ? Deferred.succeed(roomIdDeferred, (event as RoomSessionOpenedEvent).roomId)
+        : Effect.void,
     ),
+    Stream.runDrain,
+    Effect.forkChild({ startImmediately: true }),
+  );
+  return yield* Deferred.await(roomIdDeferred);
+});
+
+// Drives alice (host) + bob (join, allowed) to a connected room. The host and
+// joiner streams are collected by forked fibers of the requested lengths.
+const connect = Effect.fnUntraced(function* (options: {
+  readonly hostTake: number;
+  readonly joinerTake: number;
+}) {
+  const room = yield* RoomService;
+  const roomIdDeferred = yield* Deferred.make<RoomId>();
+  const aliceTokenDeferred = yield* Deferred.make<string>();
+  const bobTokenDeferred = yield* Deferred.make<string>();
+
+  const aliceStream = yield* room.host(alice);
+  const aliceFiber = yield* aliceStream.pipe(
+    Stream.tap((event) =>
+      isOpened(event)
+        ? Effect.all([
+            Deferred.succeed(roomIdDeferred, (event as RoomSessionOpenedEvent).roomId),
+            Deferred.succeed(aliceTokenDeferred, (event as RoomSessionOpenedEvent).sessionToken),
+          ])
+        : Effect.void,
+    ),
+    Stream.take(options.hostTake),
+    Stream.runCollect,
+    Effect.forkChild({ startImmediately: true }),
   );
 
-  it.effect('returns the existing peer and rejects a third member', () =>
-    withRoomService(
-      Effect.gen(function* () {
-        const room = yield* RoomService;
+  const roomId = yield* Deferred.await(roomIdDeferred);
+  const aliceToken = yield* Deferred.await(aliceTokenDeferred);
 
-        const first = yield* room.openSession(roomId, alice);
-        const second = yield* room.openSession(roomId, bob);
-        const error = yield* room.openSession(roomId, charlie).pipe(Effect.flip);
-        const firstEvents = yield* first.pipe(Stream.take(2), Stream.runCollect);
-        const secondEvents = yield* second.pipe(Stream.take(1), Stream.runCollect);
-        const firstOpened = requireOpenedEvent(firstEvents[0]);
-        const secondOpened = requireOpenedEvent(secondEvents[0]);
-
-        assert.deepStrictEqual(firstEvents, [
-          new RoomSessionOpenedEvent({ peerId: null, sessionToken: firstOpened.sessionToken }),
-          new PeerJoinedEvent({ peerId: bob }),
-        ]);
-        assert.deepStrictEqual(secondEvents, [
-          new RoomSessionOpenedEvent({
-            peerId: alice,
-            sessionToken: secondOpened.sessionToken,
-          }),
-        ]);
-        assert.instanceOf(error, RoomFull);
-        assert.strictEqual(error.roomId, roomId);
-      }),
+  const bobStream = yield* room.join(roomId, bob, bobName);
+  const bobFiber = yield* bobStream.pipe(
+    Stream.tap((event) =>
+      isOpened(event)
+        ? Deferred.succeed(bobTokenDeferred, (event as RoomSessionOpenedEvent).sessionToken)
+        : Effect.void,
     ),
+    Stream.take(options.joinerTake),
+    Stream.runCollect,
+    Effect.forkChild({ startImmediately: true }),
   );
 
-  it.effect('keeps the two-member capacity invariant under concurrent joins', () =>
+  yield* room.respondToJoin(roomId, alice, aliceToken, bob, 'allow');
+  const bobToken = yield* Deferred.await(bobTokenDeferred);
+
+  return { roomId, aliceToken, bobToken, aliceFiber, bobFiber };
+});
+
+const offer = (sdp: string) =>
+  new SessionDescriptionSignal({ negotiationEpoch: 0, type: 'offer', sdp });
+
+describe('RoomService knock-to-join', () => {
+  it.effect('mints a room id and surfaces a knock to the host', () =>
     withRoomService(
       Effect.gen(function* () {
         const room = yield* RoomService;
-        const exits = yield* Effect.forEach(
-          [alice, bob, charlie],
-          (peerId) => room.openSession(roomId, peerId).pipe(Effect.exit),
-          { concurrency: 'unbounded' },
+        const roomIdDeferred = yield* Deferred.make<RoomId>();
+
+        const aliceStream = yield* room.host(alice);
+        const aliceFiber = yield* aliceStream.pipe(
+          Stream.tap((event) =>
+            isOpened(event)
+              ? Deferred.succeed(roomIdDeferred, (event as RoomSessionOpenedEvent).roomId)
+              : Effect.void,
+          ),
+          Stream.take(2),
+          Stream.runCollect,
+          Effect.forkChild({ startImmediately: true }),
         );
 
-        assert.lengthOf(exits.filter(Exit.isSuccess), 2);
-        assert.lengthOf(exits.filter(Exit.isFailure), 1);
-      }),
-    ),
-  );
+        const roomId = yield* Deferred.await(roomIdDeferred);
+        assert.match(roomId, /^[a-z]{3}-[a-z]{4}-[a-z]{3}$/);
 
-  it.effect('publishes lifecycle events and leaves when the session scope closes', () =>
-    withRoomService(
-      Effect.gen(function* () {
-        const room = yield* RoomService;
-        const events = yield* room.openSession(roomId, alice);
-        yield* Effect.scoped(room.openSession(roomId, bob));
-        const received = yield* events.pipe(Stream.take(3), Stream.runCollect);
-        const opened = requireOpenedEvent(received[0]);
+        const bobStream = yield* room.join(roomId, bob, bobName);
+        const bobEvents = yield* bobStream.pipe(Stream.take(1), Stream.runCollect);
+        const aliceEvents = yield* Fiber.join(aliceFiber);
+        const aliceOpened = requireOpenedEvent(aliceEvents[0]);
 
-        assert.deepStrictEqual(received, [
-          new RoomSessionOpenedEvent({ peerId: null, sessionToken: opened.sessionToken }),
-          new PeerJoinedEvent({ peerId: bob }),
-          new PeerLeftEvent({ peerId: bob }),
-        ]);
-      }),
-    ),
-  );
-
-  it.effect('explicitly leaves once and releases room capacity', () =>
-    withRoomService(
-      Effect.gen(function* () {
-        const room = yield* RoomService;
-        const aliceEvents = yield* room.openSession(roomId, alice);
-        const bobEvents = yield* room.openSession(roomId, bob);
-        const bobOpened = requireOpenedEvent(
-          (yield* bobEvents.pipe(Stream.take(1), Stream.runCollect))[0],
+        assert.strictEqual(aliceOpened.roomId, roomId);
+        assert.strictEqual(aliceOpened.peerId, null);
+        assert.deepStrictEqual(
+          aliceEvents[1],
+          new JoinRequestedEvent({ peerId: bob, displayName: bobName }),
         );
-
-        yield* room.leave(roomId, bob, bobOpened.sessionToken);
-        yield* room.leave(roomId, bob, bobOpened.sessionToken);
-
-        const received = yield* aliceEvents.pipe(Stream.take(3), Stream.runCollect);
-        const aliceOpened = requireOpenedEvent(received[0]);
-        assert.deepStrictEqual(received, [
-          new RoomSessionOpenedEvent({ peerId: null, sessionToken: aliceOpened.sessionToken }),
-          new PeerJoinedEvent({ peerId: bob }),
-          new PeerLeftEvent({ peerId: bob }),
-        ]);
-
-        const replacement = yield* room.openSession(roomId, charlie);
-        const replacementEvents = yield* replacement.pipe(Stream.take(1), Stream.runCollect);
-        const replacementOpened = requireOpenedEvent(replacementEvents[0]);
-        assert.deepStrictEqual(replacementEvents, [
-          new RoomSessionOpenedEvent({
-            peerId: alice,
-            sessionToken: replacementOpened.sessionToken,
-          }),
-        ]);
+        assert.deepStrictEqual(bobEvents, [new JoinPendingEvent({})]);
       }),
     ),
   );
 
-  it.effect('rejects a duplicate peer before checking room capacity', () =>
+  it.effect('admits a joiner the host allows and connects both peers', () =>
     withRoomService(
       Effect.gen(function* () {
         const room = yield* RoomService;
-        yield* room.openSession(roomId, alice);
-        yield* room.openSession(roomId, bob);
-
-        const error = yield* room.openSession(roomId, alice).pipe(Effect.flip);
-
-        assert.instanceOf(error, PeerAlreadyJoined);
-        assert.strictEqual(error.roomId, roomId);
-        assert.strictEqual(error.peerId, alice);
-      }),
-    ),
-  );
-
-  it.effect('relays room events to subscribers', () =>
-    withRoomService(
-      Effect.gen(function* () {
-        const room = yield* RoomService;
-        const events = yield* room.openSession(roomId, alice);
-        const bobEvents = yield* room.openSession(roomId, bob);
-        const bobOpened = requireOpenedEvent(
-          (yield* bobEvents.pipe(Stream.take(1), Stream.runCollect))[0],
-        );
-        const event = new SignalReceivedEvent({
-          peerId: bob,
-          signal: new SessionDescriptionSignal({
-            negotiationEpoch: 37,
-            type: 'offer',
-            sdp: 'test-offer',
-          }),
+        const { roomId, aliceToken, bobToken, aliceFiber, bobFiber } = yield* connect({
+          hostTake: 3,
+          joinerTake: 2,
         });
 
-        yield* room.sendSignal(roomId, bob, bobOpened.sessionToken, event.signal);
-        const received = yield* events.pipe(Stream.take(3), Stream.runCollect);
-        const opened = requireOpenedEvent(received[0]);
+        const bobEvents = yield* Fiber.join(bobFiber);
+        const bobOpened = requireOpenedEvent(bobEvents[1]);
 
-        assert.deepStrictEqual(received, [
-          new RoomSessionOpenedEvent({ peerId: null, sessionToken: opened.sessionToken }),
-          new PeerJoinedEvent({ peerId: bob }),
-          event,
-        ]);
+        assert.deepStrictEqual(bobEvents[0], new JoinPendingEvent({}));
+        assert.strictEqual(bobOpened.peerId, alice);
+        assert.strictEqual(bobOpened.roomId, roomId);
+        assert.notStrictEqual(aliceToken, bobToken);
+
+        // Both admitted members can signal without error.
+        yield* room.sendSignal(roomId, alice, aliceToken, offer('from-alice'));
+        yield* room.sendSignal(roomId, bob, bobToken, offer('from-bob'));
+
+        const aliceEvents = yield* Fiber.join(aliceFiber);
+        assert.deepStrictEqual(aliceEvents[2], new PeerJoinedEvent({ peerId: bob }));
       }),
     ),
   );
 
+  it.effect('fails the joiner stream when the host denies', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const room = yield* RoomService;
+        const roomIdDeferred = yield* Deferred.make<RoomId>();
+        const aliceTokenDeferred = yield* Deferred.make<string>();
+
+        const aliceStream = yield* room.host(alice);
+        yield* aliceStream.pipe(
+          Stream.tap((event) =>
+            isOpened(event)
+              ? Effect.all([
+                  Deferred.succeed(roomIdDeferred, (event as RoomSessionOpenedEvent).roomId),
+                  Deferred.succeed(
+                    aliceTokenDeferred,
+                    (event as RoomSessionOpenedEvent).sessionToken,
+                  ),
+                ])
+              : Effect.void,
+          ),
+          Stream.runDrain,
+          Effect.forkChild({ startImmediately: true }),
+        );
+        const roomId = yield* Deferred.await(roomIdDeferred);
+        const aliceToken = yield* Deferred.await(aliceTokenDeferred);
+
+        const bobStream = yield* room.join(roomId, bob, bobName);
+        const bobFiber = yield* bobStream.pipe(
+          Stream.runDrain,
+          Effect.forkChild({ startImmediately: true }),
+        );
+
+        yield* room.respondToJoin(roomId, alice, aliceToken, bob, 'deny');
+        const error = yield* Fiber.join(bobFiber).pipe(Effect.flip);
+        assert.instanceOf(error, JoinDenied);
+
+        // The room still has the host: a fresh knock reaches pending.
+        const charlieStream = yield* room.join(roomId, charlie, charlieName);
+        const charlieFirst = yield* charlieStream.pipe(Stream.take(1), Stream.runCollect);
+        assert.instanceOf(charlieFirst[0], JoinPendingEvent);
+      }),
+    ),
+  );
+
+  it.effect('denies a knock that goes unanswered past the timeout', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const room = yield* RoomService;
+        const roomIdDeferred = yield* Deferred.make<RoomId>();
+        const aliceTokenDeferred = yield* Deferred.make<string>();
+
+        const aliceStream = yield* room.host(alice);
+        yield* aliceStream.pipe(
+          Stream.tap((event) =>
+            isOpened(event)
+              ? Effect.all([
+                  Deferred.succeed(roomIdDeferred, (event as RoomSessionOpenedEvent).roomId),
+                  Deferred.succeed(
+                    aliceTokenDeferred,
+                    (event as RoomSessionOpenedEvent).sessionToken,
+                  ),
+                ])
+              : Effect.void,
+          ),
+          Stream.runDrain,
+          Effect.forkChild({ startImmediately: true }),
+        );
+        const roomId = yield* Deferred.await(roomIdDeferred);
+        const aliceToken = yield* Deferred.await(aliceTokenDeferred);
+
+        const bobStream = yield* room.join(roomId, bob, bobName);
+        const bobFiber = yield* bobStream.pipe(
+          Stream.runDrain,
+          Effect.forkChild({ startImmediately: true }),
+        );
+
+        yield* TestClock.adjust('60 seconds');
+        const error = yield* Fiber.join(bobFiber).pipe(Effect.flip);
+        assert.instanceOf(error, JoinDenied);
+
+        // Pending was cleared: answering the timed-out knock finds nothing.
+        const noPending = yield* room
+          .respondToJoin(roomId, alice, aliceToken, bob, 'allow')
+          .pipe(Effect.flip);
+        assert.instanceOf(noPending, NoPendingJoin);
+      }),
+    ),
+  );
+
+  it.effect('rejects a join for a room without a host and creates nothing', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const room = yield* RoomService;
+        const roomId = RoomId.make('zzz-zzzz-zzz');
+
+        const error = yield* room.join(roomId, bob, bobName).pipe(Effect.flip);
+        assert.instanceOf(error, RoomNotFound);
+
+        // A second attempt still fails: the first did not squat a room.
+        const again = yield* room.join(roomId, charlie, charlieName).pipe(Effect.flip);
+        assert.instanceOf(again, RoomNotFound);
+      }),
+    ),
+  );
+
+  it.effect('does not relay signals from a pending joiner', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const room = yield* RoomService;
+        const roomId = yield* openHostRoomId(alice);
+
+        const bobStream = yield* room.join(roomId, bob, bobName);
+        yield* bobStream.pipe(Stream.take(1), Stream.runCollect);
+
+        const error = yield* room
+          .sendSignal(roomId, bob, 'not-a-member-token', offer('sneaky'))
+          .pipe(Effect.flip);
+        assert.instanceOf(error, PeerNotInRoom);
+        assert.strictEqual(error.peerId, bob);
+      }),
+    ),
+  );
+
+  it.effect('denies pending joiners when the host leaves', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const room = yield* RoomService;
+        const roomIdDeferred = yield* Deferred.make<RoomId>();
+        const aliceScope = yield* Scope.make();
+
+        const aliceStream = yield* room.host(alice).pipe(Scope.provide(aliceScope));
+        yield* aliceStream.pipe(
+          Stream.tap((event) =>
+            isOpened(event)
+              ? Deferred.succeed(roomIdDeferred, (event as RoomSessionOpenedEvent).roomId)
+              : Effect.void,
+          ),
+          Stream.runDrain,
+          Effect.forkChild({ startImmediately: true }),
+        );
+        const roomId = yield* Deferred.await(roomIdDeferred);
+
+        const bobStream = yield* room.join(roomId, bob, bobName);
+        const bobFiber = yield* bobStream.pipe(
+          Stream.runDrain,
+          Effect.forkChild({ startImmediately: true }),
+        );
+        // Ensure the knock is registered before the host departs.
+        yield* Effect.yieldNow;
+
+        yield* Scope.close(aliceScope, Exit.void);
+        const denied = yield* Fiber.join(bobFiber).pipe(Effect.flip);
+        assert.instanceOf(denied, JoinDenied);
+
+        const notFound = yield* room.join(roomId, charlie, charlieName).pipe(Effect.flip);
+        assert.instanceOf(notFound, RoomNotFound);
+      }),
+    ),
+  );
+
+  it.effect('authenticates RespondToJoin and requires a pending peer', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const room = yield* RoomService;
+        const roomIdDeferred = yield* Deferred.make<RoomId>();
+        const aliceTokenDeferred = yield* Deferred.make<string>();
+
+        const aliceStream = yield* room.host(alice);
+        yield* aliceStream.pipe(
+          Stream.tap((event) =>
+            isOpened(event)
+              ? Effect.all([
+                  Deferred.succeed(roomIdDeferred, (event as RoomSessionOpenedEvent).roomId),
+                  Deferred.succeed(
+                    aliceTokenDeferred,
+                    (event as RoomSessionOpenedEvent).sessionToken,
+                  ),
+                ])
+              : Effect.void,
+          ),
+          Stream.runDrain,
+          Effect.forkChild({ startImmediately: true }),
+        );
+        const roomId = yield* Deferred.await(roomIdDeferred);
+        const aliceToken = yield* Deferred.await(aliceTokenDeferred);
+
+        const bobStream = yield* room.join(roomId, bob, bobName);
+        yield* bobStream.pipe(Stream.take(1), Stream.runCollect);
+
+        const wrongToken = yield* room
+          .respondToJoin(roomId, alice, 'wrong-session-token', bob, 'allow')
+          .pipe(Effect.flip);
+        assert.instanceOf(wrongToken, PeerNotInRoom);
+        assert.strictEqual(wrongToken.peerId, alice);
+
+        const noPending = yield* room
+          .respondToJoin(roomId, alice, aliceToken, charlie, 'allow')
+          .pipe(Effect.flip);
+        assert.instanceOf(noPending, NoPendingJoin);
+        assert.strictEqual(noPending.peerId, charlie);
+      }),
+    ),
+  );
+
+  it.effect('drops a pending joiner that disconnects before admission', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const room = yield* RoomService;
+        const roomIdDeferred = yield* Deferred.make<RoomId>();
+        const aliceTokenDeferred = yield* Deferred.make<string>();
+
+        const aliceStream = yield* room.host(alice);
+        yield* aliceStream.pipe(
+          Stream.tap((event) =>
+            isOpened(event)
+              ? Effect.all([
+                  Deferred.succeed(roomIdDeferred, (event as RoomSessionOpenedEvent).roomId),
+                  Deferred.succeed(
+                    aliceTokenDeferred,
+                    (event as RoomSessionOpenedEvent).sessionToken,
+                  ),
+                ])
+              : Effect.void,
+          ),
+          Stream.runDrain,
+          Effect.forkChild({ startImmediately: true }),
+        );
+        const roomId = yield* Deferred.await(roomIdDeferred);
+        const aliceToken = yield* Deferred.await(aliceTokenDeferred);
+
+        const bobScope = yield* Scope.make();
+        const bobStream = yield* room.join(roomId, bob, bobName).pipe(Scope.provide(bobScope));
+        yield* bobStream.pipe(Stream.take(1), Stream.runCollect, Scope.provide(bobScope));
+        yield* Scope.close(bobScope, Exit.void);
+
+        const noPending = yield* room
+          .respondToJoin(roomId, alice, aliceToken, bob, 'allow')
+          .pipe(Effect.flip);
+        assert.instanceOf(noPending, NoPendingJoin);
+      }),
+    ),
+  );
+
+  it.effect('denies a second pending knock once the first fills the room', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const room = yield* RoomService;
+        const roomIdDeferred = yield* Deferred.make<RoomId>();
+        const aliceTokenDeferred = yield* Deferred.make<string>();
+
+        const aliceStream = yield* room.host(alice);
+        yield* aliceStream.pipe(
+          Stream.tap((event) =>
+            isOpened(event)
+              ? Effect.all([
+                  Deferred.succeed(roomIdDeferred, (event as RoomSessionOpenedEvent).roomId),
+                  Deferred.succeed(
+                    aliceTokenDeferred,
+                    (event as RoomSessionOpenedEvent).sessionToken,
+                  ),
+                ])
+              : Effect.void,
+          ),
+          Stream.runDrain,
+          Effect.forkChild({ startImmediately: true }),
+        );
+        const roomId = yield* Deferred.await(roomIdDeferred);
+        const aliceToken = yield* Deferred.await(aliceTokenDeferred);
+
+        // Both knock while the room still has only the host.
+        const bobStream = yield* room.join(roomId, bob, bobName);
+        const bobFiber = yield* bobStream.pipe(
+          Stream.runDrain,
+          Effect.forkChild({ startImmediately: true }),
+        );
+        const charlieStream = yield* room.join(roomId, charlie, charlieName);
+        const charlieFiber = yield* charlieStream.pipe(
+          Stream.runDrain,
+          Effect.forkChild({ startImmediately: true }),
+        );
+
+        // Admit the first, then admitting the second finds the room full.
+        yield* room.respondToJoin(roomId, alice, aliceToken, bob, 'allow');
+        yield* room.respondToJoin(roomId, alice, aliceToken, charlie, 'allow');
+
+        const streamFailure = yield* Fiber.join(charlieFiber).pipe(Effect.flip);
+        assert.instanceOf(streamFailure, JoinDenied);
+        yield* Fiber.interrupt(bobFiber);
+      }),
+    ),
+  );
+
+  it.effect('rejects a third peer once the room is full', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const room = yield* RoomService;
+        const { roomId } = yield* connect({ hostTake: 3, joinerTake: 2 });
+
+        const error = yield* room.join(roomId, charlie, charlieName).pipe(Effect.flip);
+        assert.instanceOf(error, RoomFull);
+      }),
+    ),
+  );
+});
+
+describe('RoomService signalling', () => {
   it.effect('delivers signals to the peer in FIFO order', () =>
     withRoomService(
       Effect.gen(function* () {
         const room = yield* RoomService;
-        const aliceEvents = yield* room.openSession(roomId, alice);
-        const bobEvents = yield* room.openSession(roomId, bob);
-        const bobOpened = requireOpenedEvent(
-          (yield* bobEvents.pipe(Stream.take(1), Stream.runCollect))[0],
+        const { roomId, bobToken, aliceFiber } = yield* connect({ hostTake: 6, joinerTake: 2 });
+
+        const signals = ['one', 'two', 'three'].map(offer);
+        yield* Effect.forEach(signals, (signal) => room.sendSignal(roomId, bob, bobToken, signal));
+
+        const aliceEvents = yield* Fiber.join(aliceFiber);
+        assert.deepStrictEqual(
+          aliceEvents.filter((event) => event instanceof SignalReceivedEvent),
+          signals.map((signal) => new SignalReceivedEvent({ peerId: bob, signal })),
         );
-
-        const signals = ['one', 'two', 'three'].map(
-          (sdp) =>
-            new SessionDescriptionSignal({ negotiationEpoch: 0, type: 'offer' as const, sdp }),
-        );
-
-        yield* Effect.forEach(signals, (signal) =>
-          room.sendSignal(roomId, bob, bobOpened.sessionToken, signal),
-        );
-
-        const received = yield* aliceEvents.pipe(Stream.take(5), Stream.runCollect);
-        const opened = requireOpenedEvent(received[0]);
-
-        assert.deepStrictEqual(received, [
-          new RoomSessionOpenedEvent({ peerId: null, sessionToken: opened.sessionToken }),
-          new PeerJoinedEvent({ peerId: bob }),
-          ...signals.map((signal) => new SignalReceivedEvent({ peerId: bob, signal })),
-        ]);
       }),
     ),
   );
@@ -239,65 +520,19 @@ describe('RoomService', () => {
     withRoomService(
       Effect.gen(function* () {
         const room = yield* RoomService;
-        const aliceEvents = yield* room.openSession(roomId, alice);
-        const aliceOpened = requireOpenedEvent(
-          (yield* aliceEvents.pipe(Stream.take(1), Stream.runCollect))[0],
-        );
-        const bobEvents = yield* room.openSession(roomId, bob);
-        const signal = new SessionDescriptionSignal({
-          negotiationEpoch: 0,
-          type: 'offer',
-          sdp: 'flood',
+        const { roomId, bobToken, aliceFiber } = yield* connect({
+          hostTake: 3 + SIGNAL_BUCKET_CAPACITY,
+          joinerTake: 2,
         });
 
-        const results = yield* Effect.forEach(
-          Array.from({ length: SIGNAL_BUCKET_CAPACITY + 10 }),
-          () => room.sendSignal(roomId, alice, aliceOpened.sessionToken, signal),
-        );
-        const received = yield* bobEvents.pipe(
-          Stream.take(SIGNAL_BUCKET_CAPACITY + 1),
-          Stream.runCollect,
+        yield* Effect.forEach(Array.from({ length: SIGNAL_BUCKET_CAPACITY + 10 }), () =>
+          room.sendSignal(roomId, bob, bobToken, offer('flood')),
         );
 
-        assert.lengthOf(results, SIGNAL_BUCKET_CAPACITY + 10);
+        const aliceEvents = yield* Fiber.join(aliceFiber);
         assert.lengthOf(
-          received.filter((event) => event instanceof SignalReceivedEvent),
+          aliceEvents.filter((event) => event instanceof SignalReceivedEvent),
           SIGNAL_BUCKET_CAPACITY,
-        );
-      }),
-    ),
-  );
-
-  it.effect('refills a member signal bucket over time', () =>
-    withRoomService(
-      Effect.gen(function* () {
-        const room = yield* RoomService;
-        const aliceEvents = yield* room.openSession(roomId, alice);
-        const aliceOpened = requireOpenedEvent(
-          (yield* aliceEvents.pipe(Stream.take(1), Stream.runCollect))[0],
-        );
-        const bobEvents = yield* room.openSession(roomId, bob);
-        const signal = new SessionDescriptionSignal({
-          negotiationEpoch: 0,
-          type: 'offer',
-          sdp: 'refill',
-        });
-
-        yield* Effect.forEach(Array.from({ length: SIGNAL_BUCKET_CAPACITY }), () =>
-          room.sendSignal(roomId, alice, aliceOpened.sessionToken, signal),
-        );
-        yield* TestClock.adjust('1 second');
-        yield* Effect.forEach(Array.from({ length: 5 }), () =>
-          room.sendSignal(roomId, alice, aliceOpened.sessionToken, signal),
-        );
-
-        const received = yield* bobEvents.pipe(
-          Stream.take(SIGNAL_BUCKET_CAPACITY + 6),
-          Stream.runCollect,
-        );
-        assert.lengthOf(
-          received.filter((event) => event instanceof SignalReceivedEvent),
-          SIGNAL_BUCKET_CAPACITY + 5,
         );
       }),
     ),
@@ -307,67 +542,121 @@ describe('RoomService', () => {
     withRoomService(
       Effect.gen(function* () {
         const room = yield* RoomService;
-        const aliceEvents = yield* room.openSession(roomId, alice);
-        const aliceOpened = requireOpenedEvent(
-          (yield* aliceEvents.pipe(Stream.take(1), Stream.runCollect))[0],
-        );
-        const bobEvents = yield* room.openSession(roomId, bob);
-        const bobOpened = requireOpenedEvent(
-          (yield* bobEvents.pipe(Stream.take(1), Stream.runCollect))[0],
-        );
-        const aliceSignal = new SessionDescriptionSignal({
-          negotiationEpoch: 0,
-          type: 'offer',
-          sdp: 'alice',
-        });
-        const bobSignal = new SessionDescriptionSignal({
-          negotiationEpoch: 0,
-          type: 'answer',
-          sdp: 'bob',
+        const { roomId, aliceToken, bobToken, aliceFiber } = yield* connect({
+          hostTake: 4,
+          joinerTake: 2,
         });
 
+        // Drain alice's bucket, then a single bob signal must still arrive.
         yield* Effect.forEach(Array.from({ length: SIGNAL_BUCKET_CAPACITY }), () =>
-          room.sendSignal(roomId, alice, aliceOpened.sessionToken, aliceSignal),
+          room.sendSignal(roomId, alice, aliceToken, offer('alice')),
         );
-        yield* room.sendSignal(roomId, bob, bobOpened.sessionToken, bobSignal);
+        yield* room.sendSignal(roomId, bob, bobToken, offer('bob'));
 
-        const received = yield* aliceEvents.pipe(Stream.take(3), Stream.runCollect);
+        const aliceEvents = yield* Fiber.join(aliceFiber);
         assert.deepStrictEqual(
-          received.filter((event) => event instanceof SignalReceivedEvent),
-          [new SignalReceivedEvent({ peerId: bob, signal: bobSignal })],
+          aliceEvents.filter((event) => event instanceof SignalReceivedEvent),
+          [new SignalReceivedEvent({ peerId: bob, signal: offer('bob') })],
         );
       }),
     ),
   );
 
-  it.effect('caps new rooms while allowing joins to existing rooms', () =>
+  it.effect('rejects forged signals while accepting the member token', () =>
     withRoomService(
       Effect.gen(function* () {
         const room = yield* RoomService;
+        const { roomId, aliceToken } = yield* connect({ hostTake: 3, joinerTake: 2 });
 
-        yield* Effect.forEach(
-          Array.from({ length: MAX_LIVE_ROOMS }, (_, index) => index),
-          (index) =>
-            // Refill the creation bucket each iteration so this cap test is not
-            // gated by the room-creation rate limit.
-            room
-              .openSession(randomRoomId(index), randomPeerId(index))
-              .pipe(Effect.tap(() => TestClock.adjust(ROOM_CREATE_BUCKET_REFILL_EVERY))),
-          { discard: true },
-        );
+        const error = yield* room
+          .sendSignal(roomId, alice, 'wrong-session-token', offer('forged'))
+          .pipe(Effect.flip);
+        yield* room.sendSignal(roomId, alice, aliceToken, offer('authentic'));
 
-        const error = yield* room.openSession(RoomId.make('zzz-zzzz-zzz'), alice).pipe(Effect.flip);
-        const existingRoomEvents = yield* room.openSession(randomRoomId(0), bob);
-        const existingRoomOpened = requireOpenedEvent(
-          (yield* existingRoomEvents.pipe(Stream.take(1), Stream.runCollect))[0],
-        );
-
-        assert.instanceOf(error, ServerAtCapacity);
-        assert.strictEqual(existingRoomOpened.peerId, randomPeerId(0));
+        assert.instanceOf(error, PeerNotInRoom);
+        assert.strictEqual(error.peerId, alice);
       }),
     ),
   );
 
+  it.effect('issues distinct non-empty session tokens to each member', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const { aliceToken, bobToken } = yield* connect({ hostTake: 3, joinerTake: 2 });
+        assert.isNotEmpty(aliceToken);
+        assert.isNotEmpty(bobToken);
+        assert.notStrictEqual(aliceToken, bobToken);
+      }),
+    ),
+  );
+
+  it.effect('lets an admitted peer leave and notifies the host', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const room = yield* RoomService;
+        const { roomId, bobToken, aliceFiber } = yield* connect({ hostTake: 4, joinerTake: 2 });
+
+        yield* room.leave(roomId, bob, bobToken);
+
+        const aliceEvents = yield* Fiber.join(aliceFiber);
+        assert.deepStrictEqual(aliceEvents[3], new PeerLeftEvent({ peerId: bob }));
+      }),
+    ),
+  );
+
+  it.effect('removes an admitted member when its session scope closes', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const room = yield* RoomService;
+        const roomIdDeferred = yield* Deferred.make<RoomId>();
+        const aliceTokenDeferred = yield* Deferred.make<string>();
+
+        const aliceStream = yield* room.host(alice);
+        const aliceFiber = yield* aliceStream.pipe(
+          Stream.tap((event) =>
+            isOpened(event)
+              ? Effect.all([
+                  Deferred.succeed(roomIdDeferred, (event as RoomSessionOpenedEvent).roomId),
+                  Deferred.succeed(
+                    aliceTokenDeferred,
+                    (event as RoomSessionOpenedEvent).sessionToken,
+                  ),
+                ])
+              : Effect.void,
+          ),
+          Stream.take(4),
+          Stream.runCollect,
+          Effect.forkChild({ startImmediately: true }),
+        );
+        const roomId = yield* Deferred.await(roomIdDeferred);
+        const aliceToken = yield* Deferred.await(aliceTokenDeferred);
+
+        const bobScope = yield* Scope.make();
+        const bobTokenDeferred = yield* Deferred.make<string>();
+        const bobStream = yield* room.join(roomId, bob, bobName).pipe(Scope.provide(bobScope));
+        yield* bobStream.pipe(
+          Stream.tap((event) =>
+            isOpened(event)
+              ? Deferred.succeed(bobTokenDeferred, (event as RoomSessionOpenedEvent).sessionToken)
+              : Effect.void,
+          ),
+          Stream.runDrain,
+          Scope.provide(bobScope),
+          Effect.forkChild({ startImmediately: true }),
+        );
+
+        yield* room.respondToJoin(roomId, alice, aliceToken, bob, 'allow');
+        yield* Deferred.await(bobTokenDeferred);
+        yield* Scope.close(bobScope, Exit.void);
+
+        const aliceEvents = yield* Fiber.join(aliceFiber);
+        assert.deepStrictEqual(aliceEvents[3], new PeerLeftEvent({ peerId: bob }));
+      }),
+    ),
+  );
+});
+
+describe('RoomService capacity', () => {
   it.effect('rejects new rooms once the creation bucket is drained', () =>
     withRoomService(
       Effect.gen(function* () {
@@ -375,17 +664,11 @@ describe('RoomService', () => {
 
         yield* Effect.forEach(
           Array.from({ length: ROOM_CREATE_BUCKET_CAPACITY }, (_, index) => index),
-          (index) => room.openSession(randomRoomId(index), randomPeerId(index)),
+          (index) => room.host(randomPeerId(index)),
           { discard: true },
         );
 
-        const error = yield* room
-          .openSession(
-            randomRoomId(ROOM_CREATE_BUCKET_CAPACITY),
-            randomPeerId(ROOM_CREATE_BUCKET_CAPACITY),
-          )
-          .pipe(Effect.flip);
-
+        const error = yield* room.host(randomPeerId(ROOM_CREATE_BUCKET_CAPACITY)).pipe(Effect.flip);
         assert.instanceOf(error, ServerAtCapacity);
       }),
     ),
@@ -398,22 +681,20 @@ describe('RoomService', () => {
 
         yield* Effect.forEach(
           Array.from({ length: ROOM_CREATE_BUCKET_CAPACITY }, (_, index) => index),
-          (index) => room.openSession(randomRoomId(index), randomPeerId(index)),
+          (index) => room.host(randomPeerId(index)),
           { discard: true },
         );
 
-        const rejected = yield* room
-          .openSession(randomRoomId(100), randomPeerId(100))
-          .pipe(Effect.flip);
+        const rejected = yield* room.host(randomPeerId(100)).pipe(Effect.flip);
         assert.instanceOf(rejected, ServerAtCapacity);
 
         yield* TestClock.adjust(ROOM_CREATE_BUCKET_REFILL_EVERY);
 
-        const events = yield* room.openSession(randomRoomId(101), randomPeerId(101));
+        const events = yield* room.host(randomPeerId(101));
         const opened = requireOpenedEvent(
           (yield* events.pipe(Stream.take(1), Stream.runCollect))[0],
         );
-        assert.isNull(opened.peerId);
+        assert.match(opened.roomId, /^[a-z]{3}-[a-z]{4}-[a-z]{3}$/);
       }),
     ),
   );
@@ -422,196 +703,45 @@ describe('RoomService', () => {
     withRoomService(
       Effect.gen(function* () {
         const room = yield* RoomService;
+        const roomId = yield* openHostRoomId(alice);
 
-        // Create the room to join later while a creation token is still available.
-        const aliceEvents = yield* room.openSession(roomId, alice);
-        yield* aliceEvents.pipe(Stream.take(1), Stream.runCollect);
-
-        // Drain the remaining creation tokens with fresh-room attempts.
         yield* Effect.forEach(
           Array.from({ length: ROOM_CREATE_BUCKET_CAPACITY - 1 }, (_, index) => index),
-          (index) => room.openSession(randomRoomId(index), randomPeerId(index)),
+          (index) => room.host(randomPeerId(index)),
           { discard: true },
         );
 
-        // A brand-new room is now rejected...
-        const rejected = yield* room
-          .openSession(RoomId.make('zzz-zzzz-zzz'), charlie)
-          .pipe(Effect.flip);
+        const rejected = yield* room.host(randomPeerId(500)).pipe(Effect.flip);
         assert.instanceOf(rejected, ServerAtCapacity);
 
-        // ...but joining the earlier room as the second peer still succeeds.
-        const bobEvents = yield* room.openSession(roomId, bob);
-        const bobOpened = requireOpenedEvent(
-          (yield* bobEvents.pipe(Stream.take(1), Stream.runCollect))[0],
-        );
-        assert.strictEqual(bobOpened.peerId, alice);
+        const joinerStream = yield* room.join(roomId, bob, bobName);
+        const first = yield* joinerStream.pipe(Stream.take(1), Stream.runCollect);
+        assert.instanceOf(first[0], JoinPendingEvent);
       }),
     ),
   );
 
-  it.effect('does not lose a signal published before the newcomer consumes', () =>
+  it.effect('caps new rooms while allowing joins to existing rooms', () =>
     withRoomService(
       Effect.gen(function* () {
         const room = yield* RoomService;
-        const aliceEvents = yield* room.openSession(roomId, alice);
-        const aliceOpened = requireOpenedEvent(
-          (yield* aliceEvents.pipe(Stream.take(1), Stream.runCollect))[0],
-        );
-        const bobEvents = yield* room.openSession(roomId, bob);
+        const roomId = yield* openHostRoomId(alice);
 
-        const signal = new SignalReceivedEvent({
-          peerId: alice,
-          signal: new SessionDescriptionSignal({
-            negotiationEpoch: 0,
-            type: 'offer',
-            sdp: 'immediate-offer',
-          }),
-        });
-        yield* room.sendSignal(roomId, alice, aliceOpened.sessionToken, signal.signal);
-
-        const received = yield* bobEvents.pipe(Stream.take(2), Stream.runCollect);
-        const bobOpened = requireOpenedEvent(received[0]);
-
-        assert.deepStrictEqual(received, [
-          new RoomSessionOpenedEvent({ peerId: alice, sessionToken: bobOpened.sessionToken }),
-          signal,
-        ]);
-      }),
-    ),
-  );
-
-  it.effect('rejects an attempt to kick a member with another member token', () =>
-    withRoomService(
-      Effect.gen(function* () {
-        const room = yield* RoomService;
-        const aliceEvents = yield* room.openSession(roomId, alice);
-        const aliceOpened = requireOpenedEvent(
-          (yield* aliceEvents.pipe(Stream.take(1), Stream.runCollect))[0],
-        );
-        const bobEvents = yield* room.openSession(roomId, bob);
-        const bobOpened = requireOpenedEvent(
-          (yield* bobEvents.pipe(Stream.take(1), Stream.runCollect))[0],
-        );
-        const signal = new SessionDescriptionSignal({
-          negotiationEpoch: 0,
-          type: 'offer',
-          sdp: 'still-a-member',
-        });
-
-        yield* room.leave(roomId, alice, bobOpened.sessionToken);
-        yield* room.sendSignal(roomId, alice, aliceOpened.sessionToken, signal);
-
-        const received = yield* bobEvents.pipe(Stream.take(2), Stream.runCollect);
-        assert.deepStrictEqual(received, [
-          new RoomSessionOpenedEvent({
-            peerId: alice,
-            sessionToken: bobOpened.sessionToken,
-          }),
-          new SignalReceivedEvent({ peerId: alice, signal }),
-        ]);
-      }),
-    ),
-  );
-
-  it.effect('rejects forged signals while accepting the member token', () =>
-    withRoomService(
-      Effect.gen(function* () {
-        const room = yield* RoomService;
-        const aliceEvents = yield* room.openSession(roomId, alice);
-        const aliceOpened = requireOpenedEvent(
-          (yield* aliceEvents.pipe(Stream.take(1), Stream.runCollect))[0],
-        );
-        const signal = new SessionDescriptionSignal({
-          negotiationEpoch: 0,
-          type: 'offer',
-          sdp: 'authenticated',
-        });
-
-        const error = yield* room
-          .sendSignal(roomId, alice, 'wrong-session-token', signal)
-          .pipe(Effect.flip);
-        yield* room.sendSignal(roomId, alice, aliceOpened.sessionToken, signal);
-
-        assert.instanceOf(error, PeerNotInRoom);
-        assert.strictEqual(error.roomId, roomId);
-        assert.strictEqual(error.peerId, alice);
-      }),
-    ),
-  );
-
-  it.effect('removes a member when its session scope closes', () =>
-    withRoomService(
-      Effect.gen(function* () {
-        const room = yield* RoomService;
-        const sessionScope = yield* Scope.make();
-        const events = yield* room.openSession(roomId, alice).pipe(Scope.provide(sessionScope));
-        const opened = requireOpenedEvent(
-          (yield* events.pipe(Stream.take(1), Stream.runCollect))[0],
+        yield* Effect.forEach(
+          Array.from({ length: MAX_LIVE_ROOMS - 1 }, (_, index) => index),
+          (index) =>
+            room
+              .host(randomPeerId(index))
+              .pipe(Effect.tap(() => TestClock.adjust(ROOM_CREATE_BUCKET_REFILL_EVERY))),
+          { discard: true },
         );
 
-        yield* Scope.close(sessionScope, Exit.void);
+        const error = yield* room.host(randomPeerId(9999)).pipe(Effect.flip);
+        assert.instanceOf(error, ServerAtCapacity);
 
-        const error = yield* room
-          .sendSignal(
-            roomId,
-            alice,
-            opened.sessionToken,
-            new SessionDescriptionSignal({
-              negotiationEpoch: 0,
-              type: 'offer',
-              sdp: 'after-close',
-            }),
-          )
-          .pipe(Effect.flip);
-        assert.instanceOf(error, PeerNotInRoom);
-      }),
-    ),
-  );
-
-  it.effect('issues distinct non-empty tokens to each member', () =>
-    withRoomService(
-      Effect.gen(function* () {
-        const room = yield* RoomService;
-        const aliceEvents = yield* room.openSession(roomId, alice);
-        const bobEvents = yield* room.openSession(roomId, bob);
-        const aliceOpened = requireOpenedEvent(
-          (yield* aliceEvents.pipe(Stream.take(1), Stream.runCollect))[0],
-        );
-        const bobOpened = requireOpenedEvent(
-          (yield* bobEvents.pipe(Stream.take(1), Stream.runCollect))[0],
-        );
-
-        assert.isNotEmpty(aliceOpened.sessionToken);
-        assert.isNotEmpty(bobOpened.sessionToken);
-        assert.notStrictEqual(aliceOpened.sessionToken, bobOpened.sessionToken);
-      }),
-    ),
-  );
-
-  it.effect('removes an empty room', () =>
-    withRoomService(
-      Effect.gen(function* () {
-        const room = yield* RoomService;
-        yield* Effect.scoped(room.openSession(roomId, alice));
-
-        const error = yield* room
-          .sendSignal(
-            roomId,
-            alice,
-            'invalid-session-token',
-            new SessionDescriptionSignal({
-              negotiationEpoch: 0,
-              type: 'offer',
-              sdp: 'missing-room',
-            }),
-          )
-          .pipe(Effect.flip);
-        yield* room.openSession(roomId, bob);
-
-        assert.instanceOf(error, PeerNotInRoom);
-        assert.strictEqual(error.roomId, roomId);
-        assert.strictEqual(error.peerId, alice);
+        const joinerStream = yield* room.join(roomId, bob, bobName);
+        const first = yield* joinerStream.pipe(Stream.take(1), Stream.runCollect);
+        assert.instanceOf(first[0], JoinPendingEvent);
       }),
     ),
   );

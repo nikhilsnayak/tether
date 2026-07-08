@@ -8,16 +8,27 @@ export const RoomHandlers = RoomRpcs.toLayer(
     const room = yield* RoomService;
 
     return RoomRpcs.of({
-      OpenRoomSession: Effect.fnUntraced(function* ({ roomId, selfId }) {
-        const events = yield* room.openSession(roomId, selfId);
+      OpenRoomSession: Effect.fnUntraced(function* (payload) {
+        const events = yield* payload.intent === 'host'
+          ? room.host(payload.selfId)
+          : room.join(payload.roomId, payload.selfId, payload.displayName);
 
         return events.pipe(Stream.map((event) => ({ event })));
       }, Stream.unwrap),
-      LeaveRoom: Effect.fnUntraced(function* ({ roomId, selfId, sessionToken }) {
-        yield* room.leave(roomId, selfId, sessionToken);
+      RespondToJoin: Effect.fnUntraced(function* ({
+        roomId,
+        selfId,
+        sessionToken,
+        peerId,
+        decision,
+      }) {
+        yield* room.respondToJoin(roomId, selfId, sessionToken, peerId, decision);
       }),
       SendSignal: Effect.fnUntraced(function* ({ roomId, selfId, sessionToken, signal }) {
         yield* room.sendSignal(roomId, selfId, sessionToken, signal);
+      }),
+      LeaveRoom: Effect.fnUntraced(function* ({ roomId, selfId, sessionToken }) {
+        yield* room.leave(roomId, selfId, sessionToken);
       }),
     });
   }),

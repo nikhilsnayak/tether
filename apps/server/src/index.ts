@@ -4,9 +4,11 @@ import { HttpRouter } from 'effect/unstable/http';
 
 import { AppLayer } from './App';
 import { NetworkAddressBanner } from './lib/NetworkAddressBanner';
+import * as ServerCrypto from './lib/ServerCrypto';
 
 const HttpLive = HttpRouter.serve(AppLayer, { disableListenLog: true }).pipe(
   Layer.merge(NetworkAddressBanner),
+  Layer.provide(ServerCrypto.layer),
   Layer.provide(
     BunHttpServer.layerConfig({
       hostname: Config.string('HOST').pipe(Config.withDefault('0.0.0.0')),
