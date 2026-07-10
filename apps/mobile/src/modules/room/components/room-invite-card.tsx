@@ -1,7 +1,7 @@
 import * as Clipboard from 'expo-clipboard';
 import { Check, Copy, Share2, X } from 'lucide-react-native';
 import { useState } from 'react';
-import { Pressable, Share, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 
 import { colors, mono } from '@/lib/theme';
 
@@ -23,13 +23,24 @@ export function RoomInviteCard({
       await Clipboard.setStringAsync(roomUrl);
       setCopied(true);
       setTimeout(() => setCopied(false), 2_000);
-    } catch {
+    } catch (error) {
       setCopied(false);
+      Alert.alert('Copy failed', 'Could not copy the room link. Please try again.');
     }
   };
 
   const shareRoomUrl = () => {
-    void Share.share({ message: `Join my Tether video call\n${roomUrl}` }).catch(() => {});
+    void Share.share({ message: `Join my Tether video call\n${roomUrl}` }).catch((error) => {
+      // Share.share throws 'ABORT_ERROR' or Error with name 'AbortError' when cancelled by the user.
+      // These are not failures, so we only alert on genuine errors.
+      const isCancellation =
+        error === 'ABORT_ERROR' ||
+        (error instanceof Error && error.name === 'AbortError') ||
+        error?.code === 'ERR_CANCELLED';
+      if (!isCancellation) {
+        Alert.alert('Share failed', 'Could not share the room link. Please try again.');
+      }
+    });
   };
 
   return (

@@ -39,12 +39,17 @@ type Member = {
   readonly signalBucket: TokenBucket;
 };
 
-type AdmitResult = { readonly sessionToken: string; readonly hostPeerId: PeerId };
+type AdmitResult = {
+  readonly sessionToken: string;
+  readonly hostPeerId: PeerId;
+  readonly subscription: PubSub.Subscription<BroadcastRoomEvent>;
+};
 
 type PendingJoin = {
   readonly peerId: PeerId;
   readonly displayName: DisplayName;
   readonly deferred: Deferred.Deferred<AdmitResult, JoinDenied>;
+  readonly subscription: PubSub.Subscription<BroadcastRoomEvent>;
 };
 
 type BroadcastRoomEvent = Exclude<RoomEvent, JoinPendingEvent>;
@@ -253,26 +258,17 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
       return resource.events;
     });
 
-    // Subscribes at admission time so a still-pending joiner never sees earlier traffic.
+    // Uses the subscription established before admission was granted, ensuring no events are missed.
     const admittedStream = (roomId: RoomId, selfId: PeerId, result: AdmitResult) =>
-      Stream.unwrap(
-        Effect.gen(function* () {
-          const ctx = (yield* SynchronizedRef.get(registryRef)).get(roomId);
-          if (ctx === undefined) {
-            return Stream.fail(new JoinDenied());
-          }
-          const subscription = yield* PubSub.subscribe(ctx.pubsub);
-          return Stream.fromArray<BroadcastRoomEvent>([
-            new RoomSessionOpenedEvent({
-              peerId: result.hostPeerId,
-              sessionToken: result.sessionToken,
-              roomId,
-            }),
-          ]).pipe(
-            Stream.concat(Stream.fromSubscription(subscription)),
-            Stream.filter(notSelf(selfId)),
-          );
+      Stream.fromArray<BroadcastRoomEvent>([
+        new RoomSessionOpenedEvent({
+          peerId: result.hostPeerId,
+          sessionToken: result.sessionToken,
+          roomId,
         }),
+      ]).pipe(
+        Stream.concat(Stream.fromSubscription(result.subscription)),
+        Stream.filter(notSelf(selfId)),
       );
 
     const openJoin = Effect.fnUntraced(function* (
@@ -281,6 +277,31 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
       displayName: DisplayName,
     ) {
       const deferred = yield* Deferred.make<AdmitResult, JoinDenied>();
+
+      // Subscribe before requesting to join, so the subscription is ready when admission is granted.
+      const subscriptionResult = yield* SynchronizedRef.modifyEffect(
+        registryRef,
+        Effect.fnUntraced(function* (registry) {
+          const ctx = registry.get(roomId);
+          if (ctx === undefined || ctx.members.length === 0) {
+            return [
+              { _tag: 'not-found', subscription: null } as const,
+              registry,
+            ];
+          }
+          const subscription = yield* PubSub.subscribe(ctx.pubsub);
+          return [
+            { _tag: 'found', subscription } as const,
+            registry,
+          ];
+        }),
+      );
+
+      if (subscriptionResult._tag === 'not-found') {
+        return yield* new RoomNotFound({ roomId });
+      }
+
+      const subscription = subscriptionResult.subscription;
 
       const outcome = yield* SynchronizedRef.modifyEffect(
         registryRef,
@@ -309,7 +330,7 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
             return [{ _tag: 'full' } as JoinOutcome, newRegistry];
           }
 
-          ctx.pending = [...ctx.pending, { peerId: selfId, displayName, deferred }];
+          ctx.pending = [...ctx.pending, { peerId: selfId, displayName, deferred, subscription }];
           yield* PubSub.publish(
             ctx.pubsub,
             new JoinRequestedEvent({ peerId: selfId, displayName }),
@@ -407,7 +428,11 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
             {
               _tag: 'allow',
               deferred: pendingEntry.deferred,
-              result: { sessionToken: newToken, hostPeerId: selfId },
+              result: {
+                sessionToken: newToken,
+                hostPeerId: selfId,
+                subscription: pendingEntry.subscription,
+              },
             } as RespondAction,
             newRegistry,
           ];
