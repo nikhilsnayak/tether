@@ -4,6 +4,7 @@ import { Exit, Schema } from 'effect';
 import {
   DisplayName,
   IceCandidateSignal,
+  JoinCancelledEvent,
   isServerAtCapacity,
   OpenRoomSessionError,
   OpenRoomSessionPayload,
@@ -155,6 +156,18 @@ describe('room wire schemas', () => {
         sessionToken: 'session-token',
         roomId: 'abc-defg-hij',
       }),
+    );
+  });
+
+  it('round-trips a join-cancelled event with a bounded peer id', () => {
+    assert.isTrue(
+      succeeds(JoinCancelledEvent, {
+        _tag: '@tether/JoinCancelledEvent',
+        peerId: 'abcdefghijkl',
+      }),
+    );
+    assert.isFalse(
+      succeeds(JoinCancelledEvent, { _tag: '@tether/JoinCancelledEvent', peerId: '' }),
     );
   });
 

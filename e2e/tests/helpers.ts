@@ -97,28 +97,40 @@ export const expectWaitingForPeer = (page: Page) =>
 export const continueInBrowser = (page: Page) =>
   page.getByRole('button', { name: 'Join in this browser' }).click();
 
-export const joinRoom = async (page: Page, roomId: string) => {
+// Joins as a guest: enter the code, continue in-browser, then present a name
+// and knock. The host must still admit before the call connects.
+export const joinRoom = async (page: Page, roomId: string, displayName = 'Guest') => {
   await page.goto('/');
   await page.getByRole('textbox', { name: 'Room code' }).fill(roomId);
   await page.getByRole('button', { name: 'Connect' }).click();
   await expect(page).toHaveURL(new RegExp(`/room/${roomId}$`));
   await continueInBrowser(page);
+  await page.getByRole('textbox', { name: 'Your name' }).fill(displayName);
+  await page.getByRole('button', { name: 'Knock to join' }).click();
 };
 
+export const admitGuest = (host: Page) =>
+  host.getByRole('button', { name: 'Allow', exact: true }).click();
+
+export const denyGuest = (host: Page) =>
+  host.getByRole('button', { name: 'Deny', exact: true }).click();
+
+// The host mints its room server-side on /host; the id arrives in the invite
+// card once the session opens.
 export const createRoom = async (page: Page) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Call' }).click();
-  await expect(page).toHaveURL(/\/room\/[a-z]{3}-[a-z]{4}-[a-z]{3}\?invite=true$/);
-  await continueInBrowser(page);
-  await page.getByRole('button', { name: 'Close' }).click();
-  // Wait for the ?invite=true replace-navigation so the id is extracted clean.
-  await expect(page).toHaveURL(/\/room\/[a-z]{3}-[a-z]{4}-[a-z]{3}$/);
-  await expectWaitingForPeer(page);
-  const roomId = page.url().split('/').at(-1);
-  if (roomId === undefined) {
-    throw new Error('Expected the generated meeting URL to contain a room id');
+  await expect(page).toHaveURL(/\/host$/);
+  const inviteLink = page.getByRole('textbox', { name: 'Room invite link' });
+  await expect(inviteLink).toBeVisible({ timeout: 20_000 });
+  const url = await inviteLink.inputValue();
+  const roomId = url.split('/').at(-1);
+  if (roomId === undefined || roomId === '') {
+    throw new Error('Expected the invite link to contain a room id');
   }
-  return roomId;
+  await page.getByRole('button', { name: 'Close' }).click();
+  await expectWaitingForPeer(page);
+  return decodeURIComponent(roomId);
 };
 
 export const connectPeers = async (
@@ -136,6 +148,7 @@ export const connectPeers = async (
 
   const roomId = await createRoom(host);
   await joinRoom(guest, roomId);
+  await admitGuest(host);
   await Promise.all([expectConnected(host), expectConnected(guest)]);
 
   return {

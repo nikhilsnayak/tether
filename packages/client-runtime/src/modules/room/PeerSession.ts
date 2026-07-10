@@ -3,6 +3,7 @@ import {
   SessionDescriptionSignal,
   type PeerId,
   type RoomEvent,
+  type RoomId,
   type Signal,
 } from '@tether/contracts/modules/room';
 import { Crypto, Duration, Effect, Exit, Ref, Scope } from 'effect';
@@ -58,6 +59,9 @@ const makePeerSessionActorInternal = Effect.fnUntraced(function* (
   const crypto = yield* Crypto.Crypto;
   const actorScope = yield* Scope.Scope;
   const sessionTokenRef = yield* Ref.make('');
+  // The host does not know its roomId until RoomSessionOpenedEvent mints one;
+  // both intents resolve the effective roomId from that event for later RPCs.
+  const roomIdRef = yield* Ref.make<RoomId | null>(null);
   let nextMessageSequence = 0;
   let nextOfferEpoch = 0;
   let latestRemoteOfferEpoch: number | null = null;
@@ -68,10 +72,16 @@ const makePeerSessionActorInternal = Effect.fnUntraced(function* (
   const makeMessageId = (sender: ChatMessage['sender']) =>
     `${session.selfId}:${sender}:${nextMessageSequence++}`;
 
-  const sendSignal = (signal: Signal) =>
-    Ref.get(sessionTokenRef).pipe(
-      Effect.flatMap((sessionToken) => client.SendSignal({ ...session, sessionToken, signal })),
-    );
+  const sendSignal = Effect.fnUntraced(function* (signal: Signal) {
+    const roomId = yield* Ref.get(roomIdRef);
+    // Unreachable: signals only flow after RoomSessionOpenedEvent set roomId.
+    /* v8 ignore next 3 */
+    if (roomId === null) {
+      return;
+    }
+    const sessionToken = yield* Ref.get(sessionTokenRef);
+    yield* client.SendSignal({ selfId: session.selfId, roomId, sessionToken, signal });
+  });
 
   // Hashes the SDPs as they crossed signaling; failure downgrades to unverified.
   const emitSas = (offerSdp: string, answerSdp: string) =>
@@ -397,6 +407,8 @@ const makePeerSessionActorInternal = Effect.fnUntraced(function* (
     switch (event._tag) {
       case '@tether/RoomSessionOpenedEvent': {
         yield* Ref.set(sessionTokenRef, event.sessionToken);
+        yield* Ref.set(roomIdRef, event.roomId);
+        yield* eventSink.emit({ _tag: 'RoomOpened', roomId: event.roomId });
         return yield* handleRoomSessionOpened(event.peerId);
       }
       case '@tether/PeerJoinedEvent':
@@ -405,6 +417,18 @@ const makePeerSessionActorInternal = Effect.fnUntraced(function* (
         return yield* handleSignal(event.peerId, event.signal);
       case '@tether/PeerLeftEvent':
         return yield* handlePeerLeft(event.peerId);
+      // Pending-phase events precede negotiation, so they only surface to the UI
+      // and never touch the connection state machine.
+      case '@tether/JoinRequestedEvent':
+        return yield* eventSink.emit({
+          _tag: 'JoinRequestReceived',
+          peerId: event.peerId,
+          displayName: event.displayName,
+        });
+      case '@tether/JoinPendingEvent':
+        return yield* eventSink.emit({ _tag: 'JoinPending' });
+      case '@tether/JoinCancelledEvent':
+        return yield* eventSink.emit({ _tag: 'JoinRequestCancelled', peerId: event.peerId });
     }
   });
 
@@ -657,7 +681,7 @@ const makePeerSessionActorInternal = Effect.fnUntraced(function* (
     }
   });
 
-  return { handleInput, sessionTokenRef };
+  return { handleInput, sessionTokenRef, roomIdRef };
 });
 
 /**

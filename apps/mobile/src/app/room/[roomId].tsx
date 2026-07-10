@@ -1,151 +1,135 @@
-import { PeerId, RoomId } from '@tether/contracts/modules/room';
-import * as Clipboard from 'expo-clipboard';
+import type { RoomSession } from '@tether/client-runtime/modules/room';
+import { DisplayName, PeerId, RoomId } from '@tether/contracts/modules/room';
 import { Stack, useLocalSearchParams, useRouter, type ErrorBoundaryProps } from 'expo-router';
-import { Check, Copy, Share2, X } from 'lucide-react-native';
 import { Suspense, useState } from 'react';
-import { Pressable, Share, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { Wordmark } from '@/components/logo';
 import { colors, mono } from '@/lib/theme';
 import { generatePeerId } from '@/lib/utils';
 import { CallErrorScreen, CallLoadingScreen, CallScreen } from '@/modules/room/components/room';
 
-const webBaseUrl = process.env.EXPO_PUBLIC_WEB_URL ?? 'https://tether.nikhilsnayak.dev';
+const MAX_DISPLAY_NAME = 32;
 
 export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
   return <CallErrorScreen error={error} retry={() => void retry()} />;
 }
 
 export default function RoomPage() {
-  const { roomId, invite } = useLocalSearchParams<{ roomId: string; invite?: string }>();
+  const { roomId } = useLocalSearchParams<{ roomId: string }>();
   const router = useRouter();
   const [selfId] = useState(() => PeerId.make(generatePeerId()));
-  const [inviteOpen, setInviteOpen] = useState(invite === 'true');
+  const [displayName, setDisplayName] = useState<DisplayName | null>(null);
+
+  if (displayName === null) {
+    return <JoinNameScreen onSubmit={setDisplayName} />;
+  }
+
+  const session: RoomSession = {
+    intent: 'join',
+    roomId: RoomId.make(roomId),
+    selfId,
+    displayName,
+  };
 
   return (
     <>
       <Stack.Screen options={{ headerShown: false }} />
       <Suspense fallback={<CallLoadingScreen />}>
-        <CallScreen
-          session={{ roomId: RoomId.make(roomId), selfId }}
-          onLeaveRoom={() => router.dismissTo('/')}
-        />
+        <CallScreen session={session} onLeaveRoom={() => router.dismissTo('/')} />
       </Suspense>
-      {inviteOpen && <RoomInviteCard roomId={roomId} onClose={() => setInviteOpen(false)} />}
     </>
   );
 }
 
-function RoomInviteCard({
-  roomId,
-  onClose,
-}: {
-  readonly roomId: string;
-  readonly onClose: () => void;
-}) {
-  const [copied, setCopied] = useState(false);
-  // Share the web URL so the invitee needs nothing installed.
-  const roomUrl = `${webBaseUrl}/room/${encodeURIComponent(roomId)}`;
+// Collected before media/session start: the joiner presents a name, the host
+// approves or denies. Never persisted.
+function JoinNameScreen({ onSubmit }: { readonly onSubmit: (name: DisplayName) => void }) {
+  const [name, setName] = useState('');
+  const trimmed = name.trim();
+  const canContinue = trimmed.length > 0;
 
-  const copyRoomUrl = async () => {
-    try {
-      await Clipboard.setStringAsync(roomUrl);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2_000);
-    } catch {
-      setCopied(false);
+  const handleSubmit = () => {
+    if (canContinue) {
+      onSubmit(DisplayName.make(trimmed));
     }
   };
 
-  const shareRoomUrl = () => {
-    void Share.share({ message: `Join my Tether video call\n${roomUrl}` }).catch(() => {});
-  };
-
   return (
-    <View accessibilityLabel='Room invite' style={styles.card}>
-      <View style={styles.cardHeader}>
-        <Text style={styles.cardHeaderText}>Room ready</Text>
-        <Pressable accessibilityLabel='Close' onPress={onClose} hitSlop={8}>
-          <X color={colors.mutedForeground} size={16} />
-        </Pressable>
+    <SafeAreaView style={styles.screen}>
+      <Stack.Screen options={{ headerShown: false }} />
+      <View style={styles.header}>
+        <Wordmark size={28} />
       </View>
-      <View style={styles.cardBody}>
-        <Text style={styles.cardText}>
-          Send this link to the one person you want to call. First to open it joins the line.
+      <View style={styles.panel}>
+        <Text style={styles.panelLabel}>Join call</Text>
+        <Text style={styles.title}>What should the host call you?</Text>
+        <Text style={styles.body}>
+          The host sees this name before letting you in. It is not saved anywhere.
         </Text>
-        <Text selectable style={styles.roomUrl}>
-          {roomUrl}
-        </Text>
+        <TextInput
+          accessibilityLabel='Your name'
+          autoCapitalize='none'
+          autoCorrect={false}
+          maxLength={MAX_DISPLAY_NAME}
+          onChangeText={setName}
+          onSubmitEditing={handleSubmit}
+          placeholder='Your name'
+          placeholderTextColor={colors.mutedForeground}
+          returnKeyType='go'
+          style={styles.input}
+          value={name}
+        />
         <Pressable
           accessibilityRole='button'
-          accessibilityLabel='Copy room link'
-          onPress={() => void copyRoomUrl()}
-          style={({ pressed }) => [styles.copyButton, pressed && styles.pressed]}
+          disabled={!canContinue}
+          onPress={handleSubmit}
+          style={({ pressed }) => [
+            styles.primaryButton,
+            !canContinue && styles.disabled,
+            pressed && styles.pressed,
+          ]}
         >
-          {copied ? (
-            <Check color={colors.success} size={16} />
-          ) : (
-            <Copy color={colors.foreground} size={16} />
-          )}
-          <Text style={styles.copyButtonText}>{copied ? 'Copied' : 'Copy link'}</Text>
-        </Pressable>
-        <Pressable
-          accessibilityRole='button'
-          onPress={shareRoomUrl}
-          style={({ pressed }) => [styles.shareButton, pressed && styles.pressed]}
-        >
-          <Share2 color={colors.background} size={16} />
-          <Text style={styles.shareButtonText}>Share room</Text>
+          <Text style={styles.primaryButtonText}>Knock to join</Text>
         </Pressable>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    position: 'absolute',
-    left: 16,
-    right: 16,
-    bottom: 108,
+  screen: { flex: 1, backgroundColor: colors.background, padding: 20, gap: 20 },
+  header: { gap: 8, paddingVertical: 24 },
+  panel: {
+    gap: 12,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.border,
     backgroundColor: colors.card,
     borderRadius: 6,
-    overflow: 'hidden',
+    padding: 16,
   },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-  },
-  cardHeaderText: { ...mono, color: colors.mutedForeground, fontSize: 11 },
-  cardBody: { gap: 12, padding: 16 },
-  cardText: { color: colors.foreground, fontSize: 13, lineHeight: 20 },
-  roomUrl: { fontFamily: 'monospace', color: colors.mutedForeground, fontSize: 12 },
-  copyButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
+  panelLabel: { ...mono, color: colors.mutedForeground, fontSize: 11 },
+  title: { color: colors.foreground, fontSize: 22, fontWeight: '600' },
+  body: { color: colors.mutedForeground, fontSize: 14, lineHeight: 20 },
+  input: {
+    ...mono,
+    color: colors.foreground,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.border,
+    backgroundColor: colors.background,
     borderRadius: 6,
-    paddingVertical: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
   },
-  copyButtonText: { color: colors.foreground, fontSize: 14, fontWeight: '500' },
-  shareButton: {
-    flexDirection: 'row',
+  primaryButton: {
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
     backgroundColor: colors.brand,
     borderRadius: 6,
     paddingVertical: 12,
   },
-  shareButtonText: { color: colors.background, fontSize: 14, fontWeight: '600' },
+  primaryButtonText: { color: colors.background, fontSize: 15, fontWeight: '600' },
+  disabled: { opacity: 0.4 },
   pressed: { opacity: 0.7 },
 });

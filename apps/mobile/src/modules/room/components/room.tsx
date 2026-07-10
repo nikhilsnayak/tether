@@ -9,6 +9,7 @@ import {
   type PeerSessionView,
   type RoomSession,
 } from '@tether/client-runtime/modules/room';
+import type { PeerId } from '@tether/contracts/modules/room';
 import { useKeepAwake } from 'expo-keep-awake';
 import {
   Bluetooth,
@@ -141,9 +142,7 @@ export function CallScreen({
   readonly session: RoomSession;
 }) {
   useKeepAwake();
-  const { leave, sendMessage } = usePeerConnection({
-    input: { roomId: session.roomId, selfId: session.selfId },
-  });
+  const { leave, sendMessage, respondToJoin } = usePeerConnection({ input: session });
   const view = useAtomValue(peerSessionViewAtom);
   const localStreamHandle = useAtomValue(peerLocalStreamAtom);
   const remoteStreamHandle = useAtomValue(peerRemoteStreamAtom);
@@ -159,6 +158,19 @@ export function CallScreen({
   // Compared against view.sas, so a new code (reconnect) is unconfirmed by construction.
   const [confirmedSas, setConfirmedSas] = useState<string | null>(null);
   const sasConfirmed = view.sas !== null && confirmedSas === view.sas;
+  const [handlingJoinPeerIds, setHandlingJoinPeerIds] = useState<ReadonlySet<PeerId>>(new Set());
+  const pendingJoin =
+    view.pendingJoinRequests.find((request) => !handlingJoinPeerIds.has(request.peerId)) ?? null;
+  const answerJoin = (peerId: PeerId, decision: 'allow' | 'deny') => {
+    setHandlingJoinPeerIds((current) => new Set(current).add(peerId));
+    void respondToJoin(peerId, decision).catch(() => {
+      setHandlingJoinPeerIds((current) => {
+        const next = new Set(current);
+        next.delete(peerId);
+        return next;
+      });
+    });
+  };
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
   const messageCount = view.messages.length;
   const hasUnread = !chatOpen && messageCount > readCount;
@@ -249,9 +261,11 @@ export function CallScreen({
               />
             </View>
           </View>
-          <View style={styles.roomBadge}>
-            <Text style={styles.pillText}>{session.roomId}</Text>
-          </View>
+          {view.roomId !== null && (
+            <View style={styles.roomBadge}>
+              <Text style={styles.pillText}>{view.roomId}</Text>
+            </View>
+          )}
         </View>
 
         <SelfPreview stream={localStream} cameraOn={camOn} stage={stageSize} />
@@ -345,6 +359,12 @@ export function CallScreen({
         messages={view.messages}
         canChat={canChat}
         sendMessage={sendMessage}
+      />
+
+      <JoinRequestModal
+        request={pendingJoin}
+        onAllow={(peerId) => answerJoin(peerId, 'allow')}
+        onDeny={(peerId) => answerJoin(peerId, 'deny')}
       />
     </SafeAreaView>
   );
@@ -549,6 +569,60 @@ function ChatModal({
           </View>
         </View>
       </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+function JoinRequestModal({
+  request,
+  onAllow,
+  onDeny,
+}: {
+  readonly request: PeerSessionView['pendingJoinRequests'][number] | null;
+  readonly onAllow: (peerId: PeerId) => void;
+  readonly onDeny: (peerId: PeerId) => void;
+}) {
+  return (
+    <Modal
+      visible={request !== null}
+      transparent
+      statusBarTranslucent
+      navigationBarTranslucent
+      animationType='fade'
+      onRequestClose={() => {
+        if (request !== null) {
+          onDeny(request.peerId);
+        }
+      }}
+    >
+      <View style={styles.joinBackdrop}>
+        {request !== null && (
+          <View accessibilityLabel='Join request' style={styles.joinCard}>
+            <View style={styles.safetyTitleRow}>
+              <User color={colors.foreground} size={16} />
+              <Text style={styles.safetyTitle}>Someone wants to join</Text>
+            </View>
+            <Text style={styles.joinName}>{request.displayName}</Text>
+            <Text style={styles.statusHint}>This is the name they typed — it is not verified.</Text>
+            <View style={styles.safetyActions}>
+              <View style={styles.grow}>
+                <ActionButton
+                  label='Deny'
+                  variant='danger'
+                  onPress={() => onDeny(request.peerId)}
+                />
+              </View>
+              <View style={styles.grow}>
+                <ActionButton
+                  label='Allow'
+                  variant='primary'
+                  onPress={() => onAllow(request.peerId)}
+                />
+              </View>
+            </View>
+          </View>
+        )}
+      </View>
     </Modal>
   );
 }
@@ -802,6 +876,24 @@ const styles = StyleSheet.create({
   },
   safetyActions: { flexDirection: 'row', gap: 8 },
   grow: { flex: 1 },
+  joinBackdrop: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  joinCard: {
+    width: '100%',
+    maxWidth: 360,
+    gap: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    backgroundColor: colors.card,
+    borderRadius: 6,
+    padding: 20,
+  },
+  joinName: { color: colors.foreground, fontSize: 20, fontWeight: '600' },
   actionButton: {
     alignItems: 'center',
     justifyContent: 'center',

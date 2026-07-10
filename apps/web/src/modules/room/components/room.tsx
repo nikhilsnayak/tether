@@ -8,6 +8,7 @@ import {
   type PeerSessionStatusPresentation,
   type RoomSession,
 } from '@tether/client-runtime/modules/room';
+import type { PeerId } from '@tether/contracts/modules/room';
 import { Avatar, AvatarFallback } from '@tether/ui/components/avatar';
 import { Badge } from '@tether/ui/components/badge';
 import { Button } from '@tether/ui/components/button';
@@ -191,9 +192,7 @@ export function CallScreen({
   readonly onLeaveRoom: () => void;
   readonly session: RoomSession;
 }) {
-  const { leave, sendMessage } = usePeerConnection({
-    input: { roomId: session.roomId, selfId: session.selfId },
-  });
+  const { leave, sendMessage, respondToJoin } = usePeerConnection({ input: session });
   const view = useAtomValue(peerSessionViewAtom);
   const localStreamHandle = useAtomValue(peerLocalStreamAtom);
   const remoteStreamHandle = useAtomValue(peerRemoteStreamAtom);
@@ -211,6 +210,19 @@ export function CallScreen({
   const [readCount, setReadCount] = useState(view.messages.length);
   // Compared against view.sas, so a new code (reconnect) is unconfirmed by construction.
   const [confirmedSas, setConfirmedSas] = useState<string | null>(null);
+  const [handlingJoinPeerIds, setHandlingJoinPeerIds] = useState<ReadonlySet<PeerId>>(new Set());
+  const pendingJoin =
+    view.pendingJoinRequests.find((request) => !handlingJoinPeerIds.has(request.peerId)) ?? null;
+  const answerJoin = (peerId: PeerId, decision: 'allow' | 'deny') => {
+    setHandlingJoinPeerIds((current) => new Set(current).add(peerId));
+    void respondToJoin(peerId, decision).catch(() => {
+      setHandlingJoinPeerIds((current) => {
+        const next = new Set(current);
+        next.delete(peerId);
+        return next;
+      });
+    });
+  };
   const sasConfirmed = view.sas !== null && confirmedSas === view.sas;
   const messageCount = view.messages.length;
   const hasUnread = !chatOpen && messageCount > readCount;
@@ -321,10 +333,12 @@ export function CallScreen({
               </div>
             </div>
             <div className='flex shrink-0 flex-col items-end gap-1.5'>
-              <Badge variant='secondary' className='font-mono tracking-[0.15em] uppercase'>
-                <span className='max-sm:hidden'>Room&nbsp;</span>
-                {session.roomId}
-              </Badge>
+              {view.roomId !== null && (
+                <Badge variant='secondary' className='font-mono tracking-[0.15em] uppercase'>
+                  <span className='max-sm:hidden'>Room&nbsp;</span>
+                  {view.roomId}
+                </Badge>
+              )}
               {view.sas !== null && sasConfirmed && (
                 <Tooltip>
                   <TooltipTrigger
@@ -385,6 +399,38 @@ export function CallScreen({
                   <Button size='sm' onClick={() => setConfirmedSas(view.sas)}>
                     We see the same code
                   </Button>
+                </div>
+              </section>
+            </div>
+          )}
+
+          {pendingJoin !== null && (
+            <div className='bg-background/50 absolute inset-0 z-50 grid place-items-center px-4 backdrop-blur-sm'>
+              <section
+                aria-label='Join request'
+                className='border-border bg-card w-[min(24rem,100%)] space-y-4 border p-5 shadow-lg'
+              >
+                <div className='flex items-center gap-2'>
+                  <User className='size-4' />
+                  <h2 className='font-mono text-xs tracking-[0.2em] uppercase'>
+                    Someone wants to join
+                  </h2>
+                </div>
+                <p className='text-sm leading-6'>
+                  <span className='font-medium'>{pendingJoin.displayName}</span> is asking to join
+                  this call.
+                </p>
+                <p className='text-muted-foreground font-mono text-[11px] tracking-[0.15em] uppercase'>
+                  This is the name they typed — it is not verified.
+                </p>
+                <div className='grid grid-cols-2 gap-2'>
+                  <Button
+                    variant='destructive'
+                    onClick={() => answerJoin(pendingJoin.peerId, 'deny')}
+                  >
+                    Deny
+                  </Button>
+                  <Button onClick={() => answerJoin(pendingJoin.peerId, 'allow')}>Allow</Button>
                 </div>
               </section>
             </div>

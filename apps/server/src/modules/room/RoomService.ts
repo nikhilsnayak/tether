@@ -1,4 +1,5 @@
 import {
+  JoinCancelledEvent,
   JoinDenied,
   JoinPendingEvent,
   JoinRequestedEvent,
@@ -46,10 +47,12 @@ type PendingJoin = {
   readonly deferred: Deferred.Deferred<AdmitResult, JoinDenied>;
 };
 
+type BroadcastRoomEvent = Exclude<RoomEvent, JoinPendingEvent>;
+
 type RoomCtx = {
   members: Member[];
   pending: PendingJoin[];
-  readonly pubsub: PubSub.PubSub<RoomEvent>;
+  readonly pubsub: PubSub.PubSub<BroadcastRoomEvent>;
 };
 // Registry writes are serialized by SynchronizedRef, so updater bodies mutate ctx
 // in place; the `new Map(registry)` copy matters only where a key is added or
@@ -79,9 +82,7 @@ type RespondAction =
       readonly result: AdmitResult;
     };
 
-// The : true branch keeps events without a peerId (JoinPendingEvent) unfiltered.
-const notSelf = (selfId: PeerId) => (event: RoomEvent) =>
-  'peerId' in event ? event.peerId !== selfId : true;
+const notSelf = (selfId: PeerId) => (event: BroadcastRoomEvent) => event.peerId !== selfId;
 
 export class RoomService extends Context.Service<RoomService>()('@tether/RoomService', {
   make: Effect.gen(function* () {
@@ -105,14 +106,20 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
       return `${yield* randomCode(3)}-${yield* randomCode(4)}-${yield* randomCode(3)}`;
     }).pipe(Effect.orDie);
 
+    // A knock withdrawn before a decision (timeout) tells the host to clear its
+    // prompt. Disconnects go through removeMember, which broadcasts the same event.
     const removePending = (roomId: RoomId, peerId: PeerId) =>
-      SynchronizedRef.update(registryRef, (registry) => {
-        const ctx = registry.get(roomId);
-        if (ctx !== undefined) {
-          ctx.pending = ctx.pending.filter((entry) => entry.peerId !== peerId);
-        }
-        return registry;
-      });
+      SynchronizedRef.updateEffect(
+        registryRef,
+        Effect.fnUntraced(function* (registry) {
+          const ctx = registry.get(roomId);
+          if (ctx !== undefined && ctx.pending.some((entry) => entry.peerId === peerId)) {
+            ctx.pending = ctx.pending.filter((entry) => entry.peerId !== peerId);
+            yield* PubSub.publish(ctx.pubsub, new JoinCancelledEvent({ peerId }));
+          }
+          return registry;
+        }),
+      );
 
     const removeMember = Effect.fnUntraced(function* (
       roomId: RoomId,
@@ -132,6 +139,7 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
           // A joiner that disconnects before admission is only ever in pending.
           if (ctx.pending.some((entry) => entry.peerId === selfId)) {
             ctx.pending = ctx.pending.filter((entry) => entry.peerId !== selfId);
+            yield* PubSub.publish(ctx.pubsub, new JoinCancelledEvent({ peerId: selfId }));
             return [[], newRegistry];
           }
 
@@ -197,7 +205,7 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
             return [{ _tag: 'rejected' } as CreateOutcome, newRegistry];
           }
 
-          const pubsub = yield* PubSub.unbounded<RoomEvent>();
+          const pubsub = yield* PubSub.unbounded<BroadcastRoomEvent>();
           const subscription = yield* PubSub.subscribe(pubsub);
           const signalBucket = yield* makeTokenBucket({
             capacity: SIGNAL_BUCKET_CAPACITY,
@@ -213,7 +221,7 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
 
           yield* Effect.logInfo('Room session opened').pipe(Effect.annotateLogs('occupancy', 1));
 
-          const events = Stream.fromArray<RoomEvent>([
+          const events = Stream.fromArray<BroadcastRoomEvent>([
             new RoomSessionOpenedEvent({ peerId: null, sessionToken, roomId }),
           ]).pipe(
             Stream.concat(Stream.fromSubscription(subscription)),
@@ -253,13 +261,17 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
           if (ctx === undefined) {
             return Stream.fail(new JoinDenied());
           }
-          return Stream.fromArray<RoomEvent>([
+          const subscription = yield* PubSub.subscribe(ctx.pubsub);
+          return Stream.fromArray<BroadcastRoomEvent>([
             new RoomSessionOpenedEvent({
               peerId: result.hostPeerId,
               sessionToken: result.sessionToken,
               roomId,
             }),
-          ]).pipe(Stream.concat(Stream.fromPubSub(ctx.pubsub)), Stream.filter(notSelf(selfId)));
+          ]).pipe(
+            Stream.concat(Stream.fromSubscription(subscription)),
+            Stream.filter(notSelf(selfId)),
+          );
         }),
       );
 

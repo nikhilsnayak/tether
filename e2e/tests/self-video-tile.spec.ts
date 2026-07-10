@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
-import { continueInBrowser } from './helpers';
+import { createRoom } from './helpers';
 
 const tileInset = (page: Page) =>
   page.getByLabel('Local video preview').evaluate((video: HTMLVideoElement) => {
@@ -41,8 +41,7 @@ const dragTileTo = async (page: Page, x: number, y: number) => {
 const NEAR = 24;
 
 test('self-video tile snaps to whichever corner it is dragged to', async ({ page }) => {
-  await page.goto('/room/til-edra-gxx');
-  await continueInBrowser(page);
+  await createRoom(page);
   await expect(page.getByLabel('Local video preview')).toBeVisible();
 
   await expect.poll(async () => (await tileInset(page)).right).toBeLessThanOrEqual(NEAR);

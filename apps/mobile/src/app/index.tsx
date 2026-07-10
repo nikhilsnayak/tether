@@ -5,7 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Wordmark } from '@/components/logo';
 import { colors, mono } from '@/lib/theme';
-import { formatRoomCodeInput, generateRoomId, ROOM_CODE_LENGTH } from '@/lib/utils';
+import { formatRoomCodeInput, ROOM_CODE_LENGTH } from '@/lib/utils';
 
 export default function Home() {
   const router = useRouter();
@@ -23,12 +23,7 @@ export default function Home() {
         <Text style={styles.panelLabel}>01 — New call</Text>
         <Pressable
           accessibilityRole='button'
-          onPress={() =>
-            router.push({
-              pathname: '/room/[roomId]',
-              params: { roomId: generateRoomId(), invite: 'true' },
-            })
-          }
+          onPress={() => router.push('/host')}
           style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}
         >
           <Text style={styles.primaryButtonText}>Start a call</Text>

@@ -66,6 +66,15 @@ export class JoinPendingEvent extends Schema.TaggedClass<JoinPendingEvent>()(
   {},
 ) {}
 
+// Broadcast to the host when a pending knock is withdrawn before a decision
+// (the joiner disconnected or the knock timed out), so the prompt can clear.
+export class JoinCancelledEvent extends Schema.TaggedClass<JoinCancelledEvent>()(
+  '@tether/JoinCancelledEvent',
+  {
+    peerId: PeerId,
+  },
+) {}
+
 export class PeerJoinedEvent extends Schema.TaggedClass<PeerJoinedEvent>()(
   '@tether/PeerJoinedEvent',
   {
@@ -145,6 +154,7 @@ export const RoomEvent = Schema.Union([
   SignalReceivedEvent,
   JoinRequestedEvent,
   JoinPendingEvent,
+  JoinCancelledEvent,
 ]);
 export type RoomEvent = typeof RoomEvent.Type;
 

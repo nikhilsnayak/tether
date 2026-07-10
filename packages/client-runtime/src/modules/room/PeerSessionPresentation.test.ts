@@ -14,6 +14,9 @@ const statuses: ReadonlyArray<PeerSessionView['status']> = [
   'room-full',
   'server-at-capacity',
   'peer-already-joined',
+  'room-not-found',
+  'join-denied',
+  'awaiting-approval',
   'waiting-for-peer',
 ];
 
@@ -34,7 +37,15 @@ describe('PeerSessionPresentation', () => {
       'room-full',
       'server-at-capacity',
       'peer-already-joined',
+      'room-not-found',
+      'join-denied',
     ]);
+  });
+
+  it('treats a declined or missing room as an error but awaiting approval as transient', () => {
+    assert.isTrue(isPeerSessionErrorStatus('room-not-found'));
+    assert.isTrue(isPeerSessionErrorStatus('join-denied'));
+    assert.isFalse(isPeerSessionErrorStatus('awaiting-approval'));
   });
 
   it('presents server capacity without room-specific guidance', () => {

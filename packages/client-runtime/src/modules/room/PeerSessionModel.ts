@@ -1,4 +1,4 @@
-import type { PeerId, RoomId } from '@tether/contracts/modules/room';
+import type { DisplayName, PeerId, RoomId } from '@tether/contracts/modules/room';
 import { Data, Predicate } from 'effect';
 
 export const CHAT_CHANNEL_LABEL = 'chat';
@@ -32,10 +32,17 @@ export class PlatformError extends Data.TaggedError('PlatformError')<{
 export const isPlatformError = (u: unknown): u is PlatformError =>
   Predicate.isTagged(u, 'PlatformError');
 
-export interface RoomSession {
-  readonly roomId: RoomId;
-  readonly selfId: PeerId;
-}
+// Mirrors OpenRoomSessionPayload: a host mints its room server-side and sends
+// no roomId; a joiner names the room and itself. The minted id arrives in
+// RoomSessionOpenedEvent, so downstream RPCs read roomId from that, not here.
+export type RoomSession =
+  | { readonly intent: 'host'; readonly selfId: PeerId }
+  | {
+      readonly intent: 'join';
+      readonly selfId: PeerId;
+      readonly roomId: RoomId;
+      readonly displayName: DisplayName;
+    };
 
 export interface SessionDescription {
   readonly type: 'offer' | 'answer';
@@ -156,14 +163,51 @@ export type PeerSessionEvent =
       readonly _tag: 'PeerRestored';
       readonly peerId: PeerId;
     }
+  // Carries the server-minted roomId to the UI. A host learns its room this
+  // way; a joiner already knew it but receives the same event.
+  | {
+      readonly _tag: 'RoomOpened';
+      readonly roomId: RoomId;
+    }
   | {
       readonly _tag: 'RoomJoinRejected';
-      readonly reason: 'room-full' | 'server-at-capacity' | 'peer-already-joined';
+      readonly reason:
+        | 'room-full'
+        | 'server-at-capacity'
+        | 'peer-already-joined'
+        | 'room-not-found'
+        | 'join-denied';
+    }
+  // Host side: a joiner is knocking and awaits an allow/deny decision. The name
+  // is an unauthenticated claim the joiner typed.
+  | {
+      readonly _tag: 'JoinRequestReceived';
+      readonly peerId: PeerId;
+      readonly displayName: DisplayName;
+    }
+  // Joiner side: the knock reached the host; waiting on the decision.
+  | {
+      readonly _tag: 'JoinPending';
+    }
+  // Host side: a pending knock was withdrawn (joiner left or timed out).
+  | {
+      readonly _tag: 'JoinRequestCancelled';
+      readonly peerId: PeerId;
+    }
+  | {
+      readonly _tag: 'JoinRequestHandled';
+      readonly peerId: PeerId;
     }
   | {
       readonly _tag: 'PeerDeparted';
       readonly peerId: PeerId;
     };
+
+/** A joiner's knock awaiting the host's decision. The name is an unverified claim. */
+export interface JoinRequestClaim {
+  readonly peerId: PeerId;
+  readonly displayName: DisplayName;
+}
 
 export interface PeerSessionView {
   readonly status:
@@ -177,11 +221,18 @@ export interface PeerSessionView {
     | 'room-full'
     | 'server-at-capacity'
     | 'peer-already-joined'
+    | 'room-not-found'
+    | 'join-denied'
+    | 'awaiting-approval'
     | 'waiting-for-peer';
   readonly messages: ReadonlyArray<ChatMessage>;
   readonly chatReady: boolean;
   /** Safety code both peers compare aloud. */
   readonly sas: string | null;
+  /** The server-minted room, known once the session opens. */
+  readonly roomId: RoomId | null;
+  /** Host side: ordered knocks that have not yet been handled or withdrawn. */
+  readonly pendingJoinRequests: ReadonlyArray<JoinRequestClaim>;
 }
 
 export const initialPeerSessionView: PeerSessionView = {
@@ -189,6 +240,8 @@ export const initialPeerSessionView: PeerSessionView = {
   messages: [],
   chatReady: false,
   sas: null,
+  roomId: null,
+  pendingJoinRequests: [],
 };
 
 export const reducePeerSessionView = (
@@ -229,8 +282,31 @@ export const reducePeerSessionView = (
       return { ...view, status: 'reconnecting', chatReady: false, sas: null };
     case 'PeerRestored':
       return { ...view, status: 'connected' };
+    case 'RoomOpened':
+      return { ...view, roomId: event.roomId };
     case 'RoomJoinRejected':
       return { ...view, status: event.reason };
+    case 'JoinRequestReceived':
+      return view.pendingJoinRequests.some((request) => request.peerId === event.peerId)
+        ? view
+        : {
+            ...view,
+            pendingJoinRequests: [
+              ...view.pendingJoinRequests,
+              { peerId: event.peerId, displayName: event.displayName },
+            ],
+          };
+    case 'JoinPending':
+      return { ...view, status: 'awaiting-approval' };
+    case 'JoinRequestCancelled':
+    case 'JoinRequestHandled': {
+      const pendingJoinRequests = view.pendingJoinRequests.filter(
+        (request) => request.peerId !== event.peerId,
+      );
+      return pendingJoinRequests.length === view.pendingJoinRequests.length
+        ? view
+        : { ...view, pendingJoinRequests };
+    }
     case 'PeerDeparted':
       return { ...view, status: 'waiting-for-peer', chatReady: false, sas: null };
   }

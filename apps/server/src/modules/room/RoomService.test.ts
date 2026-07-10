@@ -1,6 +1,7 @@
 import { assert, describe, it } from '@effect/vitest';
 import {
   DisplayName,
+  JoinCancelledEvent,
   JoinDenied,
   JoinPendingEvent,
   JoinRequestedEvent,
@@ -17,7 +18,7 @@ import {
   SessionDescriptionSignal,
   SignalReceivedEvent,
 } from '@tether/contracts/modules/room';
-import { Deferred, Effect, Exit, Fiber, Schema, Scope, Stream } from 'effect';
+import { Crypto, Deferred, Effect, Exit, Fiber, Layer, Schema, Scope, Stream } from 'effect';
 import { TestClock } from 'effect/testing';
 
 import * as ServerCrypto from '@/lib/ServerCrypto';
@@ -50,6 +51,17 @@ const randomPeerId = (index: number) => PeerId.make(letters(12, index));
 
 const withRoomService = <A, E, R>(effect: Effect.Effect<A, E, R | RoomService>) =>
   effect.pipe(Effect.provide(RoomService.layer), Effect.provide(ServerCrypto.layer));
+
+const deterministicCryptoLayer = Layer.succeed(
+  Crypto.Crypto,
+  Crypto.make({
+    randomBytes: (size) => new Uint8Array(size),
+    digest: () => Effect.die(new Error('Digest is not used by RoomService')),
+  }),
+);
+
+const withDeterministicRoomService = <A, E, R>(effect: Effect.Effect<A, E, R | RoomService>) =>
+  effect.pipe(Effect.provide(RoomService.layer), Effect.provide(deterministicCryptoLayer));
 
 const requireOpenedEvent = (event: unknown): RoomSessionOpenedEvent => {
   assert.instanceOf(event, RoomSessionOpenedEvent);
@@ -192,6 +204,101 @@ describe('RoomService knock-to-join', () => {
     ),
   );
 
+  it.effect('subscribes an admitted joiner before exposing the opened event', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const room = yield* RoomService;
+        const roomIdDeferred = yield* Deferred.make<RoomId>();
+        const aliceTokenDeferred = yield* Deferred.make<string>();
+        const bobOpenedDeferred = yield* Deferred.make<void>();
+
+        const aliceStream = yield* room.host(alice);
+        yield* aliceStream.pipe(
+          Stream.tap((event) =>
+            isOpened(event)
+              ? Effect.all([
+                  Deferred.succeed(roomIdDeferred, (event as RoomSessionOpenedEvent).roomId),
+                  Deferred.succeed(
+                    aliceTokenDeferred,
+                    (event as RoomSessionOpenedEvent).sessionToken,
+                  ),
+                ])
+              : Effect.void,
+          ),
+          Stream.runDrain,
+          Effect.forkChild({ startImmediately: true }),
+        );
+
+        const roomId = yield* Deferred.await(roomIdDeferred);
+        const aliceToken = yield* Deferred.await(aliceTokenDeferred);
+        const bobStream = yield* room.join(roomId, bob, bobName);
+        const bobFiber = yield* bobStream.pipe(
+          Stream.tap((event) =>
+            isOpened(event)
+              ? room
+                  .sendSignal(roomId, alice, aliceToken, offer('immediate-answer'))
+                  .pipe(Effect.andThen(Deferred.succeed(bobOpenedDeferred, undefined)))
+              : Effect.void,
+          ),
+          Stream.take(3),
+          Stream.runCollect,
+          Effect.forkChild({ startImmediately: true }),
+        );
+
+        yield* room.respondToJoin(roomId, alice, aliceToken, bob, 'allow');
+        yield* Deferred.await(bobOpenedDeferred);
+        yield* Effect.yieldNow;
+        yield* room.sendSignal(roomId, alice, aliceToken, offer('later-answer'));
+
+        const bobEvents = yield* Fiber.join(bobFiber);
+        assert.deepStrictEqual(
+          bobEvents[2],
+          new SignalReceivedEvent({ peerId: alice, signal: offer('immediate-answer') }),
+        );
+      }),
+    ),
+  );
+
+  it.effect('denies an admitted stream if its room disappears before it opens', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const room = yield* RoomService;
+        const roomIdDeferred = yield* Deferred.make<RoomId>();
+        const aliceTokenDeferred = yield* Deferred.make<string>();
+        const aliceScope = yield* Scope.make();
+        const bobScope = yield* Scope.make();
+
+        const aliceStream = yield* room.host(alice).pipe(Scope.provide(aliceScope));
+        yield* aliceStream.pipe(
+          Stream.tap((event) =>
+            isOpened(event)
+              ? Effect.all([
+                  Deferred.succeed(roomIdDeferred, (event as RoomSessionOpenedEvent).roomId),
+                  Deferred.succeed(
+                    aliceTokenDeferred,
+                    (event as RoomSessionOpenedEvent).sessionToken,
+                  ),
+                ])
+              : Effect.void,
+          ),
+          Stream.runDrain,
+          Effect.forkChild({ startImmediately: true }),
+        );
+
+        const roomId = yield* Deferred.await(roomIdDeferred);
+        const aliceToken = yield* Deferred.await(aliceTokenDeferred);
+        const bobStream = yield* room.join(roomId, bob, bobName).pipe(Scope.provide(bobScope));
+
+        yield* room.respondToJoin(roomId, alice, aliceToken, bob, 'allow');
+        yield* Scope.close(aliceScope, Exit.void);
+        yield* Scope.close(bobScope, Exit.void);
+
+        const error = yield* bobStream.pipe(Stream.drop(1), Stream.runDrain, Effect.flip);
+        assert.instanceOf(error, JoinDenied);
+      }),
+    ),
+  );
+
   it.effect('fails the joiner stream when the host denies', () =>
     withRoomService(
       Effect.gen(function* () {
@@ -277,6 +384,29 @@ describe('RoomService knock-to-join', () => {
           .respondToJoin(roomId, alice, aliceToken, bob, 'allow')
           .pipe(Effect.flip);
         assert.instanceOf(noPending, NoPendingJoin);
+      }),
+    ),
+  );
+
+  it.effect('cleans up safely when two consumers observe the same knock timing out', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const room = yield* RoomService;
+        const roomId = yield* openHostRoomId(alice);
+        const bobStream = yield* room.join(roomId, bob, bobName);
+        const firstFiber = yield* bobStream.pipe(
+          Stream.runDrain,
+          Effect.forkChild({ startImmediately: true }),
+        );
+        const secondFiber = yield* bobStream.pipe(
+          Stream.runDrain,
+          Effect.forkChild({ startImmediately: true }),
+        );
+
+        yield* TestClock.adjust('60 seconds');
+
+        assert.instanceOf(yield* Fiber.join(firstFiber).pipe(Effect.flip), JoinDenied);
+        assert.instanceOf(yield* Fiber.join(secondFiber).pipe(Effect.flip), JoinDenied);
       }),
     ),
   );
@@ -431,6 +561,78 @@ describe('RoomService knock-to-join', () => {
           .respondToJoin(roomId, alice, aliceToken, bob, 'allow')
           .pipe(Effect.flip);
         assert.instanceOf(noPending, NoPendingJoin);
+      }),
+    ),
+  );
+
+  it.effect('tells the host when a pending knock times out', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const room = yield* RoomService;
+        const roomIdDeferred = yield* Deferred.make<RoomId>();
+
+        const aliceStream = yield* room.host(alice);
+        const aliceFiber = yield* aliceStream.pipe(
+          Stream.tap((event) =>
+            isOpened(event)
+              ? Deferred.succeed(roomIdDeferred, (event as RoomSessionOpenedEvent).roomId)
+              : Effect.void,
+          ),
+          Stream.take(3),
+          Stream.runCollect,
+          Effect.forkChild({ startImmediately: true }),
+        );
+        const roomId = yield* Deferred.await(roomIdDeferred);
+
+        const bobStream = yield* room.join(roomId, bob, bobName);
+        const bobFiber = yield* bobStream.pipe(
+          Stream.runDrain,
+          Effect.forkChild({ startImmediately: true }),
+        );
+
+        yield* TestClock.adjust('60 seconds');
+        yield* Fiber.join(bobFiber).pipe(Effect.flip);
+
+        const aliceEvents = yield* Fiber.join(aliceFiber);
+        assert.deepStrictEqual(
+          aliceEvents[1],
+          new JoinRequestedEvent({ peerId: bob, displayName: bobName }),
+        );
+        assert.deepStrictEqual(aliceEvents[2], new JoinCancelledEvent({ peerId: bob }));
+      }),
+    ),
+  );
+
+  it.effect('tells the host when a pending joiner disconnects', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const room = yield* RoomService;
+        const roomIdDeferred = yield* Deferred.make<RoomId>();
+
+        const aliceStream = yield* room.host(alice);
+        const aliceFiber = yield* aliceStream.pipe(
+          Stream.tap((event) =>
+            isOpened(event)
+              ? Deferred.succeed(roomIdDeferred, (event as RoomSessionOpenedEvent).roomId)
+              : Effect.void,
+          ),
+          Stream.take(3),
+          Stream.runCollect,
+          Effect.forkChild({ startImmediately: true }),
+        );
+        const roomId = yield* Deferred.await(roomIdDeferred);
+
+        const bobScope = yield* Scope.make();
+        const bobStream = yield* room.join(roomId, bob, bobName).pipe(Scope.provide(bobScope));
+        yield* bobStream.pipe(Stream.take(1), Stream.runCollect, Scope.provide(bobScope));
+        yield* Scope.close(bobScope, Exit.void);
+
+        const aliceEvents = yield* Fiber.join(aliceFiber);
+        assert.deepStrictEqual(
+          aliceEvents[1],
+          new JoinRequestedEvent({ peerId: bob, displayName: bobName }),
+        );
+        assert.deepStrictEqual(aliceEvents[2], new JoinCancelledEvent({ peerId: bob }));
       }),
     ),
   );
@@ -604,6 +806,21 @@ describe('RoomService signalling', () => {
     ),
   );
 
+  it.effect('ignores a leave request with the wrong session token', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const room = yield* RoomService;
+        const { roomId, bobToken, aliceFiber } = yield* connect({ hostTake: 4, joinerTake: 2 });
+
+        yield* room.leave(roomId, bob, 'wrong-session-token');
+        yield* room.leave(roomId, bob, bobToken);
+
+        const aliceEvents = yield* Fiber.join(aliceFiber);
+        assert.deepStrictEqual(aliceEvents[3], new PeerLeftEvent({ peerId: bob }));
+      }),
+    ),
+  );
+
   it.effect('removes an admitted member when its session scope closes', () =>
     withRoomService(
       Effect.gen(function* () {
@@ -657,6 +874,18 @@ describe('RoomService signalling', () => {
 });
 
 describe('RoomService capacity', () => {
+  it.effect('rejects a room after exhausting colliding minted ids', () =>
+    withDeterministicRoomService(
+      Effect.gen(function* () {
+        const room = yield* RoomService;
+        yield* room.host(alice);
+
+        const error = yield* room.host(bob).pipe(Effect.flip);
+        assert.instanceOf(error, ServerAtCapacity);
+      }),
+    ),
+  );
+
   it.effect('rejects new rooms once the creation bucket is drained', () =>
     withRoomService(
       Effect.gen(function* () {
