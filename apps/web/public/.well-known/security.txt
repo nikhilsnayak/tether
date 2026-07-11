@@ -1,0 +1,5 @@
+Contact: mailto:nikhilsnayak3473@gmail.com
+Contact: https://github.com/nikhilsnayak/tether/issues
+Expires: 2027-07-11T00:00:00Z
+Preferred-Languages: en
+Canonical: https://tether.nikhilsnayak.dev/.well-known/security.txt
