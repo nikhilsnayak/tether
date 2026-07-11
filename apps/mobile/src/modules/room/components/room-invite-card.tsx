@@ -23,7 +23,7 @@ export function RoomInviteCard({
       await Clipboard.setStringAsync(roomUrl);
       setCopied(true);
       setTimeout(() => setCopied(false), 2_000);
-    } catch (error) {
+    } catch {
       setCopied(false);
       Alert.alert('Copy failed', 'Could not copy the room link. Please try again.');
     }

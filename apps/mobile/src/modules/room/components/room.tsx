@@ -163,21 +163,16 @@ export function CallScreen({
     view.pendingJoinRequests.find((request) => !handlingJoinPeerIds.has(request.peerId)) ?? null;
   const answerJoin = (peerId: PeerId, decision: 'allow' | 'deny') => {
     setHandlingJoinPeerIds((current) => new Set(current).add(peerId));
-    void respondToJoin(peerId, decision)
-      .then(() => {
-        setHandlingJoinPeerIds((current) => {
-          const next = new Set(current);
-          next.delete(peerId);
-          return next;
-        });
-      })
-      .catch(() => {
-        setHandlingJoinPeerIds((current) => {
-          const next = new Set(current);
-          next.delete(peerId);
-          return next;
-        });
+
+    const clearHandling = () => {
+      setHandlingJoinPeerIds((current) => {
+        const next = new Set(current);
+        next.delete(peerId);
+        return next;
       });
+    };
+
+    void respondToJoin(peerId, decision).then(clearHandling, clearHandling);
   };
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
   const messageCount = view.messages.length;

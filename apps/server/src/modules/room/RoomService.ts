@@ -19,7 +19,7 @@ import {
   type RoomEvent,
   type Signal,
 } from '@tether/contracts/modules/room';
-import { Context, Crypto, Deferred, Effect, Layer, PubSub, Stream, SynchronizedRef } from 'effect';
+import { Context, Crypto, Deferred, Effect, Layer, Queue, Stream, SynchronizedRef } from 'effect';
 
 import { makeTokenBucket, type TokenBucket } from '@/lib/TokenBucket';
 
@@ -37,19 +37,20 @@ type Member = {
   readonly peerId: PeerId;
   readonly sessionToken: string;
   readonly signalBucket: TokenBucket;
+  readonly events: Queue.Queue<BroadcastRoomEvent>;
 };
 
 type AdmitResult = {
   readonly sessionToken: string;
   readonly hostPeerId: PeerId;
-  readonly subscription: PubSub.Subscription<BroadcastRoomEvent>;
+  readonly events: Queue.Queue<BroadcastRoomEvent>;
 };
 
 type PendingJoin = {
   readonly peerId: PeerId;
   readonly displayName: DisplayName;
   readonly deferred: Deferred.Deferred<AdmitResult, JoinDenied>;
-  readonly subscription: PubSub.Subscription<BroadcastRoomEvent>;
+  readonly events: Queue.Queue<BroadcastRoomEvent>;
 };
 
 type BroadcastRoomEvent = Exclude<RoomEvent, JoinPendingEvent>;
@@ -57,7 +58,6 @@ type BroadcastRoomEvent = Exclude<RoomEvent, JoinPendingEvent>;
 type RoomCtx = {
   members: Member[];
   pending: PendingJoin[];
-  readonly pubsub: PubSub.PubSub<BroadcastRoomEvent>;
 };
 // Registry writes are serialized by SynchronizedRef, so updater bodies mutate ctx
 // in place; the `new Map(registry)` copy matters only where a key is added or
@@ -87,8 +87,6 @@ type RespondAction =
       readonly result: AdmitResult;
     };
 
-const notSelf = (selfId: PeerId) => (event: BroadcastRoomEvent) => event.peerId !== selfId;
-
 export class RoomService extends Context.Service<RoomService>()('@tether/RoomService', {
   make: Effect.gen(function* () {
     const crypto = yield* Crypto.Crypto;
@@ -111,8 +109,16 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
       return `${yield* randomCode(3)}-${yield* randomCode(4)}-${yield* randomCode(3)}`;
     }).pipe(Effect.orDie);
 
+    const sendToMembers = (ctx: RoomCtx, event: BroadcastRoomEvent, exceptPeerId?: PeerId) =>
+      Effect.forEach(
+        ctx.members,
+        (member) =>
+          member.peerId === exceptPeerId ? Effect.void : Queue.offer(member.events, event),
+        { discard: true },
+      );
+
     // A knock withdrawn before a decision (timeout) tells the host to clear its
-    // prompt. Disconnects go through removeMember, which broadcasts the same event.
+    // prompt. Disconnects go through removeMember, which sends the same event.
     const removePending = (roomId: RoomId, peerId: PeerId) =>
       SynchronizedRef.updateEffect(
         registryRef,
@@ -120,7 +126,7 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
           const ctx = registry.get(roomId);
           if (ctx !== undefined && ctx.pending.some((entry) => entry.peerId === peerId)) {
             ctx.pending = ctx.pending.filter((entry) => entry.peerId !== peerId);
-            yield* PubSub.publish(ctx.pubsub, new JoinCancelledEvent({ peerId }));
+            yield* sendToMembers(ctx, new JoinCancelledEvent({ peerId }));
           }
           return registry;
         }),
@@ -144,7 +150,7 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
           // A joiner that disconnects before admission is only ever in pending.
           if (ctx.pending.some((entry) => entry.peerId === selfId)) {
             ctx.pending = ctx.pending.filter((entry) => entry.peerId !== selfId);
-            yield* PubSub.publish(ctx.pubsub, new JoinCancelledEvent({ peerId: selfId }));
+            yield* sendToMembers(ctx, new JoinCancelledEvent({ peerId: selfId }));
             return [[], newRegistry];
           }
 
@@ -163,7 +169,7 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
 
           ctx.members = ctx.members.filter((member) => member.peerId !== selfId);
 
-          yield* PubSub.publish(ctx.pubsub, new PeerLeftEvent({ peerId: selfId }));
+          yield* sendToMembers(ctx, new PeerLeftEvent({ peerId: selfId }));
           yield* Effect.logInfo('Room session closed').pipe(
             Effect.annotateLogs('occupancy', ctx.members.length),
           );
@@ -210,8 +216,7 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
             return [{ _tag: 'rejected' } as CreateOutcome, newRegistry];
           }
 
-          const pubsub = yield* PubSub.unbounded<BroadcastRoomEvent>();
-          const subscription = yield* PubSub.subscribe(pubsub);
+          const events = yield* Queue.unbounded<BroadcastRoomEvent>();
           const signalBucket = yield* makeTokenBucket({
             capacity: SIGNAL_BUCKET_CAPACITY,
             refillEvery: SIGNAL_BUCKET_REFILL_EVERY,
@@ -219,21 +224,17 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
           const sessionToken = yield* randomSessionToken;
 
           newRegistry.set(roomId, {
-            members: [{ peerId: selfId, sessionToken, signalBucket }],
+            members: [{ peerId: selfId, sessionToken, signalBucket, events }],
             pending: [],
-            pubsub,
           });
 
           yield* Effect.logInfo('Room session opened').pipe(Effect.annotateLogs('occupancy', 1));
 
-          const events = Stream.fromArray<BroadcastRoomEvent>([
+          const eventStream = Stream.fromArray<BroadcastRoomEvent>([
             new RoomSessionOpenedEvent({ peerId: null, sessionToken, roomId }),
-          ]).pipe(
-            Stream.concat(Stream.fromSubscription(subscription)),
-            Stream.filter(notSelf(selfId)),
-          );
+          ]).pipe(Stream.concat(Stream.fromQueue(events)));
 
-          return [{ _tag: 'created', events } as CreateOutcome, newRegistry];
+          return [{ _tag: 'created', events: eventStream } as CreateOutcome, newRegistry];
         }),
       );
 
@@ -258,18 +259,14 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
       return resource.events;
     });
 
-    // Uses the subscription established before admission was granted, ensuring no events are missed.
-    const admittedStream = (roomId: RoomId, selfId: PeerId, result: AdmitResult) =>
+    const admittedStream = (roomId: RoomId, result: AdmitResult) =>
       Stream.fromArray<BroadcastRoomEvent>([
         new RoomSessionOpenedEvent({
           peerId: result.hostPeerId,
           sessionToken: result.sessionToken,
           roomId,
         }),
-      ]).pipe(
-        Stream.concat(Stream.fromSubscription(result.subscription)),
-        Stream.filter(notSelf(selfId)),
-      );
+      ]).pipe(Stream.concat(Stream.fromQueue(result.events)));
 
     const openJoin = Effect.fnUntraced(function* (
       roomId: RoomId,
@@ -277,31 +274,7 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
       displayName: DisplayName,
     ) {
       const deferred = yield* Deferred.make<AdmitResult, JoinDenied>();
-
-      // Subscribe before requesting to join, so the subscription is ready when admission is granted.
-      const subscriptionResult = yield* SynchronizedRef.modifyEffect(
-        registryRef,
-        Effect.fnUntraced(function* (registry) {
-          const ctx = registry.get(roomId);
-          if (ctx === undefined || ctx.members.length === 0) {
-            return [
-              { _tag: 'not-found', subscription: null } as const,
-              registry,
-            ];
-          }
-          const subscription = yield* PubSub.subscribe(ctx.pubsub);
-          return [
-            { _tag: 'found', subscription } as const,
-            registry,
-          ];
-        }),
-      );
-
-      if (subscriptionResult._tag === 'not-found') {
-        return yield* new RoomNotFound({ roomId });
-      }
-
-      const subscription = subscriptionResult.subscription;
+      const events = yield* Queue.unbounded<BroadcastRoomEvent>();
 
       const outcome = yield* SynchronizedRef.modifyEffect(
         registryRef,
@@ -330,11 +303,8 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
             return [{ _tag: 'full' } as JoinOutcome, newRegistry];
           }
 
-          ctx.pending = [...ctx.pending, { peerId: selfId, displayName, deferred, subscription }];
-          yield* PubSub.publish(
-            ctx.pubsub,
-            new JoinRequestedEvent({ peerId: selfId, displayName }),
-          );
+          ctx.pending = [...ctx.pending, { peerId: selfId, displayName, deferred, events }];
+          yield* sendToMembers(ctx, new JoinRequestedEvent({ peerId: selfId, displayName }));
           yield* Effect.logInfo('Join requested');
 
           return [{ _tag: 'pending' } as JoinOutcome, newRegistry];
@@ -360,9 +330,7 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
 
       return Stream.fromArray<RoomEvent>([new JoinPendingEvent({})]).pipe(
         Stream.concat(
-          Stream.unwrap(
-            admitted.pipe(Effect.map((result) => admittedStream(roomId, selfId, result))),
-          ),
+          Stream.unwrap(admitted.pipe(Effect.map((result) => admittedStream(roomId, result)))),
         ),
       );
     });
@@ -417,9 +385,12 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
             capacity: SIGNAL_BUCKET_CAPACITY,
             refillEvery: SIGNAL_BUCKET_REFILL_EVERY,
           });
-          ctx.members = [...ctx.members, { peerId, sessionToken: newToken, signalBucket }];
+          ctx.members = [
+            ...ctx.members,
+            { peerId, sessionToken: newToken, signalBucket, events: pendingEntry.events },
+          ];
 
-          yield* PubSub.publish(ctx.pubsub, new PeerJoinedEvent({ peerId }));
+          yield* sendToMembers(ctx, new PeerJoinedEvent({ peerId }), peerId);
           yield* Effect.logInfo('Room session opened').pipe(
             Effect.annotateLogs('occupancy', ctx.members.length),
           );
@@ -431,7 +402,7 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
               result: {
                 sessionToken: newToken,
                 hostPeerId: selfId,
-                subscription: pendingEntry.subscription,
+                events: pendingEntry.events,
               },
             } as RespondAction,
             newRegistry,
@@ -477,7 +448,7 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
             return [undefined, registry];
           }
 
-          yield* PubSub.publish(ctx.pubsub, new SignalReceivedEvent({ peerId: selfId, signal }));
+          yield* sendToMembers(ctx, new SignalReceivedEvent({ peerId: selfId, signal }), selfId);
 
           return [undefined, registry];
         }),

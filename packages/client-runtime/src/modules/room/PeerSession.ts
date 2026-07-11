@@ -6,7 +6,7 @@ import {
   type RoomId,
   type Signal,
 } from '@tether/contracts/modules/room';
-import { Crypto, Duration, Effect, Exit, Ref, Scope } from 'effect';
+import { Crypto, Deferred, Duration, Effect, Exit, Scope } from 'effect';
 
 import { AppClient } from '../../AppClient';
 import type {
@@ -58,10 +58,12 @@ const makePeerSessionActorInternal = Effect.fnUntraced(function* (
   const eventSink = yield* PeerSessionEventSink;
   const crypto = yield* Crypto.Crypto;
   const actorScope = yield* Scope.Scope;
-  const sessionTokenRef = yield* Ref.make('');
-  // The host does not know its roomId until RoomSessionOpenedEvent mints one;
-  // both intents resolve the effective roomId from that event for later RPCs.
-  const roomIdRef = yield* Ref.make<RoomId | null>(null);
+  // Both intents learn the effective roomId and token from RoomSessionOpenedEvent.
+  // A Deferred models that one-time transition and lets early RPCs wait for it.
+  const openedSession = yield* Deferred.make<{
+    readonly roomId: RoomId;
+    readonly sessionToken: string;
+  }>();
   let nextMessageSequence = 0;
   let nextOfferEpoch = 0;
   let latestRemoteOfferEpoch: number | null = null;
@@ -73,13 +75,7 @@ const makePeerSessionActorInternal = Effect.fnUntraced(function* (
     `${session.selfId}:${sender}:${nextMessageSequence++}`;
 
   const sendSignal = Effect.fnUntraced(function* (signal: Signal) {
-    const roomId = yield* Ref.get(roomIdRef);
-    // Unreachable: signals only flow after RoomSessionOpenedEvent set roomId.
-    /* v8 ignore next 3 */
-    if (roomId === null) {
-      return;
-    }
-    const sessionToken = yield* Ref.get(sessionTokenRef);
+    const { roomId, sessionToken } = yield* Deferred.await(openedSession);
     yield* client.SendSignal({ selfId: session.selfId, roomId, sessionToken, signal });
   });
 
@@ -406,8 +402,10 @@ const makePeerSessionActorInternal = Effect.fnUntraced(function* (
   const handleRoomEvent = Effect.fnUntraced(function* (event: RoomEvent) {
     switch (event._tag) {
       case '@tether/RoomSessionOpenedEvent': {
-        yield* Ref.set(sessionTokenRef, event.sessionToken);
-        yield* Ref.set(roomIdRef, event.roomId);
+        yield* Deferred.succeed(openedSession, {
+          roomId: event.roomId,
+          sessionToken: event.sessionToken,
+        });
         yield* eventSink.emit({ _tag: 'RoomOpened', roomId: event.roomId });
         return yield* handleRoomSessionOpened(event.peerId);
       }
@@ -681,7 +679,7 @@ const makePeerSessionActorInternal = Effect.fnUntraced(function* (
     }
   });
 
-  return { handleInput, sessionTokenRef, roomIdRef };
+  return { handleInput, openedSession };
 });
 
 /**

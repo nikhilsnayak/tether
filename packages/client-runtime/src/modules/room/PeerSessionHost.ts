@@ -8,7 +8,7 @@ import {
   isServerAtCapacity,
   type PeerId,
 } from '@tether/contracts/modules/room';
-import { Cause, Effect, Exit, Option, Queue, Ref, Scope, Stream } from 'effect';
+import { Cause, Deferred, Effect, Exit, Option, Queue, Scope, Stream } from 'effect';
 
 import { AppClient } from '../../AppClient';
 import { makePeerSessionActor } from './PeerSession';
@@ -160,6 +160,11 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
   );
 
   let leavePromise: Promise<void> | undefined;
+  const leaveEffect = Deferred.await(actor.openedSession).pipe(
+    Effect.flatMap(({ roomId, sessionToken }) =>
+      client.LeaveRoom({ selfId: session.selfId, roomId, sessionToken }),
+    ),
+  );
 
   return {
     sendMessage: (message) =>
@@ -169,17 +174,15 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
       }),
     respondToJoin: (peerId, decision) =>
       Effect.runPromise(
-        Effect.all([Ref.get(actor.roomIdRef), Ref.get(actor.sessionTokenRef)]).pipe(
-          Effect.flatMap(([roomId, sessionToken]) =>
-            roomId === null
-              ? Effect.void
-              : client.RespondToJoin({
-                  roomId,
-                  selfId: session.selfId,
-                  sessionToken,
-                  peerId,
-                  decision,
-                }),
+        Deferred.await(actor.openedSession).pipe(
+          Effect.flatMap(({ roomId, sessionToken }) =>
+            client.RespondToJoin({
+              roomId,
+              selfId: session.selfId,
+              sessionToken,
+              peerId,
+              decision,
+            }),
           ),
           Effect.catchIf(isNoPendingJoin, (error) =>
             Effect.logWarning('Join decision could not be delivered').pipe(
@@ -190,16 +193,7 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
         ),
       ),
     leave: () => {
-      leavePromise ??= Effect.runPromise(
-        Effect.all([Ref.get(actor.roomIdRef), Ref.get(actor.sessionTokenRef)]).pipe(
-          Effect.flatMap(([roomId, sessionToken]) =>
-            // No room was ever opened, so there is nothing to leave.
-            roomId === null
-              ? Effect.void
-              : client.LeaveRoom({ selfId: session.selfId, roomId, sessionToken }),
-          ),
-        ),
-      );
+      leavePromise ??= Effect.runPromise(leaveEffect);
       return leavePromise;
     },
   } satisfies PeerSession;

@@ -215,13 +215,16 @@ export function CallScreen({
     view.pendingJoinRequests.find((request) => !handlingJoinPeerIds.has(request.peerId)) ?? null;
   const answerJoin = (peerId: PeerId, decision: 'allow' | 'deny') => {
     setHandlingJoinPeerIds((current) => new Set(current).add(peerId));
-    void respondToJoin(peerId, decision).catch(() => {
+
+    const clearHandling = () => {
       setHandlingJoinPeerIds((current) => {
         const next = new Set(current);
         next.delete(peerId);
         return next;
       });
-    });
+    };
+
+    void respondToJoin(peerId, decision).then(clearHandling, clearHandling);
   };
   const sasConfirmed = view.sas !== null && confirmedSas === view.sas;
   const messageCount = view.messages.length;
