@@ -5,7 +5,7 @@
 <h1 align="center">Tether</h1>
 
 <p align="center">
-  Private, account-free video calls for two people.
+  Private, account-free video calls with host-controlled admission.
   <br />
   Peer-to-peer media, ephemeral chat, and a safety code you can verify aloud.
 </p>
@@ -29,12 +29,13 @@
 
 ## Features
 
-- **Private rooms for two.** Create a short room code, share the invite link, and connect without an account or lobby.
+- **Private rooms for two.** Create a short room code and share its invite link without creating an account. Guests enter a display name and knock; the host explicitly allows or denies each request before any WebRTC negotiation begins.
 - **Web, Android, and desktop clients.** The same room works from a browser, the native Android app, or the Electron desktop app. Shared room links open directly in the installed app — Android App Links on mobile, and on desktop the web page hands off to the app through its `tether://` deep link.
 - **Peer-to-peer video and audio.** Camera and microphone media use WebRTC, with in-call mic, camera, speaker, and audio-output controls.
 - **Ephemeral chat.** Messages travel over the call's encrypted WebRTC data channel and disappear when the session ends.
 - **Verifiable safety codes.** Both callers can compare a code derived from the negotiated DTLS fingerprints to detect signaling-path fingerprint substitution.
 - **Resilient sessions.** Tether reconnects failed peer connections, rejects stale events, recovers stalled negotiation, and isolates chat-channel closure without interrupting media or invalidating the safety code.
+- **Controlled admission.** Multiple guests may knock concurrently, requests remain visible in arrival order, and unanswered or withdrawn knocks are cleaned up automatically. Only one guest can be admitted to the two-person room.
 - **Public STUN discovery.** Calls use Google's public STUN server to establish a direct path.
 
 ## Privacy and security
@@ -46,7 +47,8 @@ Tether separates signaling from call content:
 - The signaling server relays room membership, SDP, and ICE messages. It does not receive decoded camera, microphone, or chat content.
 - Audio, video, and chat are encrypted by WebRTC and travel directly between callers.
 - Rooms and signaling state are held in memory and removed when callers leave. Tether has no account system, call history, or message database.
-- Each room admits at most two peers. Private session tokens authorize signaling and leave operations after a caller joins.
+- Each room admits at most two peers. A guest's display name is an unverified, ephemeral claim shown only to the host while deciding whether to admit them.
+- Private session tokens authorize admission decisions, signaling, and leave operations after a caller joins.
 - The server validates RPC payloads, rate-limits signaling per member, and caps live rooms.
 
 The safety code is meaningful only when both callers compare it through a separate trusted channel, such as reading it aloud. It does not protect a compromised browser, device, or copy of the client application.
@@ -62,7 +64,33 @@ flowchart LR
     A <-->|Encrypted WebRTC media and chat| B
 ```
 
-The Bun server exposes an Effect RPC endpoint over WebSocket. A streaming `OpenRoomSession` call represents both room membership and the server-to-client event channel; unary RPCs carry ICE and session-description signals and handle explicit departure.
+Admission happens before peer connection setup:
+
+```mermaid
+sequenceDiagram
+    participant H as Host
+    participant S as Signaling server
+    participant G as Guest
+
+    H->>S: OpenRoomSession(host)
+    S-->>H: Room ID + private session token
+    G->>S: OpenRoomSession(join, name)
+    S-->>G: Join pending
+    S-->>H: Join requested
+    H->>S: RespondToJoin(allow or deny)
+    alt allowed and room still available
+        S-->>G: Session opened + private session token
+        S-->>H: Peer joined
+        H->>G: WebRTC offer and ICE through relayed signals
+        G->>H: WebRTC answer and ICE through relayed signals
+    else denied, timed out, or room filled
+        S-->>G: Join denied
+    end
+```
+
+The Bun server exposes an Effect RPC endpoint over WebSocket. A streaming `OpenRoomSession` call represents a host, pending join, or admitted membership and carries the server-to-client event channel. Unary `RespondToJoin`, `SendSignal`, and `LeaveRoom` calls handle admission, WebRTC signaling, and explicit departure.
+
+The room registry is serialized in one in-memory `SynchronizedRef`. Each admitted member—and each pending guest—owns an event queue. Reusing the pending guest's queue after admission ensures that an immediate answer or ICE candidate cannot be lost during the transition from waiting to connected.
 
 Signaling is intentionally single-process and in-memory. Active calls end when the server process restarts or is redeployed, and the room registry only coordinates one live replica at a time. Running multiple replicas requires either shared signaling state or deterministic room affinity. That tradeoff keeps the system ephemeral and simple, and it does not imply that media ever transits the server.
 
@@ -83,7 +111,7 @@ cp apps/web/.env.example apps/web/.env
 bun run dev --filter=server --filter=web
 ```
 
-Open `http://localhost:5173` in two tabs, create a room, and join it from the second tab. Localhost is treated as a secure browser context, so camera and microphone APIs are available during development.
+Open `http://localhost:5173` in two tabs. Create a room in the first tab, open its invite link in the second, enter a name, and knock. Allow the request in the host tab to start the call. Localhost is treated as a secure browser context, so camera and microphone APIs are available during development.
 
 ## Configuration
 
@@ -153,7 +181,7 @@ Tether is a Bun workspace managed with Turborepo.
 
 ```text
 apps/
-  server/          Bun HTTP server and Effect RPC signaling relay
+  server/          Bun HTTP server, admission coordinator, and Effect RPC signaling relay
   web/             React 19, Vite, TanStack Router, and browser WebRTC adapter
   mobile/          Expo + react-native-webrtc client on the shared peer-session runtime
   desktop/         Electron shell that reuses the web app and handles tether:// deep links
@@ -166,8 +194,8 @@ e2e/               Playwright browser tests for complete two-peer flows
 
 The main implementation boundaries are:
 
-- [`apps/server/src/modules/room`](apps/server/src/modules/room) — ephemeral room membership, authenticated signaling, limits, and event delivery.
-- [`packages/client-runtime/src/modules/room`](packages/client-runtime/src/modules/room) — negotiation, reconnection, safety-code derivation, chat, and resource ownership.
+- [`apps/server/src/modules/room`](apps/server/src/modules/room) — ephemeral room membership, pending admission queues, authenticated signaling, limits, and event delivery.
+- [`packages/client-runtime/src/modules/room`](packages/client-runtime/src/modules/room) — React-independent admission state, negotiation, reconnection, safety-code derivation, chat, and resource ownership.
 - [`apps/web/src/modules/room`](apps/web/src/modules/room) — browser WebRTC integration and the call interface.
 - [`apps/mobile/src/modules/room`](apps/mobile/src/modules/room) — react-native-webrtc integration and the native call interface.
 - [`packages/contracts/src/modules/room`](packages/contracts/src/modules/room) — shared wire schemas and RPC definitions.
@@ -206,9 +234,11 @@ bun run build
 Run `bun run test:coverage` to generate unit coverage reports for the server, web, mobile, and
 client runtime. CI retains those reports as an artifact.
 
-The test suite covers room-capacity invariants, authenticated signaling, rate limits, STUN
-configuration, peer-session state transitions, resource cleanup, safety-code agreement, complete
-two-peer calls, chat-channel isolation, media controls, and peer-connection recovery.
+The test suite covers concurrent and timed-out knocks, admission races, room-capacity invariants,
+authenticated signaling, rate limits, STUN configuration, peer-session state transitions, resource
+cleanup, safety-code agreement, complete two-peer calls, chat-channel isolation, media controls,
+and peer-connection recovery. Coverage thresholds are enforced for the server, web, mobile, and
+shared client runtime.
 
 ## Roadmap
 
