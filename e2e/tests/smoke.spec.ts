@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-import { continueInBrowser } from './helpers';
+import { createRoom } from './helpers';
 
 test('web app loads', async ({ page }) => {
   await page.goto('/');
@@ -33,9 +33,8 @@ test('a fresh visitor must accept the disclaimer before the app renders', async 
 });
 
 test('web app opens a signaling session', async ({ page }) => {
-  await page.goto('/room/eet-smoo-kee');
-  await continueInBrowser(page);
+  const roomId = await createRoom(page);
 
   await expect(page.getByText('Share this room to invite someone.')).toBeVisible();
-  await expect(page.getByText('Room eet-smoo-kee')).toBeVisible();
+  await expect(page.getByText(`Room ${roomId}`)).toBeVisible();
 });

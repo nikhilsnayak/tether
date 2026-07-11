@@ -1,10 +1,14 @@
 import {
+  isJoinDenied,
+  isNoPendingJoin,
   isPeerAlreadyJoined,
   isPeerNotInRoom,
   isRoomFull,
+  isRoomNotFound,
   isServerAtCapacity,
+  type PeerId,
 } from '@tether/contracts/modules/room';
-import { Cause, Effect, Exit, Option, Queue, Ref, Scope, Stream } from 'effect';
+import { Cause, Deferred, Effect, Exit, Option, Queue, Scope, Stream } from 'effect';
 
 import { AppClient } from '../../AppClient';
 import { makePeerSessionActor } from './PeerSession';
@@ -19,6 +23,8 @@ import { PeerSessionEventSink, PeerSessionPlatform } from './PeerSessionServices
 export interface PeerSession {
   /** Enqueues a chat command; `true` means queued, not remotely delivered. */
   readonly sendMessage: (message: string) => boolean;
+  /** Host admits or rejects a knocking joiner. */
+  readonly respondToJoin: (peerId: PeerId, decision: 'allow' | 'deny') => Promise<void>;
   /** Explicitly releases room membership before the client tears down its transport. */
   readonly leave: () => Promise<void>;
 }
@@ -114,6 +120,22 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
               });
             }
 
+            if (isRoomNotFound(error)) {
+              yield* Effect.logWarning('Room join rejected because the room does not exist');
+              return yield* peerSessionEventSink.emit({
+                _tag: 'RoomJoinRejected',
+                reason: 'room-not-found',
+              });
+            }
+
+            if (isJoinDenied(error)) {
+              yield* Effect.logWarning('Room join rejected because the host declined');
+              return yield* peerSessionEventSink.emit({
+                _tag: 'RoomJoinRejected',
+                reason: 'join-denied',
+              });
+            }
+
             if (isPeerNotInRoom(error)) {
               yield* Effect.logWarning('Signaling rejected because peer is no longer in room');
               return yield* peerSessionEventSink.emit({
@@ -138,6 +160,11 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
   );
 
   let leavePromise: Promise<void> | undefined;
+  const leaveEffect = Deferred.await(actor.openedSession).pipe(
+    Effect.flatMap(({ roomId, sessionToken }) =>
+      client.LeaveRoom({ selfId: session.selfId, roomId, sessionToken }),
+    ),
+  );
 
   return {
     sendMessage: (message) =>
@@ -145,12 +172,28 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
         _tag: 'SendMessage',
         message,
       }),
-    leave: () => {
-      leavePromise ??= Effect.runPromise(
-        Ref.get(actor.sessionTokenRef).pipe(
-          Effect.flatMap((sessionToken) => client.LeaveRoom({ ...session, sessionToken })),
+    respondToJoin: (peerId, decision) =>
+      Effect.runPromise(
+        Deferred.await(actor.openedSession).pipe(
+          Effect.flatMap(({ roomId, sessionToken }) =>
+            client.RespondToJoin({
+              roomId,
+              selfId: session.selfId,
+              sessionToken,
+              peerId,
+              decision,
+            }),
+          ),
+          Effect.catchIf(isNoPendingJoin, (error) =>
+            Effect.logWarning('Join decision could not be delivered').pipe(
+              Effect.annotateLogs('reason', String(error)),
+            ),
+          ),
+          Effect.tap(() => peerSessionEventSink.emit({ _tag: 'JoinRequestHandled', peerId })),
         ),
-      );
+      ),
+    leave: () => {
+      leavePromise ??= Effect.runPromise(leaveEffect);
       return leavePromise;
     },
   } satisfies PeerSession;

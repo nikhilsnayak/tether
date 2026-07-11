@@ -4,6 +4,8 @@ const ERROR_STATUSES = new Set<PeerSessionView['status']>([
   'room-full',
   'server-at-capacity',
   'peer-already-joined',
+  'room-not-found',
+  'join-denied',
   'disconnected',
   'failed',
 ]);
@@ -59,6 +61,13 @@ export function peerSessionStatusPresentation(
         label: 'Waiting for the other person',
         hint: 'Share this room to invite someone.',
       };
+    case 'awaiting-approval':
+      return {
+        tone: 'warning',
+        pulse: true,
+        label: 'Waiting for the host',
+        hint: 'The host needs to let you in before the call starts.',
+      };
     case 'negotiation-stalled':
       return {
         tone: 'warning',
@@ -100,6 +109,20 @@ export function peerSessionStatusPresentation(
         pulse: false,
         label: 'Already joined',
         hint: 'You already have this room open somewhere else, maybe in another tab or on another device.',
+      };
+    case 'room-not-found':
+      return {
+        tone: 'destructive',
+        pulse: false,
+        label: 'Room not found',
+        hint: 'This room does not exist or has already ended.',
+      };
+    case 'join-denied':
+      return {
+        tone: 'destructive',
+        pulse: false,
+        label: 'Request declined',
+        hint: 'The host declined your request to join.',
       };
   }
 }

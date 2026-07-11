@@ -5,14 +5,12 @@ const ALPHABET = 'abcdefghijklmnopqrstuvwxyz';
 // Formatted length of xxx-xxxx-xxx.
 export const ROOM_CODE_LENGTH = 12;
 
+// Room IDs are minted server-side (see contracts RoomCodes); the client only
+// mints its own peer identity.
 const randomCode = Effect.fnUntraced(function* (length: number) {
   const crypto = yield* Crypto.Crypto;
   const bytes = yield* crypto.randomBytes(length);
   return Array.from(bytes, (byte) => ALPHABET[byte % 26]).join('');
-});
-
-export const generateRoomId = Effect.gen(function* () {
-  return `${yield* randomCode(3)}-${yield* randomCode(4)}-${yield* randomCode(3)}`;
 });
 
 export const generatePeerId = randomCode(12);

@@ -1,12 +1,10 @@
 import { CatchBoundary, createFileRoute, useNavigate } from '@tanstack/react-router';
 import type { RoomSession } from '@tether/client-runtime/modules/room';
-import { PeerId, RoomId } from '@tether/contracts/modules/room';
+import { DisplayName, PeerId, RoomId } from '@tether/contracts/modules/room';
 import { Button } from '@tether/ui/components/button';
-import { Input } from '@tether/ui/components/input';
-import { toast } from '@tether/ui/components/toast';
-import { Check, Copy, Share2, X } from 'lucide-react';
-import { Suspense, useEffect, useState } from 'react';
+import { type SubmitEvent, Suspense, useEffect, useState } from 'react';
 
+import { LogoMark } from '@/components/logo';
 import { canOfferDesktopApp, desktopRoomUrl } from '@/lib/desktop-handoff';
 import { generatePeerId } from '@/lib/utils';
 import {
@@ -16,24 +14,20 @@ import {
   CallScreen,
 } from '@/modules/room/components/room';
 
-const DEFAULT_WEB_URL = 'https://tether.nikhilsnayak.dev';
+const MAX_DISPLAY_NAME = 32;
 
 export const Route = createFileRoute('/room/$roomId')({
-  validateSearch: (search: Record<string, unknown>) => ({
-    invite: search.invite === true || search.invite === 'true' ? true : undefined,
-  }),
   component: RoomPage,
 });
 
 function RoomPage() {
   const { roomId } = Route.useParams();
-  const { invite } = Route.useSearch();
   const navigate = useNavigate();
   const [selfId] = useState(() => PeerId.make(generatePeerId()));
   // On a desktop web browser we hand off to the app first, so hold the call
   // (and its media grab) until the caller opts to stay in the browser.
   const [joinInBrowser, setJoinInBrowser] = useState(() => !canOfferDesktopApp());
-  const session: RoomSession = { roomId: RoomId.make(roomId), selfId };
+  const [displayName, setDisplayName] = useState<DisplayName | null>(null);
 
   // Fire the tether:// scheme once; the browser's native "Open Tether?" prompt
   // takes over. If the app is absent or declined, the caller taps to join here.
@@ -47,6 +41,17 @@ function RoomPage() {
     return <CallHandoffScreen onJoinInBrowser={() => setJoinInBrowser(true)} />;
   }
 
+  if (displayName === null) {
+    return <JoinNamePanel onSubmit={setDisplayName} />;
+  }
+
+  const session: RoomSession = {
+    intent: 'join',
+    roomId: RoomId.make(roomId),
+    selfId,
+    displayName,
+  };
+
   return (
     <CatchBoundary errorComponent={CallErrorScreen} getResetKey={() => roomId}>
       <Suspense fallback={<CallLoadingScreen />}>
@@ -57,110 +62,55 @@ function RoomPage() {
           }}
         />
       </Suspense>
-      <RoomInviteCard
-        open={invite ?? false}
-        roomId={roomId}
-        onClose={() => {
-          void navigate({
-            to: '/room/$roomId',
-            params: { roomId },
-            search: { invite: undefined },
-            replace: true,
-          });
-        }}
-      />
     </CatchBoundary>
   );
 }
 
-function RoomInviteCard({
-  open,
-  onClose,
-  roomId,
-}: {
-  readonly open: boolean;
-  readonly onClose: () => void;
-  readonly roomId: string;
-}) {
-  const [copied, setCopied] = useState(false);
+// Collected before media/session start: the joiner presents a name, the host
+// approves or denies. Never persisted.
+function JoinNamePanel({ onSubmit }: { readonly onSubmit: (name: DisplayName) => void }) {
+  const [name, setName] = useState('');
+  const trimmed = name.trim();
+  const canContinue = trimmed.length > 0;
 
-  if (!open) {
-    return null;
-  }
-
-  const roomUrl = new URL(
-    `/room/${encodeURIComponent(roomId)}`,
-    import.meta.env.VITE_WEB_URL ??
-      (window.location.protocol === 'http:' || window.location.protocol === 'https:'
-        ? window.location.origin
-        : DEFAULT_WEB_URL),
-  ).href;
-  const canShare = typeof navigator.share === 'function';
-
-  const copyRoomUrl = async () => {
-    try {
-      await navigator.clipboard.writeText(roomUrl);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2_000);
-    } catch {
-      toast.error('Could not copy the room link');
-    }
-  };
-
-  const shareRoomUrl = async () => {
-    try {
-      await navigator.share({
-        title: 'Tether call',
-        text: 'Join my Tether video call',
-        url: roomUrl,
-      });
-    } catch (error) {
-      if (!(error instanceof DOMException && error.name === 'AbortError')) {
-        toast.error('Could not share the room link');
-      }
+  const handleSubmit = (event: SubmitEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (canContinue) {
+      onSubmit(DisplayName.make(trimmed));
     }
   };
 
   return (
-    <section
-      aria-label='Room invite'
-      className='border-border bg-card animate-in fade-in slide-in-from-bottom-4 fixed bottom-24 left-4 z-50 w-[min(26rem,calc(100vw-2rem))] border shadow-lg duration-300'
-    >
-      <div className='border-border flex items-center justify-between border-b px-4 py-2.5'>
-        <span className='text-muted-foreground font-mono text-[11px] tracking-[0.2em] uppercase'>
-          Room ready
+    <div className='grid min-h-svh place-items-center px-6'>
+      <div className='w-full max-w-sm space-y-6'>
+        <span className='flex items-center gap-2.5'>
+          <LogoMark className='size-5' />
+          <span className='font-medium tracking-tight'>tether</span>
         </span>
-        <Button aria-label='Close' variant='ghost' size='icon-sm' onClick={onClose}>
-          <X />
-        </Button>
-      </div>
-
-      <div className='space-y-3 p-4'>
-        <p className='text-sm leading-6'>
-          Send this link to the one person you want to call. First to open it joins the line.
-        </p>
-
-        <div className='flex gap-2'>
-          <Input
-            aria-label='Room invite link'
-            readOnly
-            value={roomUrl}
-            onFocus={(event) => event.currentTarget.select()}
-            className='font-mono text-xs max-sm:text-[11px]'
-          />
-          <Button aria-label='Copy room link' variant='outline' onClick={() => void copyRoomUrl()}>
-            {copied ? <Check className='text-success' /> : <Copy />}
-            <span className='hidden sm:inline'>{copied ? 'Copied' : 'Copy'}</span>
-          </Button>
+        <div className='space-y-3'>
+          <p className='text-muted-foreground font-mono text-[11px] tracking-[0.2em] uppercase'>
+            Join call
+          </p>
+          <h1 className='text-2xl tracking-tight'>What should the host call you?</h1>
+          <p className='text-muted-foreground text-sm leading-6'>
+            The host sees this name before letting you in. It is not saved anywhere.
+          </p>
         </div>
-
-        {canShare && (
-          <Button className='w-full' onClick={() => void shareRoomUrl()}>
-            <Share2 />
-            Share room
+        <form onSubmit={handleSubmit} className='space-y-6'>
+          <input
+            aria-label='Your name'
+            autoComplete='off'
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder='YOUR NAME'
+            maxLength={MAX_DISPLAY_NAME}
+            className='border-input placeholder:text-muted-foreground/70 focus:border-primary w-full border-b bg-transparent py-2 font-mono text-xl tracking-[0.15em] uppercase outline-none'
+          />
+          <Button type='submit' disabled={!canContinue} className='w-full'>
+            Knock to join
           </Button>
-        )}
+        </form>
       </div>
-    </section>
+    </div>
   );
 }

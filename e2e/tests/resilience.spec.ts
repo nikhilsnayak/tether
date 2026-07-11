@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
-import { connectPeers, continueInBrowser, expectConnected, requireBaseURL } from './helpers';
+import { connectPeers, expectConnected, requireBaseURL } from './helpers';
 
 const sendMessage = async (sender: Page, recipient: Page, message: string) => {
   await Promise.all([
@@ -84,10 +84,11 @@ test('leaving a call and joining a new room starts with clean media', async ({
     await guest.getByRole('button', { name: 'Leave call' }).click();
     await expect(guest).toHaveURL('/');
 
-    // Join via the form (SPA navigation) so the probe keeps both streams.
-    await guest.getByRole('textbox', { name: 'Room code' }).fill('fresh-after-leave');
-    await guest.getByRole('button', { name: 'Connect' }).click();
-    await continueInBrowser(guest);
+    // Create a fresh room via the Call button (SPA navigation) so the probe
+    // keeps both streams. A lone waiting peer now only exists as a host.
+    await guest.getByRole('button', { name: 'Call' }).click();
+    await expect(guest).toHaveURL(/\/host$/);
+    await guest.getByRole('button', { name: 'Close' }).click();
     await expect(guest.getByText('Share this room to invite someone.')).toBeVisible();
 
     // No stale remote frame from the previous call may survive the rejoin.

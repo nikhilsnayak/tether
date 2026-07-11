@@ -5,6 +5,8 @@ import {
   OpenRoomSessionError,
   OpenRoomSessionPayload,
   OpenRoomSessionSuccess,
+  RespondToJoinError,
+  RespondToJoinPayload,
   SendSignalError,
   SendSignalPayload,
 } from './Schemas';
@@ -16,6 +18,11 @@ const OpenRoomSessionRpc = Rpc.make('OpenRoomSession', {
   error: OpenRoomSessionError,
 });
 
+const RespondToJoinRpc = Rpc.make('RespondToJoin', {
+  payload: RespondToJoinPayload,
+  error: RespondToJoinError,
+});
+
 const SendSignalRpc = Rpc.make('SendSignal', {
   payload: SendSignalPayload,
   error: SendSignalError,
@@ -25,4 +32,9 @@ const LeaveRoomRpc = Rpc.make('LeaveRoom', {
   payload: LeaveRoomPayload,
 });
 
-export const RoomRpcs = RpcGroup.make(OpenRoomSessionRpc, SendSignalRpc, LeaveRoomRpc);
+export const RoomRpcs = RpcGroup.make(
+  OpenRoomSessionRpc,
+  RespondToJoinRpc,
+  SendSignalRpc,
+  LeaveRoomRpc,
+);

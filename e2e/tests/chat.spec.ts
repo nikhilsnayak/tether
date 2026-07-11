@@ -1,10 +1,9 @@
 import { expect, test } from '@playwright/test';
 
-import { connectPeers, continueInBrowser, requireBaseURL } from './helpers';
+import { connectPeers, createRoom, requireBaseURL } from './helpers';
 
 test('message input is disabled until a peer connects', async ({ page }) => {
-  await page.goto('/room/cha-tgat-eee');
-  await continueInBrowser(page);
+  await createRoom(page);
   await expect(page.getByText('Share this room to invite someone.')).toBeVisible();
 
   await page.getByRole('button', { name: 'Open chat' }).click();

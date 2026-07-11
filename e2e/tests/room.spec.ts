@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import {
-  continueInBrowser,
+  admitGuest,
   expectConnected,
   expectWaitingForPeer,
   installWebRtcProbe,
@@ -63,29 +63,29 @@ test('complete room flow', async ({ browser, page }, testInfo) => {
   const guestPage = await guestContext.newPage();
   const replacementPage = await replacementContext.newPage();
 
+  let roomId = '';
   try {
     await test.step('host creates a meeting', async () => {
       await page.goto('/');
       await page.getByRole('button', { name: 'Call' }).click();
-      await expect(page).toHaveURL(/\/room\/[a-z]{3}-[a-z]{4}-[a-z]{3}\?invite=true$/);
-      await continueInBrowser(page);
-      await expect(page.getByText('Room ready')).toBeVisible();
-      await expect(page.getByRole('textbox', { name: 'Room invite link' })).toHaveValue(
-        /\/room\/[a-z]{3}-[a-z]{4}-[a-z]{3}$/,
-      );
+      await expect(page).toHaveURL(/\/host$/);
+      await expect(page.getByText('Room ready')).toBeVisible({ timeout: 20_000 });
+      const inviteLink = page.getByRole('textbox', { name: 'Room invite link' });
+      await expect(inviteLink).toHaveValue(/\/room\/[a-z]{3}-[a-z]{4}-[a-z]{3}$/);
       await expect(page.getByRole('button', { name: 'Copy room link' })).toBeVisible();
+      const url = await inviteLink.inputValue();
+      const capturedId = url.split('/').at(-1);
+      if (capturedId === undefined || capturedId === '') {
+        throw new Error('Expected the invite link to contain a room id');
+      }
+      roomId = decodeURIComponent(capturedId);
       await page.getByRole('button', { name: 'Close' }).click();
-      await expect(page).toHaveURL(/\/room\/[a-z]{3}-[a-z]{4}-[a-z]{3}$/);
       await expectWaitingForPeer(page);
     });
 
-    const roomId = page.url().split('/').at(-1);
-    if (roomId === undefined) {
-      throw new Error('Expected the generated meeting URL to contain a room id');
-    }
-
     await test.step('guest joins by room code and media connects', async () => {
       await joinRoom(guestPage, roomId);
+      await admitGuest(page);
       await Promise.all([expectConnected(page), expectConnected(guestPage)]);
       await Promise.all([expectLocalAndRemoteMedia(page), expectLocalAndRemoteMedia(guestPage)]);
     });
@@ -155,6 +155,7 @@ test('complete room flow', async ({ browser, page }, testInfo) => {
       await expectWaitingForPeer(page);
 
       await joinRoom(replacementPage, roomId);
+      await admitGuest(page);
       await Promise.all([expectConnected(page), expectConnected(replacementPage)]);
       await Promise.all([
         expectLocalAndRemoteMedia(page),

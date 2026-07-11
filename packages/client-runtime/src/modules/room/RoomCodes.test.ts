@@ -2,7 +2,7 @@ import { assert, describe, it } from '@effect/vitest';
 import { Crypto, Effect, Layer } from 'effect';
 import { expect } from 'vitest';
 
-import { formatRoomCodeInput, generatePeerId, generateRoomId } from './RoomCodes';
+import { formatRoomCodeInput, generatePeerId } from './RoomCodes';
 
 // No DOM lib in this tsconfig, so the Web Crypto global is typed by hand.
 const webCryptoApi = (
@@ -24,15 +24,6 @@ const webCrypto = Layer.succeed(
       Effect.promise(async () => new Uint8Array(await webCryptoApi.subtle.digest(algorithm, data))),
   }),
 );
-
-describe('generateRoomId', () => {
-  it.effect('produces the xxx-xxxx-xxx shape', () =>
-    Effect.gen(function* () {
-      const roomId = yield* generateRoomId;
-      assert.match(roomId, /^[a-z]{3}-[a-z]{4}-[a-z]{3}$/);
-    }).pipe(Effect.provide(webCrypto)),
-  );
-});
 
 describe('generatePeerId', () => {
   it.effect('produces 12 lowercase letters', () =>

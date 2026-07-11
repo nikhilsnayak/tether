@@ -2,7 +2,9 @@ import { assert, describe, it } from '@effect/vitest';
 import { Exit, Schema } from 'effect';
 
 import {
+  DisplayName,
   IceCandidateSignal,
+  JoinCancelledEvent,
   isServerAtCapacity,
   OpenRoomSessionError,
   OpenRoomSessionPayload,
@@ -53,6 +55,7 @@ describe('room wire schemas', () => {
         _tag: '@tether/RoomSessionOpenedEvent',
         peerId: 'abcdefghijkl',
         sessionToken: 'session-token',
+        roomId: 'abc-defg-hij',
       }),
     );
     assert.isTrue(succeeds(SessionDescriptionSignal, sessionDescription('v=0')));
@@ -134,7 +137,15 @@ describe('room wire schemas', () => {
     assert.isTrue(
       succeeds(OpenRoomSessionPayload, {
         selfId: 'abcdefghijkl',
+        intent: 'host',
+      }),
+    );
+    assert.isTrue(
+      succeeds(OpenRoomSessionPayload, {
+        selfId: 'abcdefghijkl',
+        intent: 'join',
         roomId: 'abc-defg-hij',
+        displayName: 'Ada',
       }),
     );
     assert.isTrue(succeeds(SendSignalPayload, sendSignalPayload('session-token')));
@@ -143,8 +154,41 @@ describe('room wire schemas', () => {
         _tag: '@tether/RoomSessionOpenedEvent',
         peerId: null,
         sessionToken: 'session-token',
+        roomId: 'abc-defg-hij',
       }),
     );
+  });
+
+  it('round-trips a join-cancelled event with a bounded peer id', () => {
+    assert.isTrue(
+      succeeds(JoinCancelledEvent, {
+        _tag: '@tether/JoinCancelledEvent',
+        peerId: 'abcdefghijkl',
+      }),
+    );
+    assert.isFalse(
+      succeeds(JoinCancelledEvent, { _tag: '@tether/JoinCancelledEvent', peerId: '' }),
+    );
+  });
+
+  it('rejects an open-session payload without an intent', () => {
+    assert.isFalse(
+      succeeds(OpenRoomSessionPayload, { selfId: 'abcdefghijkl', roomId: 'abc-defg-hij' }),
+    );
+  });
+
+  it('rejects a join payload missing the room id and display name', () => {
+    assert.isFalse(succeeds(OpenRoomSessionPayload, { selfId: 'abcdefghijkl', intent: 'join' }));
+  });
+
+  it('trims and bounds the display name', () => {
+    assert.isTrue(succeeds(DisplayName, 'Ada'));
+    assert.isTrue(succeeds(DisplayName, '  Ada  '));
+    assert.isTrue(succeeds(DisplayName, 'n'.repeat(32)));
+    assert.isFalse(succeeds(DisplayName, ''));
+    assert.isFalse(succeeds(DisplayName, '   '));
+    assert.isFalse(succeeds(DisplayName, 'n'.repeat(33)));
+    assert.strictEqual(Schema.decodeUnknownSync(DisplayName)('  Ada  '), 'Ada');
   });
 
   it('rejects malformed room and peer identifiers', () => {

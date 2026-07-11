@@ -2,7 +2,7 @@ import { Link, createFileRoute, useNavigate } from '@tanstack/react-router';
 import { type SubmitEvent, useState } from 'react';
 
 import { LogoMark } from '@/components/logo';
-import { formatRoomCodeInput, generateRoomId, ROOM_CODE_LENGTH } from '@/lib/utils';
+import { formatRoomCodeInput, ROOM_CODE_LENGTH } from '@/lib/utils';
 
 export const Route = createFileRoute('/')({
   component: HomePage,
@@ -21,21 +21,11 @@ function HomePage() {
   const [code, setCode] = useState('');
   const canJoin = code.length === ROOM_CODE_LENGTH;
 
-  const enterRoom = (roomId: string, showInvite = false) => {
-    const trimmed = roomId.trim();
-    if (trimmed.length > 0) {
-      void navigate({
-        to: '/room/$roomId',
-        params: { roomId: trimmed },
-        search: { invite: showInvite ? true : undefined },
-      });
-    }
-  };
-
   const handleJoin = (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (canJoin) {
-      enterRoom(code);
+    const trimmed = code.trim();
+    if (canJoin && trimmed.length > 0) {
+      void navigate({ to: '/room/$roomId', params: { roomId: trimmed } });
     }
   };
 
@@ -67,7 +57,7 @@ function HomePage() {
             </div>
             <button
               type='button'
-              onClick={() => enterRoom(generateRoomId(), true)}
+              onClick={() => void navigate({ to: '/host' })}
               className='bg-primary text-primary-foreground grid size-32 place-items-center justify-self-start rounded-full text-sm font-medium tracking-wide uppercase shadow-[inset_0_-4px_10px_rgba(0,0,0,0.35)] transition-transform active:scale-95 sm:justify-self-end'
             >
               Call

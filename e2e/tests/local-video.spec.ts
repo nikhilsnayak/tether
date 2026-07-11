@@ -1,10 +1,9 @@
 import { expect, test } from '@playwright/test';
 
-import { continueInBrowser } from './helpers';
+import { createRoom } from './helpers';
 
 test('turning the camera off hides the local preview and shows the avatar', async ({ page }) => {
-  await page.goto('/room/cam-erat-ogl');
-  await continueInBrowser(page);
+  await createRoom(page);
   const preview = page.getByLabel('Local video preview');
   await expect(preview).toBeVisible({ timeout: 20_000 });
   await expect(preview).not.toHaveClass(/invisible/);

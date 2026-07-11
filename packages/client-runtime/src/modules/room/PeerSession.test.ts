@@ -1,6 +1,12 @@
 import { assert, describe, it } from '@effect/vitest';
 import {
+  DisplayName,
   IceCandidateSignal,
+  JoinCancelledEvent,
+  JoinDenied,
+  JoinPendingEvent,
+  JoinRequestedEvent,
+  NoPendingJoin,
   PeerAlreadyJoined,
   PeerId,
   PeerJoinedEvent,
@@ -8,6 +14,7 @@ import {
   PeerNotInRoom,
   RoomId,
   RoomFull,
+  RoomNotFound,
   RoomSessionOpenedEvent,
   ServerAtCapacity,
   SessionDescriptionSignal,
@@ -66,19 +73,32 @@ const webCrypto = Layer.succeed(
 );
 
 const session: RoomSession = {
+  intent: 'join',
   roomId: RoomId.make('abc-defg-hij'),
   selfId: PeerId.make('aaaaaaaaaaaa'),
+  displayName: DisplayName.make('tester'),
 };
 const bob = PeerId.make('bbbbbbbbbbbb');
+const bobName = DisplayName.make('Bob');
 const charlie = PeerId.make('cccccccccccc');
 const mallory = PeerId.make('mmmmmmmmmmmm');
 const testSessionToken = 'test-session-token';
+const openedEvent = (peerId: PeerId | null) =>
+  new RoomSessionOpenedEvent({
+    peerId,
+    sessionToken: testSessionToken,
+    roomId: session.roomId,
+  });
+
+// Every RoomSessionOpenedEvent makes the actor surface the minted roomId first.
+const roomOpened: PeerSessionEvent = { _tag: 'RoomOpened', roomId: session.roomId };
 
 const makeFixture = Effect.fn('makeFixture')(function* (
   openRoomSession: AppClient['Service']['OpenRoomSession'] = (() =>
     Stream.empty) as AppClient['Service']['OpenRoomSession'],
   sendSignal?: AppClient['Service']['SendSignal'],
   overrides?: Partial<PeerSessionPlatform['Service']>,
+  respondToJoinError?: NoPendingJoin | PeerNotInRoom,
 ) {
   const peerConnections: Array<PeerConnectionHandle> = [];
   let nextPeerConnection = 0;
@@ -104,6 +124,13 @@ const makeFixture = Effect.fn('makeFixture')(function* (
   const operations: Array<string> = [];
   const signals: Array<Signal> = [];
   const sentSessionTokens: Array<string> = [];
+  const respondToJoinPayloads: Array<{
+    readonly roomId: RoomId;
+    readonly selfId: PeerId;
+    readonly sessionToken: string;
+    readonly peerId: PeerId;
+    readonly decision: 'allow' | 'deny';
+  }> = [];
   const events: Array<PeerSessionEvent> = [];
   const eventQueue = yield* Queue.unbounded<PeerSessionEvent>();
   const acquiredIceServers: Array<ReadonlyArray<IceServer>> = [];
@@ -175,6 +202,15 @@ const makeFixture = Effect.fn('makeFixture')(function* (
       Effect.sync(() => operations.push(`sendDataChannelMessage:${message}`)),
   };
   const platform = PeerSessionPlatform.of({ ...basePlatform, ...overrides });
+  const respondToJoin = ((payload: Parameters<AppClient['Service']['RespondToJoin']>[0]) =>
+    Effect.sync(() => {
+      respondToJoinPayloads.push(payload);
+      operations.push(`respondToJoin:${payload.decision}`);
+    }).pipe(
+      Effect.andThen(
+        respondToJoinError === undefined ? Effect.void : Effect.fail(respondToJoinError),
+      ),
+    )) as AppClient['Service']['RespondToJoin'];
 
   const dependencies = Layer.mergeAll(
     webCrypto,
@@ -186,6 +222,7 @@ const makeFixture = Effect.fn('makeFixture')(function* (
           Effect.sync(() => {
             operations.push('leaveRoom');
           }),
+        RespondToJoin: respondToJoin,
         OpenRoomSession: openRoomSession,
         SendSignal: (payload) => {
           sentSessionTokens.push(payload.sessionToken);
@@ -237,6 +274,7 @@ const makeFixture = Effect.fn('makeFixture')(function* (
     operations,
     peerConnection,
     peerConnections,
+    respondToJoinPayloads,
     sentSessionTokens,
     signals,
   };
@@ -250,7 +288,7 @@ describe('startPeerSession', () => {
         const fixture = yield* makeFixture(
           (() =>
             Stream.make({
-              event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+              event: openedEvent(bob),
             }).pipe(Stream.concat(Stream.never))) as AppClient['Service']['OpenRoomSession'],
           ({ signal }) =>
             signal._tag === '@tether/SessionDescriptionSignal' && signal.type === 'offer'
@@ -275,10 +313,7 @@ describe('startPeerSession', () => {
         const fixture = yield* makeFixture(
           (() =>
             Stream.make({
-              event: new RoomSessionOpenedEvent({
-                peerId: bob,
-                sessionToken: testSessionToken,
-              }),
+              event: openedEvent(bob),
             }).pipe(Stream.concat(Stream.never))) as AppClient['Service']['OpenRoomSession'],
           ({ signal }) =>
             signal._tag === '@tether/SessionDescriptionSignal' && signal.type === 'offer'
@@ -314,12 +349,46 @@ describe('startPeerSession', () => {
   it.effect('explicitly leaves the room at most once', () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const fixture = yield* makeFixture();
+        const fixture = yield* makeFixture((() =>
+          Stream.make({
+            event: openedEvent(null),
+          }).pipe(Stream.concat(Stream.never))) as AppClient['Service']['OpenRoomSession']);
         const peerSession = yield* startPeerSession(session).pipe(
           Effect.provide(fixture.dependencies),
         );
 
+        // Wait until the room is open so the actor has learned its roomId; only
+        // then does leaving issue a LeaveRoom call.
+        yield* Queue.take(fixture.eventQueue);
+        yield* Queue.take(fixture.eventQueue);
+        assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), roomOpened);
+
         yield* Effect.promise(() => Promise.all([peerSession.leave(), peerSession.leave()]));
+
+        assert.lengthOf(
+          fixture.operations.filter((operation) => operation === 'leaveRoom'),
+          1,
+        );
+      }),
+    ),
+  );
+
+  it.effect('defers an early leave until the room opens', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const roomEventQueue = yield* Queue.unbounded<{ readonly event: RoomEvent }>();
+        const fixture = yield* makeFixture((() =>
+          Stream.fromQueue(roomEventQueue)) as AppClient['Service']['OpenRoomSession']);
+        const peerSession = yield* startPeerSession(session).pipe(
+          Effect.provide(fixture.dependencies),
+        );
+
+        const leavePromise = peerSession.leave();
+
+        assert.notInclude(fixture.operations, 'leaveRoom');
+
+        yield* Queue.offer(roomEventQueue, { event: openedEvent(null) });
+        yield* Effect.promise(() => leavePromise);
 
         assert.lengthOf(
           fixture.operations.filter((operation) => operation === 'leaveRoom'),
@@ -334,13 +403,14 @@ describe('startPeerSession', () => {
       Effect.gen(function* () {
         const fixture = yield* makeFixture((() =>
           Stream.make({
-            event: new RoomSessionOpenedEvent({ peerId: null, sessionToken: testSessionToken }),
+            event: openedEvent(null),
           })) as AppClient['Service']['OpenRoomSession']);
 
         yield* startPeerSession(session).pipe(Effect.provide(fixture.dependencies));
 
         assert.deepStrictEqual((yield* Queue.take(fixture.eventQueue))._tag, 'SessionStarted');
         assert.deepStrictEqual((yield* Queue.take(fixture.eventQueue))._tag, 'LocalStreamReady');
+        assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), roomOpened);
         assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), {
           _tag: 'WaitingForPeer',
         });
@@ -485,6 +555,182 @@ describe('startPeerSession', () => {
     ),
   );
 
+  it.effect('emits RoomJoinRejected when the room does not exist', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture((() =>
+          Stream.fail(
+            new RoomNotFound({ roomId: session.roomId }),
+          )) as AppClient['Service']['OpenRoomSession']);
+
+        yield* startPeerSession(session).pipe(Effect.provide(fixture.dependencies));
+        const started = yield* Queue.take(fixture.eventQueue);
+        const localStream = yield* Queue.take(fixture.eventQueue);
+        const event = yield* Queue.take(fixture.eventQueue);
+
+        assert.deepStrictEqual(started, { _tag: 'SessionStarted' });
+        assert.strictEqual(localStream._tag, 'LocalStreamReady');
+        assert.deepStrictEqual(event, {
+          _tag: 'RoomJoinRejected',
+          reason: 'room-not-found',
+        });
+      }),
+    ),
+  );
+
+  it.effect('emits RoomJoinRejected when the host declines the join', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture((() =>
+          Stream.fail(new JoinDenied())) as AppClient['Service']['OpenRoomSession']);
+
+        yield* startPeerSession(session).pipe(Effect.provide(fixture.dependencies));
+        const started = yield* Queue.take(fixture.eventQueue);
+        const localStream = yield* Queue.take(fixture.eventQueue);
+        const event = yield* Queue.take(fixture.eventQueue);
+
+        assert.deepStrictEqual(started, { _tag: 'SessionStarted' });
+        assert.strictEqual(localStream._tag, 'LocalStreamReady');
+        assert.deepStrictEqual(event, {
+          _tag: 'RoomJoinRejected',
+          reason: 'join-denied',
+        });
+      }),
+    ),
+  );
+
+  it.effect('sends the host decision for a knocking joiner over RespondToJoin', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture((() =>
+          Stream.make({
+            event: openedEvent(null),
+          }).pipe(Stream.concat(Stream.never))) as AppClient['Service']['OpenRoomSession']);
+        const peerSession = yield* startPeerSession(session).pipe(
+          Effect.provide(fixture.dependencies),
+        );
+
+        // Wait until the room is open so the actor has learned its roomId + token.
+        yield* Queue.take(fixture.eventQueue);
+        yield* Queue.take(fixture.eventQueue);
+        assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), roomOpened);
+
+        yield* Effect.promise(() => peerSession.respondToJoin(bob, 'allow'));
+        yield* Effect.promise(() => peerSession.respondToJoin(charlie, 'deny'));
+
+        assert.deepStrictEqual(fixture.respondToJoinPayloads, [
+          {
+            roomId: session.roomId,
+            selfId: session.selfId,
+            sessionToken: testSessionToken,
+            peerId: bob,
+            decision: 'allow',
+          },
+          {
+            roomId: session.roomId,
+            selfId: session.selfId,
+            sessionToken: testSessionToken,
+            peerId: charlie,
+            decision: 'deny',
+          },
+        ]);
+        assert.includeMembers(fixture.operations, ['respondToJoin:allow', 'respondToJoin:deny']);
+        assert.includeDeepMembers(fixture.events, [
+          { _tag: 'JoinRequestHandled', peerId: bob },
+          { _tag: 'JoinRequestHandled', peerId: charlie },
+        ]);
+      }),
+    ),
+  );
+
+  it.effect('defers an early host decision until the room opens', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const roomEventQueue = yield* Queue.unbounded<{ readonly event: RoomEvent }>();
+        const fixture = yield* makeFixture((() =>
+          Stream.fromQueue(roomEventQueue)) as AppClient['Service']['OpenRoomSession']);
+        const peerSession = yield* startPeerSession(session).pipe(
+          Effect.provide(fixture.dependencies),
+        );
+
+        const responsePromise = peerSession.respondToJoin(bob, 'deny');
+
+        assert.isEmpty(fixture.respondToJoinPayloads);
+        assert.notIncludeDeepMembers(fixture.events, [{ _tag: 'JoinRequestHandled', peerId: bob }]);
+
+        yield* Queue.offer(roomEventQueue, { event: openedEvent(null) });
+        yield* Effect.promise(() => responsePromise);
+
+        assert.deepStrictEqual(fixture.respondToJoinPayloads, [
+          {
+            roomId: session.roomId,
+            selfId: session.selfId,
+            sessionToken: testSessionToken,
+            peerId: bob,
+            decision: 'deny',
+          },
+        ]);
+        assert.includeDeepMembers(fixture.events, [{ _tag: 'JoinRequestHandled', peerId: bob }]);
+      }),
+    ),
+  );
+
+  it.effect('suppresses only a stale join decision and marks its request handled', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture(
+          (() =>
+            Stream.make({
+              event: openedEvent(null),
+            }).pipe(Stream.concat(Stream.never))) as AppClient['Service']['OpenRoomSession'],
+          undefined,
+          undefined,
+          new NoPendingJoin({ roomId: session.roomId, peerId: bob }),
+        );
+        const peerSession = yield* startPeerSession(session).pipe(
+          Effect.provide(fixture.dependencies),
+        );
+
+        yield* Queue.take(fixture.eventQueue);
+        yield* Queue.take(fixture.eventQueue);
+        yield* Queue.take(fixture.eventQueue);
+        yield* Effect.promise(() => peerSession.respondToJoin(bob, 'deny'));
+
+        assert.includeDeepMembers(fixture.events, [{ _tag: 'JoinRequestHandled', peerId: bob }]);
+      }),
+    ),
+  );
+
+  it.effect('rejects a join decision when its RPC fails for another reason', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture(
+          (() =>
+            Stream.make({
+              event: openedEvent(null),
+            }).pipe(Stream.concat(Stream.never))) as AppClient['Service']['OpenRoomSession'],
+          undefined,
+          undefined,
+          new PeerNotInRoom({ roomId: session.roomId, peerId: session.selfId }),
+        );
+        const peerSession = yield* startPeerSession(session).pipe(
+          Effect.provide(fixture.dependencies),
+        );
+
+        yield* Queue.take(fixture.eventQueue);
+        yield* Queue.take(fixture.eventQueue);
+        yield* Queue.take(fixture.eventQueue);
+        const rejection = yield* Effect.tryPromise({
+          try: () => peerSession.respondToJoin(bob, 'allow'),
+          catch: (cause) => cause,
+        }).pipe(Effect.flip);
+
+        assert.instanceOf(rejection, PeerNotInRoom);
+        assert.notIncludeDeepMembers(fixture.events, [{ _tag: 'JoinRequestHandled', peerId: bob }]);
+      }),
+    ),
+  );
+
   it.effect('emits SessionFailed when the signaling stream fails unexpectedly', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -509,7 +755,7 @@ describe('startPeerSession', () => {
         const fixture = yield* makeFixture(
           (() =>
             Stream.make({
-              event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+              event: openedEvent(bob),
             }).pipe(Stream.concat(Stream.never))) as AppClient['Service']['OpenRoomSession'],
           undefined,
           {
@@ -521,6 +767,7 @@ describe('startPeerSession', () => {
         yield* startPeerSession(session).pipe(Effect.provide(fixture.dependencies));
         assert.deepStrictEqual((yield* Queue.take(fixture.eventQueue))._tag, 'SessionStarted');
         assert.deepStrictEqual((yield* Queue.take(fixture.eventQueue))._tag, 'LocalStreamReady');
+        assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), roomOpened);
         assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), {
           _tag: 'SessionFailed',
         });
@@ -534,7 +781,7 @@ describe('startPeerSession', () => {
         const fixture = yield* makeFixture(
           (() =>
             Stream.make({
-              event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+              event: openedEvent(bob),
             }).pipe(Stream.concat(Stream.never))) as AppClient['Service']['OpenRoomSession'],
           (() =>
             Effect.fail(
@@ -545,10 +792,12 @@ describe('startPeerSession', () => {
         yield* startPeerSession(session).pipe(Effect.provide(fixture.dependencies));
         const started = yield* Queue.take(fixture.eventQueue);
         const localStream = yield* Queue.take(fixture.eventQueue);
+        const opened = yield* Queue.take(fixture.eventQueue);
         const event = yield* Queue.take(fixture.eventQueue);
 
         assert.deepStrictEqual(started, { _tag: 'SessionStarted' });
         assert.strictEqual(localStream._tag, 'LocalStreamReady');
+        assert.deepStrictEqual(opened, roomOpened);
         assert.deepStrictEqual(event, { _tag: 'SignalingDisconnected' });
       }),
     ),
@@ -576,8 +825,9 @@ describe('startPeerSession', () => {
         assert.strictEqual((yield* Queue.take(fixture.eventQueue))._tag, 'LocalStreamReady');
 
         yield* Queue.offer(roomEventQueue, {
-          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+          event: openedEvent(bob),
         });
+        assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), roomOpened);
         yield* Deferred.await(offerSent);
 
         fixture.dispatchPlatformEvent({
@@ -623,8 +873,9 @@ describe('startPeerSession', () => {
         assert.strictEqual((yield* Queue.take(fixture.eventQueue))._tag, 'LocalStreamReady');
 
         yield* Queue.offer(roomEventQueue, {
-          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+          event: openedEvent(bob),
         });
+        assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), roomOpened);
         // The peer never answers, so the remote description is never set, ICE
         // never starts, and the browser never reaches either 'connected' or
         // 'failed'. Only a negotiation deadline can initiate recovery.
@@ -662,8 +913,9 @@ describe('startPeerSession', () => {
         assert.strictEqual((yield* Queue.take(fixture.eventQueue))._tag, 'LocalStreamReady');
 
         yield* Queue.offer(roomEventQueue, {
-          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+          event: openedEvent(bob),
         });
+        assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), roomOpened);
         yield* Deferred.await(offerSent);
 
         fixture.dispatchPlatformEvent({
@@ -692,7 +944,7 @@ describe('startPeerSession', () => {
         const fixture = yield* makeFixture(
           (() =>
             Stream.make({
-              event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+              event: openedEvent(bob),
             }).pipe(Stream.concat(Stream.never))) as AppClient['Service']['OpenRoomSession'],
           undefined,
           { createOffer: () => Effect.succeed({ type: 'offer', sdp: undefined }) },
@@ -701,6 +953,7 @@ describe('startPeerSession', () => {
         yield* startPeerSession(session).pipe(Effect.provide(fixture.dependencies));
         assert.deepStrictEqual((yield* Queue.take(fixture.eventQueue))._tag, 'SessionStarted');
         assert.deepStrictEqual((yield* Queue.take(fixture.eventQueue))._tag, 'LocalStreamReady');
+        assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), roomOpened);
         assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), { _tag: 'SessionFailed' });
       }),
     ),
@@ -712,7 +965,7 @@ describe('startPeerSession', () => {
         const fixture = yield* makeFixture(
           (() =>
             Stream.make({
-              event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+              event: openedEvent(bob),
             }).pipe(Stream.concat(Stream.never))) as AppClient['Service']['OpenRoomSession'],
           undefined,
           { addLocalTracks: () => Effect.die('boom') },
@@ -721,6 +974,7 @@ describe('startPeerSession', () => {
         yield* startPeerSession(session).pipe(Effect.provide(fixture.dependencies));
         assert.deepStrictEqual((yield* Queue.take(fixture.eventQueue))._tag, 'SessionStarted');
         assert.deepStrictEqual((yield* Queue.take(fixture.eventQueue))._tag, 'LocalStreamReady');
+        assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), roomOpened);
         assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), { _tag: 'SessionFailed' });
       }),
     ),
@@ -733,6 +987,34 @@ describe('peer-session actor', () => {
   const remoteOfferSdp = fingerprintSdp('AA:BB:CC:DD');
   const localAnswerSdp = fingerprintSdp('11:22:33:44');
 
+  it.effect('surfaces a knock to the host and clears it when the joiner withdraws', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture();
+
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: openedEvent(null),
+        });
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new JoinRequestedEvent({ peerId: bob, displayName: bobName }),
+        });
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new JoinCancelledEvent({ peerId: bob }),
+        });
+
+        assert.deepStrictEqual(fixture.events, [
+          roomOpened,
+          { _tag: 'WaitingForPeer' },
+          { _tag: 'JoinRequestReceived', peerId: bob, displayName: bobName },
+          { _tag: 'JoinRequestCancelled', peerId: bob },
+        ]);
+      }),
+    ).pipe(Effect.orDie),
+  );
+
   it.effect('answerer and offerer derive the same safety code from the same handshake', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -742,7 +1024,7 @@ describe('peer-session actor', () => {
 
         yield* answererFixture.actor({
           _tag: 'RoomEvent',
-          event: new RoomSessionOpenedEvent({ peerId: null, sessionToken: testSessionToken }),
+          event: openedEvent(null),
         });
         yield* answererFixture.actor({
           _tag: 'RoomEvent',
@@ -774,7 +1056,7 @@ describe('peer-session actor', () => {
 
         yield* offererFixture.actor({
           _tag: 'RoomEvent',
-          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+          event: openedEvent(bob),
         });
         yield* offererFixture.actor({
           _tag: 'RoomEvent',
@@ -815,7 +1097,7 @@ describe('peer-session actor', () => {
 
         yield* fixture.actor({
           _tag: 'RoomEvent',
-          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+          event: openedEvent(bob),
         });
         yield* fixture.actor({
           _tag: 'RoomEvent',
@@ -859,7 +1141,7 @@ describe('peer-session actor', () => {
 
         yield* fixture.actor({
           _tag: 'RoomEvent',
-          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+          event: openedEvent(bob),
         });
         yield* fixture.actor({
           _tag: 'RoomEvent',
@@ -901,7 +1183,7 @@ describe('peer-session actor', () => {
 
         yield* fixture.actor({
           _tag: 'RoomEvent',
-          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+          event: openedEvent(bob),
         });
         yield* fixture.actor({ _tag: 'RoomEvent', event: answer });
         yield* fixture.actor({ _tag: 'RoomEvent', event: answer });
@@ -923,7 +1205,7 @@ describe('peer-session actor', () => {
 
         yield* fixture.actor({
           _tag: 'RoomEvent',
-          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+          event: openedEvent(bob),
         });
         yield* fixture.actor({
           _tag: 'PeerConnectionConnected',
@@ -951,6 +1233,7 @@ describe('peer-session actor', () => {
         );
         assert.include(fixture.operations, 'closePeerConnection');
         assert.deepStrictEqual(fixture.events, [
+          roomOpened,
           { _tag: 'Connected', peerId: bob },
           { _tag: 'PeerInterrupted', peerId: bob },
         ]);
@@ -968,7 +1251,7 @@ describe('peer-session actor', () => {
         const fixture = yield* makeFixture();
         yield* fixture.actor({
           _tag: 'RoomEvent',
-          event: new RoomSessionOpenedEvent({ peerId: null, sessionToken: testSessionToken }),
+          event: openedEvent(null),
         });
         yield* fixture.actor({ _tag: 'RoomEvent', event: new PeerJoinedEvent({ peerId: bob }) });
         yield* fixture.actor({
@@ -990,6 +1273,7 @@ describe('peer-session actor', () => {
         );
         assert.lengthOf(fixture.signals, 0);
         assert.deepStrictEqual(fixture.events, [
+          roomOpened,
           { _tag: 'WaitingForPeer' },
           { _tag: 'Connected', peerId: bob },
           { _tag: 'PeerInterrupted', peerId: bob },
@@ -1005,7 +1289,7 @@ describe('peer-session actor', () => {
 
         yield* fixture.actor({
           _tag: 'RoomEvent',
-          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+          event: openedEvent(bob),
         });
         yield* fixture.actor({
           _tag: 'PeerConnectionFailed',
@@ -1021,6 +1305,7 @@ describe('peer-session actor', () => {
         });
 
         assert.deepStrictEqual(fixture.events, [
+          roomOpened,
           { _tag: 'PeerInterrupted', peerId: bob },
           { _tag: 'PeerInterrupted', peerId: bob },
           { _tag: 'TransportLost', peerId: bob },
@@ -1040,7 +1325,7 @@ describe('peer-session actor', () => {
 
         yield* fixture.actor({
           _tag: 'RoomEvent',
-          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+          event: openedEvent(bob),
         });
         yield* fixture.actor({
           _tag: 'PeerConnectionConnected',
@@ -1060,6 +1345,7 @@ describe('peer-session actor', () => {
         });
 
         assert.deepStrictEqual(fixture.events, [
+          roomOpened,
           { _tag: 'Connected', peerId: bob },
           { _tag: 'PeerInterrupted', peerId: bob },
           { _tag: 'Connected', peerId: bob },
@@ -1080,7 +1366,7 @@ describe('peer-session actor', () => {
 
         yield* fixture.actor({
           _tag: 'RoomEvent',
-          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+          event: openedEvent(bob),
         });
         yield* fixture.actor({
           _tag: 'RoomEvent',
@@ -1147,7 +1433,7 @@ describe('peer-session actor', () => {
 
         yield* fixture.actor({
           _tag: 'RoomEvent',
-          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+          event: openedEvent(bob),
         });
         yield* fixture.actor({
           _tag: 'PeerConnectionFailed',
@@ -1210,9 +1496,10 @@ describe('peer-session actor', () => {
         assert.strictEqual((yield* Queue.take(fixture.eventQueue))._tag, 'LocalStreamReady');
 
         yield* Queue.offer(roomEventQueue, {
-          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+          event: openedEvent(bob),
         });
         yield* Queue.take(offerSent);
+        assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), roomOpened);
 
         yield* TestClock.adjust('20 seconds');
         assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), {
@@ -1245,7 +1532,7 @@ describe('peer-session actor', () => {
 
         yield* fixture.actor({
           _tag: 'RoomEvent',
-          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+          event: openedEvent(bob),
         });
         yield* fixture.actor({
           _tag: 'RoomEvent',
@@ -1279,6 +1566,7 @@ describe('peer-session actor', () => {
           'setRemoteDescription:answer:remote-answer',
         ]);
         assert.deepStrictEqual(fixture.events, [
+          roomOpened,
           { _tag: 'Connected', peerId: bob },
           { _tag: 'ChatReady' },
         ]);
@@ -1296,7 +1584,7 @@ describe('peer-session actor', () => {
 
         yield* fixture.actor({
           _tag: 'RoomEvent',
-          event: new RoomSessionOpenedEvent({ peerId: null, sessionToken: testSessionToken }),
+          event: openedEvent(null),
         });
         yield* fixture.actor({ _tag: 'RoomEvent', event: new PeerJoinedEvent({ peerId: bob }) });
         yield* fixture.actor({
@@ -1332,6 +1620,7 @@ describe('peer-session actor', () => {
           'observeDataChannel:chat',
         ]);
         assert.deepStrictEqual(fixture.events, [
+          roomOpened,
           { _tag: 'WaitingForPeer' },
           { _tag: 'Connected', peerId: bob },
           { _tag: 'ChatReady' },
@@ -1347,7 +1636,7 @@ describe('peer-session actor', () => {
 
         yield* fixture.actor({
           _tag: 'RoomEvent',
-          event: new RoomSessionOpenedEvent({ peerId: null, sessionToken: testSessionToken }),
+          event: openedEvent(null),
         });
         yield* fixture.actor({ _tag: 'RoomEvent', event: new PeerJoinedEvent({ peerId: bob }) });
 
@@ -1389,7 +1678,7 @@ describe('peer-session actor', () => {
 
         yield* fixture.actor({
           _tag: 'RoomEvent',
-          event: new RoomSessionOpenedEvent({ peerId: null, sessionToken: testSessionToken }),
+          event: openedEvent(null),
         });
         yield* fixture.actor({ _tag: 'RoomEvent', event: new PeerJoinedEvent({ peerId: bob }) });
         yield* fixture.actor({
@@ -1446,7 +1735,7 @@ describe('peer-session actor', () => {
 
         yield* fixture.actor({
           _tag: 'RoomEvent',
-          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+          event: openedEvent(bob),
         });
         yield* fixture.actor({
           _tag: 'RoomEvent',
@@ -1496,6 +1785,7 @@ describe('peer-session actor', () => {
           0,
         );
         assert.deepStrictEqual(fixture.events, [
+          roomOpened,
           { _tag: 'Connected', peerId: bob },
           { _tag: 'ChatReady' },
           {
@@ -1533,7 +1823,7 @@ describe('peer-session actor', () => {
 
         yield* fixture.actor({
           _tag: 'RoomEvent',
-          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+          event: openedEvent(bob),
         });
         yield* fixture.actor({
           _tag: 'RoomEvent',
@@ -1556,7 +1846,7 @@ describe('peer-session actor', () => {
           'observePeerConnection',
           'addLocalTracks',
         ]);
-        assert.deepStrictEqual(fixture.events, [{ _tag: 'PeerDeparted', peerId: bob }]);
+        assert.deepStrictEqual(fixture.events, [roomOpened, { _tag: 'PeerDeparted', peerId: bob }]);
 
         const replacementPeerConnection = fixture.peerConnections[1]!;
         yield* fixture.actor({
@@ -1598,6 +1888,7 @@ describe('peer-session actor', () => {
         assert.notInclude(fixture.operations, 'sendSignal:ice:stale-ice');
         assert.include(fixture.operations, 'sendSignal:ice:current-ice');
         assert.deepStrictEqual(fixture.events, [
+          roomOpened,
           { _tag: 'PeerDeparted', peerId: bob },
           { _tag: 'Connected', peerId: charlie },
           { _tag: 'ChatReady' },
@@ -1625,7 +1916,7 @@ describe('peer-session actor', () => {
         yield* fixture.actor({ _tag: 'SendMessage', message: 'too early' });
         yield* fixture.actor({
           _tag: 'RoomEvent',
-          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+          event: openedEvent(bob),
         });
         yield* fixture.actor({
           _tag: 'RoomEvent',
@@ -1644,7 +1935,7 @@ describe('peer-session actor', () => {
         });
 
         assert.lengthOf(fixture.signals, 1);
-        assert.deepStrictEqual(fixture.events, []);
+        assert.deepStrictEqual(fixture.events, [roomOpened]);
         assert.notInclude(fixture.operations, 'sendDataChannelMessage:too early');
         assert.notInclude(fixture.operations, 'setRemoteDescription:answer:wrong-peer');
         assert.notInclude(fixture.operations, 'closePeerConnection');
@@ -1659,7 +1950,7 @@ describe('peer-session actor', () => {
 
         yield* fixture.actor({
           _tag: 'RoomEvent',
-          event: new RoomSessionOpenedEvent({ peerId: null, sessionToken: testSessionToken }),
+          event: openedEvent(null),
         });
         yield* fixture.actor({ _tag: 'RoomEvent', event: new PeerJoinedEvent({ peerId: bob }) });
         yield* fixture.actor({
@@ -1695,7 +1986,7 @@ describe('peer-session actor', () => {
 
         yield* fixture.actor({
           _tag: 'RoomEvent',
-          event: new RoomSessionOpenedEvent({ peerId: null, sessionToken: testSessionToken }),
+          event: openedEvent(null),
         });
         yield* fixture.actor({ _tag: 'RoomEvent', event: new PeerJoinedEvent({ peerId: bob }) });
         yield* fixture.actor({
@@ -1723,7 +2014,7 @@ describe('peer-session actor', () => {
 
         yield* fixture.actor({
           _tag: 'RoomEvent',
-          event: new RoomSessionOpenedEvent({ peerId: null, sessionToken: testSessionToken }),
+          event: openedEvent(null),
         });
         yield* fixture.actor({
           _tag: 'PeerConnectionFailed',
@@ -1736,7 +2027,7 @@ describe('peer-session actor', () => {
 
         // A failure while waiting stays generation-scoped: no failure event is
         // emitted after the initial waiting state, and the connection is replaced.
-        assert.deepStrictEqual(fixture.events, [{ _tag: 'WaitingForPeer' }]);
+        assert.deepStrictEqual(fixture.events, [roomOpened, { _tag: 'WaitingForPeer' }]);
         assert.deepStrictEqual(
           fixture.operations.filter((operation) => operation === 'acquirePeerConnection').length,
           2,
@@ -1753,7 +2044,7 @@ describe('peer-session actor', () => {
 
         yield* fixture.actor({
           _tag: 'RoomEvent',
-          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+          event: openedEvent(bob),
         });
         yield* fixture.actor({
           _tag: 'PeerConnectionConnected',
@@ -1770,6 +2061,7 @@ describe('peer-session actor', () => {
         });
 
         assert.deepStrictEqual(fixture.events, [
+          roomOpened,
           { _tag: 'Connected', peerId: bob },
           { _tag: 'PeerInterrupted', peerId: bob },
           { _tag: 'PeerRestored', peerId: bob },
@@ -1785,7 +2077,7 @@ describe('peer-session actor', () => {
 
         yield* fixture.actor({
           _tag: 'RoomEvent',
-          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+          event: openedEvent(bob),
         });
         // A pre-connect connectivity blip is covered by negotiation/transport
         // handling, not the reconnecting projection.
@@ -1794,7 +2086,7 @@ describe('peer-session actor', () => {
           peerConnection: fixture.peerConnection,
         });
 
-        assert.deepStrictEqual(fixture.events, []);
+        assert.deepStrictEqual(fixture.events, [roomOpened]);
       }),
     ).pipe(Effect.orDie),
   );
@@ -1809,7 +2101,7 @@ describe('peer-session actor', () => {
 
         yield* fixture.actor({
           _tag: 'RoomEvent',
-          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+          event: openedEvent(bob),
         });
         yield* fixture.actor({
           _tag: 'PeerConnectionConnected',
@@ -1829,6 +2121,7 @@ describe('peer-session actor', () => {
         });
 
         assert.deepStrictEqual(fixture.events, [
+          roomOpened,
           { _tag: 'Connected', peerId: bob },
           { _tag: 'ChatReady' },
           { _tag: 'ChatUnavailable' },
@@ -1848,7 +2141,7 @@ describe('peer-session actor', () => {
 
         yield* fixture.actor({
           _tag: 'RoomEvent',
-          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+          event: openedEvent(bob),
         });
         yield* fixture.actor({
           _tag: 'RemoteTrackReceived',
@@ -1862,6 +2155,7 @@ describe('peer-session actor', () => {
         });
 
         assert.deepStrictEqual(fixture.events, [
+          roomOpened,
           { _tag: 'RemoteStreamReady', stream: remoteStream },
         ]);
       }),
@@ -1875,18 +2169,24 @@ describe('peer-session actor', () => {
 
         yield* fixture.actor({
           _tag: 'RoomEvent',
-          event: new RoomSessionOpenedEvent({ peerId: null, sessionToken: testSessionToken }),
+          event: openedEvent(null),
         });
         yield* fixture.actor({
           _tag: 'RoomEvent',
-          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+          event: openedEvent(bob),
         });
 
         assert.lengthOf(
           fixture.operations.filter((operation) => operation === 'acquirePeerConnection'),
           1,
         );
-        assert.deepStrictEqual(fixture.events, [{ _tag: 'WaitingForPeer' }]);
+        // A duplicate open re-surfaces the roomId before the ignore guard, so
+        // RoomOpened is emitted again while the connection is not re-acquired.
+        assert.deepStrictEqual(fixture.events, [
+          roomOpened,
+          { _tag: 'WaitingForPeer' },
+          roomOpened,
+        ]);
       }),
     ).pipe(Effect.orDie),
   );
@@ -1911,7 +2211,7 @@ describe('peer-session actor', () => {
 
         yield* fixture.actor({
           _tag: 'RoomEvent',
-          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+          event: openedEvent(bob),
         });
         yield* fixture.actor({
           _tag: 'RoomEvent',
@@ -1937,7 +2237,7 @@ describe('peer-session actor', () => {
 
         yield* fixture.actor({
           _tag: 'RoomEvent',
-          event: new RoomSessionOpenedEvent({ peerId: null, sessionToken: testSessionToken }),
+          event: openedEvent(null),
         });
         yield* fixture.actor({ _tag: 'RoomEvent', event: new PeerJoinedEvent({ peerId: bob }) });
         yield* fixture.actor({
@@ -1964,7 +2264,7 @@ describe('peer-session actor', () => {
 
         yield* fixture.actor({
           _tag: 'RoomEvent',
-          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+          event: openedEvent(bob),
         });
         yield* fixture.actor({
           _tag: 'PeerConnectionFailed',
@@ -2006,7 +2306,7 @@ describe('peer-session actor', () => {
         });
         yield* fixture.actor({
           _tag: 'RoomEvent',
-          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+          event: openedEvent(bob),
         });
         yield* fixture.actor({
           _tag: 'PeerConnectionConnected',
@@ -2028,7 +2328,7 @@ describe('peer-session actor', () => {
 
         yield* fixture.actor({
           _tag: 'RoomEvent',
-          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+          event: openedEvent(bob),
         });
         yield* fixture.actor({
           _tag: 'PeerConnectionConnected',
@@ -2054,7 +2354,7 @@ describe('peer-session actor', () => {
 
         yield* fixture.actor({
           _tag: 'RoomEvent',
-          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+          event: openedEvent(bob),
         });
         yield* fixture.actor({
           _tag: 'PeerConnectionConnected',
@@ -2084,7 +2384,7 @@ describe('peer-session actor', () => {
 
         yield* fixture.actor({
           _tag: 'RoomEvent',
-          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+          event: openedEvent(bob),
         });
         yield* fixture.actor({
           _tag: 'RoomEvent',
@@ -2117,6 +2417,7 @@ describe('peer-session actor', () => {
         assert.deepStrictEqual(
           fixture.events.map((event) => event._tag),
           [
+            'RoomOpened',
             'Connected',
             'SasReady',
             'ChatReady',
@@ -2137,7 +2438,7 @@ describe('peer-session actor', () => {
 
         yield* fixture.actor({
           _tag: 'RoomEvent',
-          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+          event: openedEvent(bob),
         });
         yield* fixture.actor({
           _tag: 'DataChannelOpened',
@@ -2166,7 +2467,7 @@ describe('peer-session actor', () => {
 
         yield* fixture.actor({
           _tag: 'RoomEvent',
-          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+          event: openedEvent(bob),
         });
         yield* fixture.actor({ _tag: 'DataChannelOpened', dataChannel: unknownDataChannel });
 
@@ -2185,7 +2486,7 @@ describe('peer-session actor', () => {
 
         yield* fixture.actor({
           _tag: 'RoomEvent',
-          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+          event: openedEvent(bob),
         });
         yield* fixture.actor({
           _tag: 'DataChannelMessageReceived',
@@ -2208,7 +2509,7 @@ describe('peer-session actor', () => {
 
         yield* fixture.actor({
           _tag: 'RoomEvent',
-          event: new RoomSessionOpenedEvent({ peerId: bob, sessionToken: testSessionToken }),
+          event: openedEvent(bob),
         });
         yield* fixture.actor({
           _tag: 'DataChannelOpened',
@@ -2227,6 +2528,44 @@ describe('peer-session actor', () => {
       }),
     ).pipe(Effect.orDie),
   );
+
+  it.effect('surfaces a join request without touching the connection', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture();
+        const displayName = DisplayName.make('Bob');
+
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new JoinRequestedEvent({ peerId: bob, displayName }),
+        });
+
+        // The knock only projects to the UI; no peer connection is acquired and
+        // no offer/answer negotiation is started.
+        assert.deepStrictEqual(fixture.events, [
+          { _tag: 'JoinRequestReceived', peerId: bob, displayName },
+        ]);
+        assert.deepStrictEqual(fixture.operations, []);
+        assert.deepStrictEqual(fixture.signals, []);
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('surfaces a pending knock to the joiner', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture();
+
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new JoinPendingEvent(),
+        });
+
+        assert.deepStrictEqual(fixture.events, [{ _tag: 'JoinPending' }]);
+        assert.deepStrictEqual(fixture.operations, []);
+      }),
+    ).pipe(Effect.orDie),
+  );
 });
 
 describe('reducePeerSessionView', () => {
@@ -2237,6 +2576,8 @@ describe('reducePeerSessionView', () => {
         messages: [{ id: 'message-1', sender: 'peer', text: 'from the previous session' }],
         chatReady: true,
         sas: '11111 22222 33333 44444 55555',
+        pendingJoinRequests: [],
+        roomId: null,
       },
       { _tag: 'SessionStarted' },
     );
@@ -2267,6 +2608,8 @@ describe('reducePeerSessionView', () => {
       messages: [{ id: 'message-1', sender: 'peer', text: 'hello' }],
       chatReady: true,
       sas: '11111 22222 33333 44444 55555',
+      pendingJoinRequests: [],
+      roomId: null,
     });
   });
 
@@ -2277,6 +2620,8 @@ describe('reducePeerSessionView', () => {
         messages: [{ id: 'message-1', sender: 'peer', text: 'hello' }],
         chatReady: true,
         sas: '11111 22222 33333 44444 55555',
+        pendingJoinRequests: [],
+        roomId: null,
       },
       { _tag: 'SignalingDisconnected' },
     );
@@ -2286,6 +2631,8 @@ describe('reducePeerSessionView', () => {
       messages: [{ id: 'message-1', sender: 'peer', text: 'hello' }],
       chatReady: true,
       sas: '11111 22222 33333 44444 55555',
+      pendingJoinRequests: [],
+      roomId: null,
     });
   });
 
@@ -2296,6 +2643,8 @@ describe('reducePeerSessionView', () => {
         messages: [],
         chatReady: true,
         sas: '11111 22222 33333 44444 55555',
+        pendingJoinRequests: [],
+        roomId: null,
       },
       { _tag: 'ChatUnavailable' },
     );
@@ -2305,6 +2654,8 @@ describe('reducePeerSessionView', () => {
       messages: [],
       chatReady: false,
       sas: '11111 22222 33333 44444 55555',
+      pendingJoinRequests: [],
+      roomId: null,
     });
   });
 
@@ -2315,6 +2666,8 @@ describe('reducePeerSessionView', () => {
         messages: [{ id: 'message-1', sender: 'self', text: 'hello' }],
         chatReady: true,
         sas: null,
+        pendingJoinRequests: [],
+        roomId: null,
       },
       { _tag: 'SessionFailed' },
     );
@@ -2324,6 +2677,8 @@ describe('reducePeerSessionView', () => {
       messages: [{ id: 'message-1', sender: 'self', text: 'hello' }],
       chatReady: true,
       sas: null,
+      pendingJoinRequests: [],
+      roomId: null,
     });
   });
 
@@ -2334,6 +2689,8 @@ describe('reducePeerSessionView', () => {
         messages: [{ id: 'message-1', sender: 'self', text: 'hello' }],
         chatReady: false,
         sas: null,
+        pendingJoinRequests: [],
+        roomId: null,
       },
       { _tag: 'RoomJoinRejected', reason: 'room-full' },
     );
@@ -2343,6 +2700,8 @@ describe('reducePeerSessionView', () => {
       messages: [{ id: 'message-1', sender: 'self', text: 'hello' }],
       chatReady: false,
       sas: null,
+      pendingJoinRequests: [],
+      roomId: null,
     });
   });
 
@@ -2353,6 +2712,8 @@ describe('reducePeerSessionView', () => {
         messages: [{ id: 'message-1', sender: 'self', text: 'hello' }],
         chatReady: false,
         sas: null,
+        pendingJoinRequests: [],
+        roomId: null,
       },
       { _tag: 'RoomJoinRejected', reason: 'peer-already-joined' },
     );
@@ -2362,6 +2723,8 @@ describe('reducePeerSessionView', () => {
       messages: [{ id: 'message-1', sender: 'self', text: 'hello' }],
       chatReady: false,
       sas: null,
+      pendingJoinRequests: [],
+      roomId: null,
     });
   });
 
@@ -2372,6 +2735,8 @@ describe('reducePeerSessionView', () => {
         messages: [{ id: 'message-1', sender: 'peer', text: 'hello' }],
         chatReady: true,
         sas: '11111 22222 33333 44444 55555',
+        pendingJoinRequests: [],
+        roomId: null,
       },
       { _tag: 'PeerDeparted', peerId: bob },
     );
@@ -2381,6 +2746,8 @@ describe('reducePeerSessionView', () => {
       messages: [{ id: 'message-1', sender: 'peer', text: 'hello' }],
       chatReady: false,
       sas: null,
+      pendingJoinRequests: [],
+      roomId: null,
     });
   });
 });
