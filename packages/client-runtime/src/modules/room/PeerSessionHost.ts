@@ -10,7 +10,6 @@ import {
   SessionDescriptionSignal,
   type RoomEvent,
   type RoomId,
-  type Signal,
   type PeerId,
 } from '@tether/contracts/modules/room';
 import { Cause, Deferred, Effect, Exit, Option, Queue, Scope, Stream } from 'effect';
@@ -21,7 +20,7 @@ import type {
   PeerSessionLocalInput,
   PeerSessionLocalInputDispatch,
 } from '../peer-session/ActorModel';
-import type { PeerSessionSignal, RoomSession } from '../peer-session/Model';
+import type { RoomSession } from '../peer-session/Model';
 import { makePeerSessionActor } from '../peer-session/PeerSession';
 import { GOOGLE_STUN_SERVERS, isPlatformError } from '../peer-session/Platform';
 import {
@@ -29,6 +28,7 @@ import {
   PeerSessionPlatform,
   PeerSessionSignaling,
 } from '../peer-session/Services';
+import { translateRoomEventData } from './Translation';
 
 export interface PeerSession {
   /** Enqueues a chat command; `true` means queued, not remotely delivered. */
@@ -38,23 +38,6 @@ export interface PeerSession {
   /** Explicitly releases room membership before the client tears down its transport. */
   readonly leave: () => Promise<void>;
 }
-
-const toPeerSessionSignal = (signal: Signal): PeerSessionSignal =>
-  signal._tag === '@tether/SessionDescriptionSignal'
-    ? {
-        _tag: 'SessionDescription',
-        type: signal.type,
-        sdp: signal.sdp,
-        negotiationEpoch: signal.negotiationEpoch,
-      }
-    : {
-        _tag: 'IceCandidate',
-        candidate: signal.candidate,
-        sdpMid: signal.sdpMid,
-        sdpMLineIndex: signal.sdpMLineIndex,
-        usernameFragment: signal.usernameFragment,
-        negotiationEpoch: signal.negotiationEpoch,
-      };
 
 /**
  * Hosts the serialized peer-session actor and owns its session-level resources.
@@ -106,38 +89,14 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
   });
 
   const translateRoomEvent = Effect.fnUntraced(function* (event: RoomEvent) {
-    switch (event._tag) {
-      case '@tether/RoomSessionOpenedEvent':
-        yield* Deferred.succeed(openedSession, {
-          roomId: event.roomId,
-          sessionToken: event.sessionToken,
-        });
-        yield* peerSessionEventSink.emit({ _tag: 'RoomOpened', roomId: event.roomId });
-        return Option.some({ _tag: 'RoomSessionOpened', peerId: event.peerId });
-      case '@tether/PeerJoinedEvent':
-        return Option.some({ _tag: 'PeerJoined', peerId: event.peerId });
-      case '@tether/PeerLeftEvent':
-        return Option.some({ _tag: 'PeerLeft', peerId: event.peerId });
-      case '@tether/SignalReceivedEvent':
-        return Option.some({
-          _tag: 'SignalReceived',
-          peerId: event.peerId,
-          signal: toPeerSessionSignal(event.signal),
-        });
-      case '@tether/JoinRequestedEvent':
-        yield* peerSessionEventSink.emit({
-          _tag: 'JoinRequestReceived',
-          peerId: event.peerId,
-          displayName: event.displayName,
-        });
-        return Option.none();
-      case '@tether/JoinPendingEvent':
-        yield* peerSessionEventSink.emit({ _tag: 'JoinPending' });
-        return Option.none();
-      case '@tether/JoinCancelledEvent':
-        yield* peerSessionEventSink.emit({ _tag: 'JoinRequestCancelled', peerId: event.peerId });
-        return Option.none();
+    const translation = translateRoomEventData(event);
+    if (translation.openedSession !== null) {
+      yield* Deferred.succeed(openedSession, translation.openedSession);
     }
+    if (translation.uiEvent !== null) {
+      yield* peerSessionEventSink.emit(translation.uiEvent);
+    }
+    return translation.input === null ? Option.none() : Option.some(translation.input);
   });
 
   const roomInputStream = client.OpenRoomSession(session).pipe(
