@@ -9,7 +9,7 @@ import {
   RespondToJoinPayload,
   SendSignalError,
   SendSignalPayload,
-} from './Schemas';
+} from './RpcSchemas';
 
 const OpenRoomSessionRpc = Rpc.make('OpenRoomSession', {
   stream: true,
