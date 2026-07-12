@@ -1,4 +1,4 @@
-import type { RoomEvent, RoomId, Signal } from '@tether/contracts/modules/room';
+import type { RoomEvent, RoomId, SessionToken, Signal } from '@tether/contracts/modules/room';
 
 import type { PeerSessionRemoteInput } from '../peer-session/ActorModel';
 import type { PeerSessionEvent, PeerSessionSignal } from '../peer-session/Model';
@@ -6,7 +6,7 @@ import type { PeerSessionEvent, PeerSessionSignal } from '../peer-session/Model'
 export type RoomEventTranslation = {
   readonly input: PeerSessionRemoteInput | null;
   readonly uiEvent: PeerSessionEvent | null;
-  readonly openedSession: { readonly roomId: RoomId; readonly sessionToken: string } | null;
+  readonly openedSession: { readonly roomId: RoomId; readonly sessionToken: SessionToken } | null;
 };
 
 const toPeerSessionSignal = (signal: Signal): PeerSessionSignal =>

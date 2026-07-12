@@ -1,6 +1,6 @@
 import { assert, describe, it } from '@effect/vitest';
 
-import { OpenRoomSessionPayload, SendSignalPayload } from './index';
+import { OpenRoomSessionPayload, RespondToJoinPayload, SendSignalPayload } from './index';
 import { sendSignalPayload, succeeds } from './test-helpers';
 
 describe('room RPC schemas', () => {
@@ -20,6 +20,24 @@ describe('room RPC schemas', () => {
       }),
     );
     assert.isTrue(succeeds(SendSignalPayload, sendSignalPayload('session-token')));
+    assert.isTrue(
+      succeeds(RespondToJoinPayload, {
+        roomId: 'abc-defg-hij',
+        selfId: 'abcdefghijkl',
+        sessionToken: 'session-token',
+        peerId: 'mnopqrstuvwx',
+        decision: 'allow',
+      }),
+    );
+    assert.isTrue(
+      succeeds(RespondToJoinPayload, {
+        roomId: 'abc-defg-hij',
+        selfId: 'abcdefghijkl',
+        sessionToken: 'session-token',
+        peerId: 'mnopqrstuvwx',
+        decision: 'deny',
+      }),
+    );
   });
 
   it('rejects payloads that violate the RPC discriminated union', () => {
@@ -27,5 +45,15 @@ describe('room RPC schemas', () => {
       succeeds(OpenRoomSessionPayload, { selfId: 'abcdefghijkl', roomId: 'abc-defg-hij' }),
     );
     assert.isFalse(succeeds(OpenRoomSessionPayload, { selfId: 'abcdefghijkl', intent: 'join' }));
+    assert.isFalse(succeeds(OpenRoomSessionPayload, { selfId: 'abcdefghijkl', intent: 'foo' }));
+    assert.isFalse(
+      succeeds(RespondToJoinPayload, {
+        roomId: 'abc-defg-hij',
+        selfId: 'abcdefghijkl',
+        sessionToken: 'session-token',
+        peerId: 'mnopqrstuvwx',
+        decision: 'maybe',
+      }),
+    );
   });
 });

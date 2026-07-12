@@ -1,4 +1,4 @@
-export { DisplayName, PeerId, RoomId } from './Identity';
+export { DisplayName, PeerId, RoomId, SessionToken } from './Identity';
 export * from './Signals';
 export * from './Events';
 export * from './Errors';

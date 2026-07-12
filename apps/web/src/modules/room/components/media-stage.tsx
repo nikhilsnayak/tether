@@ -1,7 +1,7 @@
 import { Avatar, AvatarFallback } from '@tether/ui/components/avatar';
 import { cn } from '@tether/ui/lib/utils';
 import { motion, animate, useMotionValue } from 'motion/react';
-import { type ReactNode, type RefObject, useRef } from 'react';
+import { type ReactNode, type RefObject, useEffect, useRef } from 'react';
 
 import { usePinnedDraggableTile, type TileCorner } from '../hooks/use-pinned-draggable-tile';
 
@@ -26,10 +26,15 @@ export function RemoteVideo({
   readonly sinkId: string;
   readonly muted: boolean;
 }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    attachMediaStreamVideo(videoRef.current, stream, sinkId);
+  }, [stream, sinkId]);
+
   return (
     // oxlint-disable-next-line jsx-a11y/media-has-caption -- live call has no captions
     <video
-      ref={(video) => attachMediaStreamVideo(video, stream, sinkId)}
+      ref={videoRef}
       aria-label='Remote video'
       autoPlay
       muted={muted}
@@ -105,10 +110,15 @@ export function SelfVideo({
   readonly cameraOn: boolean;
   readonly selfId: string;
 }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    attachMediaStreamVideo(videoRef.current, stream);
+  }, [stream]);
+
   return (
     <>
       <video
-        ref={(video) => attachMediaStreamVideo(video, stream)}
+        ref={videoRef}
         aria-label='Local video preview'
         autoPlay
         muted

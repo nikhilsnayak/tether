@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -17,7 +18,7 @@ export function CallStatusScreen({
   readonly pillLabel: string;
   readonly label: string;
   readonly hint: string;
-  readonly action?: React.ReactNode;
+  readonly action?: ReactNode;
 }) {
   return (
     <SafeAreaView style={styles.screen}>

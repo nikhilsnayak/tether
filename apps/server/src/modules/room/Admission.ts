@@ -10,6 +10,7 @@ import {
   RoomFull,
   RoomNotFound,
   RoomSessionOpenedEvent,
+  SessionToken,
   type DisplayName,
   type PeerId,
   type RoomEvent,
@@ -151,7 +152,7 @@ export class RoomAdmission extends Context.Service<RoomAdmission>()(
               return { _tag: 'deny', deferred: pendingEntry.deferred } as RespondAction;
             }
 
-            const newToken = yield* randomSessionToken;
+            const newToken = SessionToken.make(yield* randomSessionToken);
             const signalBucket = yield* makeSignalBucket;
             context.members = [
               ...context.members,

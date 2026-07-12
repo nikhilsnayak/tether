@@ -4,6 +4,7 @@ import type {
   PeerId,
   RoomEvent,
   RoomId,
+  SessionToken,
 } from '@tether/contracts/modules/room';
 import type { Deferred, Queue, Stream } from 'effect';
 
@@ -13,13 +14,13 @@ export type BroadcastRoomEvent = Exclude<RoomEvent, { readonly _tag: '@tether/Jo
 
 export type Member = {
   readonly peerId: PeerId;
-  readonly sessionToken: string;
+  readonly sessionToken: SessionToken;
   readonly signalBucket: TokenBucket;
   readonly events: Queue.Queue<BroadcastRoomEvent>;
 };
 
 export type AdmitResult = {
-  readonly sessionToken: string;
+  readonly sessionToken: SessionToken;
   readonly hostPeerId: PeerId;
   readonly events: Queue.Queue<BroadcastRoomEvent>;
 };

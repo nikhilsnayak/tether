@@ -46,7 +46,7 @@ export function AudioOutputModal({
     >
       <View style={styles.backdrop}>
         <Pressable accessibilityLabel='Close audio output' onPress={onClose} style={styles.scrim} />
-        <View accessibilityRole='menu' style={styles.sheet}>
+        <View accessibilityRole='radiogroup' style={styles.sheet}>
           <View style={styles.header}>
             <Text style={styles.title}>Audio output</Text>
             <Pressable accessibilityLabel='Close audio output' onPress={onClose} hitSlop={8}>

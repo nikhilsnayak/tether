@@ -59,7 +59,7 @@ export const SendSignalPayload = Schema.Struct({
   signal: Signal,
 });
 
-export const SendSignalError = Schema.Union([PeerNotInRoom]);
+export const SendSignalError = PeerNotInRoom;
 
 export const LeaveRoomPayload = Schema.Struct({
   selfId: PeerId,

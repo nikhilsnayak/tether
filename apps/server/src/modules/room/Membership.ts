@@ -5,6 +5,7 @@ import {
   RoomId,
   RoomSessionOpenedEvent,
   ServerAtCapacity,
+  SessionToken,
   type PeerId,
   type RoomEvent,
 } from '@tether/contracts/modules/room';
@@ -119,12 +120,19 @@ export class RoomMembership extends Context.Service<RoomMembership>()(
                 sessionToken: randomSessionToken,
               }).pipe(
                 Effect.flatMap(({ events, signalBucket, sessionToken }) => {
+                  const brandedSessionToken = SessionToken.make(sessionToken);
                   state.set(roomId, {
-                    members: [{ peerId: selfId, sessionToken, signalBucket, events }],
+                    members: [
+                      { peerId: selfId, sessionToken: brandedSessionToken, signalBucket, events },
+                    ],
                     pending: [],
                   });
                   const eventStream = Stream.fromArray<RoomEvent>([
-                    new RoomSessionOpenedEvent({ peerId: null, sessionToken, roomId }),
+                    new RoomSessionOpenedEvent({
+                      peerId: null,
+                      sessionToken: brandedSessionToken,
+                      roomId,
+                    }),
                   ]).pipe(Stream.concat(Stream.fromQueue(events)));
                   return Effect.logInfo('Room session opened').pipe(
                     Effect.annotateLogs('occupancy', 1),

@@ -11,6 +11,7 @@ import {
   type RoomEvent,
   type RoomId,
   type PeerId,
+  type SessionToken,
 } from '@tether/contracts/modules/room';
 import { Cause, Deferred, Effect, Exit, Option, Queue, Scope, Stream } from 'effect';
 
@@ -54,7 +55,7 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
   const actorScope = yield* Scope.fork(sessionScope);
   const openedSession = yield* Deferred.make<{
     readonly roomId: RoomId;
-    readonly sessionToken: string;
+    readonly sessionToken: SessionToken;
   }>();
   const localInputQueue = yield* Queue.unbounded<PeerSessionLocalInput>();
   const dispatchLocalInput: PeerSessionLocalInputDispatch = (input) => {
@@ -209,11 +210,11 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
   );
 
   let leavePromise: Promise<void> | undefined;
-  const leaveEffect = Deferred.await(openedSession).pipe(
-    Effect.flatMap(({ roomId, sessionToken }) =>
-      client.LeaveRoom({ selfId: session.selfId, roomId, sessionToken }),
-    ),
-  );
+  const leaveEffect = Effect.gen(function* () {
+    if (!(yield* Deferred.isDone(openedSession))) return;
+    const { roomId, sessionToken } = yield* Deferred.await(openedSession);
+    yield* client.LeaveRoom({ selfId: session.selfId, roomId, sessionToken });
+  });
 
   return {
     sendMessage: (message) =>

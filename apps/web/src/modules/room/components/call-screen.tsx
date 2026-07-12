@@ -49,6 +49,7 @@ export function CallScreen({
       <CallSessionErrorScreen
         indicatorClassName={statusIndicatorClassName(presentation)}
         label={presentation.label}
+        pillLabel='Failed'
         hint={presentation.hint}
         onLeaveRoom={onLeaveRoom}
       />

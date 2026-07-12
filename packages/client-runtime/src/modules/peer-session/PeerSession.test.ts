@@ -18,6 +18,7 @@ import {
   RoomSessionOpenedEvent,
   ServerAtCapacity,
   SessionDescriptionSignal,
+  SessionToken,
   SignalReceivedEvent,
   type RoomEvent,
   type Signal,
@@ -81,7 +82,7 @@ const bob = PeerId.make('bbbbbbbbbbbb');
 const bobName = DisplayName.make('Bob');
 const charlie = PeerId.make('cccccccccccc');
 const mallory = PeerId.make('mmmmmmmmmmmm');
-const testSessionToken = 'test-session-token';
+const testSessionToken = SessionToken.make('test-session-token');
 const openedEvent = (peerId: PeerId | null) =>
   new RoomSessionOpenedEvent({
     peerId,
@@ -478,7 +479,7 @@ describe('startPeerSession', () => {
     ),
   );
 
-  it.effect('defers an early leave until the room opens', () =>
+  it.effect('resolves an early leave without waiting for the room to open', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const roomEventQueue = yield* Queue.unbounded<{ readonly event: RoomEvent }>();
@@ -492,13 +493,9 @@ describe('startPeerSession', () => {
 
         assert.notInclude(fixture.operations, 'leaveRoom');
 
-        yield* Queue.offer(roomEventQueue, { event: openedEvent(null) });
         yield* Effect.promise(() => leavePromise);
 
-        assert.lengthOf(
-          fixture.operations.filter((operation) => operation === 'leaveRoom'),
-          1,
-        );
+        assert.notInclude(fixture.operations, 'leaveRoom');
       }),
     ),
   );

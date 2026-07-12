@@ -11,6 +11,7 @@ import {
   RoomId,
   RoomSessionOpenedEvent,
   SessionDescriptionSignal,
+  SessionToken,
   SignalReceivedEvent,
 } from '@tether/contracts/modules/room';
 
@@ -18,7 +19,7 @@ import { translateRoomEventData } from './Translation';
 
 const peerId = PeerId.make('bbbbbbbbbbbb');
 const roomId = RoomId.make('abc-defg-hij');
-const sessionToken = 'session-token';
+const sessionToken = SessionToken.make('session-token');
 
 describe('translateRoomEventData', () => {
   it('translates a room opening into session, UI, and authentication data', () => {

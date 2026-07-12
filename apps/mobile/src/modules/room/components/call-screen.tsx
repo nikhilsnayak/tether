@@ -10,7 +10,7 @@ import {
 import type { PeerId } from '@tether/contracts/modules/room';
 import { useKeepAwake } from 'expo-keep-awake';
 import { useState } from 'react';
-import { StyleSheet } from 'react-native';
+import { Alert, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { colors } from '@/lib/theme';
@@ -73,7 +73,12 @@ export function CallScreen({
       await selectAudioRoute(route);
       setRemoteAudioOn(true);
       setAudioOutputOpen(false);
-    } catch {}
+    } catch (error) {
+      Alert.alert(
+        'Audio output unavailable',
+        error instanceof Error ? error.message : 'The selected audio output could not be used.',
+      );
+    }
   };
   const answerJoin = (peerId: PeerId, decision: 'allow' | 'deny') => {
     setHandlingJoinPeerIds((current) => new Set(current).add(peerId));
