@@ -194,8 +194,9 @@ e2e/               Playwright browser tests for complete two-peer flows
 
 The main implementation boundaries are:
 
-- [`apps/server/src/modules/room`](apps/server/src/modules/room) — ephemeral room membership, pending admission queues, authenticated signaling, limits, and event delivery.
-- [`packages/client-runtime/src/modules/room`](packages/client-runtime/src/modules/room) — React-independent admission state, negotiation, reconnection, safety-code derivation, chat, and resource ownership.
+- [`apps/server/src/modules/room`](apps/server/src/modules/room) — the public room service facade plus registry, membership, admission, broadcast, and authenticated-signaling operations.
+- [`packages/client-runtime/src/modules/room`](packages/client-runtime/src/modules/room) — React-independent room orchestration, admission events, presentation state, and resource ownership.
+- [`packages/client-runtime/src/modules/peer-session`](packages/client-runtime/src/modules/peer-session) — the React-free platform-neutral actor for WebRTC negotiation, reconnection, safety-code derivation, chat, and transport state.
 - [`apps/web/src/modules/room`](apps/web/src/modules/room) — browser WebRTC integration and the call interface.
 - [`apps/mobile/src/modules/room`](apps/mobile/src/modules/room) — react-native-webrtc integration and the native call interface.
 - [`packages/contracts/src/modules/room`](packages/contracts/src/modules/room) — shared wire schemas and RPC definitions.
