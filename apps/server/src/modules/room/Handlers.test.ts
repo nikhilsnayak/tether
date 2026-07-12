@@ -13,6 +13,7 @@ import {
   RoomRpcs,
   RoomSessionOpenedEvent,
   ServerAtCapacity,
+  SessionToken,
   SessionDescriptionSignal,
   SignalReceivedEvent,
 } from '@tether/contracts/modules/room';
@@ -61,9 +62,9 @@ const connect = (
 ) =>
   Effect.gen(function* () {
     const roomIdDeferred = yield* Deferred.make<RoomId>();
-    const aliceTokenDeferred = yield* Deferred.make<string>();
+    const aliceTokenDeferred = yield* Deferred.make<SessionToken>();
     const knockDeferred = yield* Deferred.make<void>();
-    const bobTokenDeferred = yield* Deferred.make<string>();
+    const bobTokenDeferred = yield* Deferred.make<SessionToken>();
 
     const hostStream = client.OpenRoomSession({ selfId: alice, intent: 'host' });
     const aliceFiber = yield* (
@@ -183,7 +184,7 @@ describe('RoomHandlers', () => {
         .SendSignal({
           roomId,
           selfId: mallory,
-          sessionToken: 'invalid-session-token',
+          sessionToken: SessionToken.make('invalid-session-token'),
           signal: new SessionDescriptionSignal({
             negotiationEpoch: 0,
             type: 'offer',
@@ -267,7 +268,7 @@ describe('RoomHandlers', () => {
     Effect.gen(function* () {
       const client = yield* makeClient;
       const roomIdDeferred = yield* Deferred.make<RoomId>();
-      const aliceTokenDeferred = yield* Deferred.make<string>();
+      const aliceTokenDeferred = yield* Deferred.make<SessionToken>();
       const knockDeferred = yield* Deferred.make<void>();
 
       yield* client.OpenRoomSession({ selfId: alice, intent: 'host' }).pipe(
@@ -316,7 +317,7 @@ describe('RoomHandlers', () => {
         .RespondToJoin({
           roomId,
           selfId: alice,
-          sessionToken: 'wrong-session-token',
+          sessionToken: SessionToken.make('wrong-session-token'),
           peerId: charlie,
           decision: 'allow',
         })

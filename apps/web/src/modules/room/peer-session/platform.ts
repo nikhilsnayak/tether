@@ -6,8 +6,8 @@ import {
   type MediaStreamHandle,
   type PeerConnectionHandle,
   type PlatformEventDispatch,
-} from '@tether/client-runtime/modules/room';
-import type { IceServer } from '@tether/client-runtime/modules/room';
+} from '@tether/client-runtime/modules/peer-session';
+import type { IceServer } from '@tether/client-runtime/modules/peer-session';
 import { Crypto, Effect, Layer } from 'effect';
 
 export const webCryptoLayer = Layer.succeed(

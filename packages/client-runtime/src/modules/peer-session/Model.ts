@@ -1,36 +1,8 @@
 import type { DisplayName, PeerId, RoomId } from '@tether/contracts/modules/room';
-import { Data, Predicate } from 'effect';
-
-export const CHAT_CHANNEL_LABEL = 'chat';
 
 export interface IceServer {
   readonly urls: ReadonlyArray<string>;
 }
-
-export const GOOGLE_STUN_SERVERS: ReadonlyArray<IceServer> = [
-  { urls: ['stun:stun.l.google.com:19302'] },
-];
-
-export type PlatformOperation =
-  | 'acquire-peer-connection'
-  | 'acquire-local-media'
-  | 'add-local-tracks'
-  | 'create-data-channel'
-  | 'create-offer'
-  | 'create-answer'
-  | 'set-local-description'
-  | 'set-remote-description'
-  | 'add-ice-candidate'
-  | 'send-message';
-
-/** Identifies the failed WebRTC step without inspecting its untyped cause. */
-export class PlatformError extends Data.TaggedError('PlatformError')<{
-  readonly operation: PlatformOperation;
-  readonly cause: unknown;
-}> {}
-
-export const isPlatformError = (u: unknown): u is PlatformError =>
-  Predicate.isTagged(u, 'PlatformError');
 
 // Mirrors OpenRoomSessionPayload: a host mints its room server-side and sends
 // no roomId; a joiner names the room and itself. The minted id arrives in
@@ -56,6 +28,15 @@ export interface IceCandidate {
   readonly sdpMLineIndex: number | null;
   readonly usernameFragment: string | null;
 }
+
+export type PeerSessionSignal =
+  | {
+      readonly _tag: 'SessionDescription';
+      readonly type: 'offer' | 'answer';
+      readonly sdp: string;
+      readonly negotiationEpoch: number;
+    }
+  | ({ readonly _tag: 'IceCandidate'; readonly negotiationEpoch: number } & IceCandidate);
 
 export interface PeerConnectionHandle {
   readonly value: unknown;
@@ -234,80 +215,3 @@ export interface PeerSessionView {
   /** Host side: ordered knocks that have not yet been handled or withdrawn. */
   readonly pendingJoinRequests: ReadonlyArray<JoinRequestClaim>;
 }
-
-export const initialPeerSessionView: PeerSessionView = {
-  status: 'connecting',
-  messages: [],
-  chatReady: false,
-  sas: null,
-  roomId: null,
-  pendingJoinRequests: [],
-};
-
-export const reducePeerSessionView = (
-  view: PeerSessionView,
-  event: PeerSessionEvent,
-): PeerSessionView => {
-  switch (event._tag) {
-    case 'SessionStarted':
-      return initialPeerSessionView;
-    case 'LocalStreamReady':
-    case 'RemoteStreamReady':
-      // Live media handles are projected into dedicated atoms by the platform
-      // UI layer; they are not part of the serializable view.
-      return view;
-    case 'WaitingForPeer':
-      return { ...view, status: 'waiting-for-peer' };
-    case 'Connected':
-      return { ...view, status: 'connected' };
-    case 'ChatReady':
-      return { ...view, chatReady: true };
-    case 'ChatUnavailable':
-      return { ...view, chatReady: false };
-    case 'ChatMessageAdded':
-      return { ...view, messages: [...view.messages, event.message] };
-    case 'SasReady':
-      return { ...view, sas: event.code };
-    case 'SignalingDisconnected':
-      return { ...view, status: 'disconnected' };
-    case 'SessionFailed':
-      return { ...view, status: 'failed' };
-    case 'TransportLost':
-      return { ...view, status: 'transport-lost', chatReady: false, sas: null };
-    case 'NegotiationStalled':
-      return { ...view, status: 'negotiation-stalled' };
-    // Hide verification while transport is interrupted. A replacement
-    // connection mints fresh certificates; a transient recovery re-emits it.
-    case 'PeerInterrupted':
-      return { ...view, status: 'reconnecting', chatReady: false, sas: null };
-    case 'PeerRestored':
-      return { ...view, status: 'connected' };
-    case 'RoomOpened':
-      return { ...view, roomId: event.roomId };
-    case 'RoomJoinRejected':
-      return { ...view, status: event.reason };
-    case 'JoinRequestReceived':
-      return view.pendingJoinRequests.some((request) => request.peerId === event.peerId)
-        ? view
-        : {
-            ...view,
-            pendingJoinRequests: [
-              ...view.pendingJoinRequests,
-              { peerId: event.peerId, displayName: event.displayName },
-            ],
-          };
-    case 'JoinPending':
-      return { ...view, status: 'awaiting-approval' };
-    case 'JoinRequestCancelled':
-    case 'JoinRequestHandled': {
-      const pendingJoinRequests = view.pendingJoinRequests.filter(
-        (request) => request.peerId !== event.peerId,
-      );
-      return pendingJoinRequests.length === view.pendingJoinRequests.length
-        ? view
-        : { ...view, pendingJoinRequests };
-    }
-    case 'PeerDeparted':
-      return { ...view, status: 'waiting-for-peer', chatReady: false, sas: null };
-  }
-};

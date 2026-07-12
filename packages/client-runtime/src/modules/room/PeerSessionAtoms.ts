@@ -2,13 +2,12 @@ import { Effect, Layer } from 'effect';
 import { Atom, AtomRegistry } from 'effect/unstable/reactivity';
 
 import {
-  initialPeerSessionView,
-  reducePeerSessionView,
   type MediaStreamHandle,
   type PeerSessionEvent,
   type PeerSessionView,
-} from './PeerSessionModel';
-import { PeerSessionEventSink } from './PeerSessionServices';
+} from '../peer-session/Model';
+import { PeerSessionEventSink } from '../peer-session/Services';
+import { initialPeerSessionView, reducePeerSessionView } from '../peer-session/View';
 
 // The sink writes state before the suspended UI subscribes. Keeping these atoms
 // alive preserves early events such as the offerer's immediate Connected event.

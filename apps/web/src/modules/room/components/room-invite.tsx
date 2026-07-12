@@ -1,3 +1,5 @@
+import { useAtomValue } from '@effect/atom-react';
+import { peerSessionViewAtom } from '@tether/client-runtime/modules/room';
 import { Button } from '@tether/ui/components/button';
 import { Input } from '@tether/ui/components/input';
 import { toast } from '@tether/ui/components/toast';
@@ -6,30 +8,21 @@ import { useState } from 'react';
 
 const DEFAULT_WEB_URL = 'https://tether.nikhilsnayak.dev';
 
-export function RoomInviteCard({
-  open,
-  onClose,
-  roomId,
-}: {
-  readonly open: boolean;
-  readonly onClose: () => void;
-  readonly roomId: string;
-}) {
+export function RoomInvite() {
+  const view = useAtomValue(peerSessionViewAtom);
+  const [closed, setClosed] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  if (!open) {
-    return null;
-  }
+  if (view.roomId === null || closed) return null;
 
   const roomUrl = new URL(
-    `/room/${encodeURIComponent(roomId)}`,
+    `/room/${encodeURIComponent(view.roomId)}`,
     import.meta.env.VITE_WEB_URL ??
       (window.location.protocol === 'http:' || window.location.protocol === 'https:'
         ? window.location.origin
         : DEFAULT_WEB_URL),
   ).href;
   const canShare = typeof navigator.share === 'function';
-
   const copyRoomUrl = async () => {
     try {
       await navigator.clipboard.writeText(roomUrl);
@@ -39,7 +32,6 @@ export function RoomInviteCard({
       toast.error('Could not copy the room link');
     }
   };
-
   const shareRoomUrl = async () => {
     try {
       await navigator.share({
@@ -63,17 +55,15 @@ export function RoomInviteCard({
         <span className='text-muted-foreground font-mono text-[11px] tracking-[0.2em] uppercase'>
           Room ready
         </span>
-        <Button aria-label='Close' variant='ghost' size='icon-sm' onClick={onClose}>
+        <Button aria-label='Close' variant='ghost' size='icon-sm' onClick={() => setClosed(true)}>
           <X />
         </Button>
       </div>
-
       <div className='space-y-3 p-4'>
         <p className='text-sm leading-6'>
           Send this link to the one person you want to call. They enter a name and knock; you let
           them in.
         </p>
-
         <div className='flex gap-2'>
           <Input
             aria-label='Room invite link'
@@ -87,7 +77,6 @@ export function RoomInviteCard({
             <span className='hidden sm:inline'>{copied ? 'Copied' : 'Copy'}</span>
           </Button>
         </div>
-
         {canShare && (
           <Button className='w-full' onClick={() => void shareRoomUrl()}>
             <Share2 />

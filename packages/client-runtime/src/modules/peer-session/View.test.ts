@@ -1,15 +1,8 @@
 import { DisplayName, PeerId, RoomId } from '@tether/contracts/modules/room';
 import { assert, describe, it } from 'vitest';
 
-import {
-  initialPeerSessionView,
-  isPlatformError,
-  PlatformError,
-  reducePeerSessionView,
-  type MediaStreamHandle,
-  type PeerSessionEvent,
-  type PeerSessionView,
-} from './PeerSessionModel';
+import { type MediaStreamHandle, type PeerSessionEvent, type PeerSessionView } from './Model';
+import { initialPeerSessionView, reducePeerSessionView } from './View';
 
 const connectedView: PeerSessionView = {
   status: 'connected',
@@ -22,13 +15,6 @@ const connectedView: PeerSessionView = {
 const peerId = PeerId.make('pppppppppppp');
 
 describe('reducePeerSessionView', () => {
-  it('identifies platform errors', () => {
-    assert.isTrue(
-      isPlatformError(new PlatformError({ operation: 'create-offer', cause: 'failed' })),
-    );
-    assert.isFalse(isPlatformError(new Error('failed')));
-  });
-
   it('keeps media handles outside the serializable view', () => {
     const stream: MediaStreamHandle = { value: {} };
 

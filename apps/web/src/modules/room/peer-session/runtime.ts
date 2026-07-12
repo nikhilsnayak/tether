@@ -1,8 +1,5 @@
-import {
-  peerSessionEventSinkLayer,
-  startPeerSession,
-  type RoomSession,
-} from '@tether/client-runtime/modules/room';
+import type { RoomSession } from '@tether/client-runtime/modules/peer-session';
+import { peerSessionEventSinkLayer, startPeerSession } from '@tether/client-runtime/modules/room';
 import { Layer } from 'effect';
 import { Atom } from 'effect/unstable/reactivity';
 

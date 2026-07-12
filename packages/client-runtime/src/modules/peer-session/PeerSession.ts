@@ -1,33 +1,25 @@
-import {
-  IceCandidateSignal,
-  SessionDescriptionSignal,
-  type PeerId,
-  type RoomEvent,
-  type RoomId,
-  type Signal,
-} from '@tether/contracts/modules/room';
-import { Crypto, Deferred, Duration, Effect, Exit, Scope } from 'effect';
+import type { PeerId } from '@tether/contracts/modules/room';
+import { Crypto, Duration, Effect, Exit, Scope } from 'effect';
 
-import { AppClient } from '../../AppClient';
+import { deriveSasCode } from '../call-verification';
 import type {
   PeerConnectionGeneration,
   PeerSessionActorState,
   PeerSessionInput,
   PeerSessionLocalInputDispatch,
-} from './PeerSessionActorModel';
+} from './ActorModel';
 import {
-  CHAT_CHANNEL_LABEL,
   type ChatMessage,
   type DataChannelHandle,
   type IceCandidate,
   type IceServer,
   type MediaStreamHandle,
   type PeerConnectionHandle,
-  type RoomSession,
+  type PeerSessionSignal,
   type SessionDescription,
-} from './PeerSessionModel';
-import { PeerSessionEventSink, PeerSessionPlatform } from './PeerSessionServices';
-import { deriveSasCode } from './Sas';
+} from './Model';
+import { CHAT_CHANNEL_LABEL } from './Platform';
+import { PeerSessionEventSink, PeerSessionPlatform, PeerSessionSignaling } from './Services';
 
 /**
  * How long a peer may stay mid-negotiation (offer/answer/data-channel opening)
@@ -44,26 +36,55 @@ const requireDescription = (description: SessionDescription, type: 'offer' | 'an
     : Effect.succeed({ type, sdp: description.sdp } as const);
 
 /**
- * Builds the platform-neutral actor for a peer session.
- * Inputs must be handled serially; PeerSessionHost owns that serialization.
+ * Creates the state machine for one peer session.
+ *
+ * `PeerSessionHost` serializes its inputs and owns the session lifetime.
+ * Reconnects replace the current peer-connection generation, and callbacks
+ * from older generations are ignored.
+ *
+ * ```text
+ * INPUTS                              SERIALIZED PROCESSOR
+ * room session open -> remote input --------+
+ * platform callback -> PlatformEvent -------+--> merged stream --> actor
+ * sendMessage -> SendMessage ---------------+
+ *
+ * ACTOR OUTPUTS
+ * actor --> PeerSessionSignaling --> offer / answer / ICE
+ *       --> PeerSessionPlatform --> WebRTC operations
+ *       --> PeerSessionEventSink -> UI projection events
+ *
+ * SESSION FLOW
+ *
+ * [AwaitingRoomSession]
+ *          |
+ *          +-- RoomSessionOpened(peerId = null) ------> [WaitingForPeer]
+ *          |                                               |
+ *          |                                               +-- PeerJoined
+ *          |                                                     -> answerer
+ *          |
+ *          +-- RoomSessionOpened(peerId = existing peer) -> offerer
+ *
+ * Both roles converge on [PeerKnown]. Session descriptions and ICE are
+ * exchanged through signaling. Data-channel messages become chat events,
+ * while connection failures replace the current generation and retry within
+ * the reconnect budget. Exhausted retries emit TransportLost; a later
+ * PeerLeft creates a fresh generation and returns to [WaitingForPeer].
+ *
+ * ICE candidates are accepted only for the active negotiation epoch, and
+ * callbacks carrying handles from closed generations are ignored.
+ * ```
  */
-const makePeerSessionActorInternal = Effect.fnUntraced(function* (
-  session: RoomSession,
+const makePeerSessionActor = Effect.fnUntraced(function* (
+  selfId: string,
   localStream: MediaStreamHandle,
   iceServers: ReadonlyArray<IceServer>,
   dispatchLocalInput: PeerSessionLocalInputDispatch,
 ) {
-  const client = yield* AppClient;
   const platform = yield* PeerSessionPlatform;
   const eventSink = yield* PeerSessionEventSink;
+  const signaling = yield* PeerSessionSignaling;
   const crypto = yield* Crypto.Crypto;
   const actorScope = yield* Scope.Scope;
-  // Both intents learn the effective roomId and token from RoomSessionOpenedEvent.
-  // A Deferred models that one-time transition and lets early RPCs wait for it.
-  const openedSession = yield* Deferred.make<{
-    readonly roomId: RoomId;
-    readonly sessionToken: string;
-  }>();
   let nextMessageSequence = 0;
   let nextOfferEpoch = 0;
   let latestRemoteOfferEpoch: number | null = null;
@@ -72,12 +93,9 @@ const makePeerSessionActorInternal = Effect.fnUntraced(function* (
   };
 
   const makeMessageId = (sender: ChatMessage['sender']) =>
-    `${session.selfId}:${sender}:${nextMessageSequence++}`;
+    `${selfId}:${sender}:${nextMessageSequence++}`;
 
-  const sendSignal = Effect.fnUntraced(function* (signal: Signal) {
-    const { roomId, sessionToken } = yield* Deferred.await(openedSession);
-    yield* client.SendSignal({ selfId: session.selfId, roomId, sessionToken, signal });
-  });
+  const sendSignal = (signal: PeerSessionSignal) => signaling.sendSignal(signal);
 
   // Hashes the SDPs as they crossed signaling; failure downgrades to unverified.
   const emitSas = (offerSdp: string, answerSdp: string) =>
@@ -98,12 +116,15 @@ const makePeerSessionActorInternal = Effect.fnUntraced(function* (
     const created = yield* platform.createOffer(peerConnection);
     const offer = yield* requireDescription(created, 'offer');
     yield* platform.setLocalDescription(peerConnection, offer);
-    yield* sendSignal(new SessionDescriptionSignal({ ...offer, negotiationEpoch }));
+    yield* sendSignal({ _tag: 'SessionDescription', ...offer, negotiationEpoch });
     return offer.sdp;
   });
 
   const acceptOfferAndSendAnswer = Effect.fn('@tether/client-runtime/acceptOfferAndSendAnswer')(
-    function* (peerConnection: PeerConnectionHandle, signal: SessionDescriptionSignal) {
+    function* (
+      peerConnection: PeerConnectionHandle,
+      signal: Extract<PeerSessionSignal, { readonly _tag: 'SessionDescription' }>,
+    ) {
       yield* platform.setRemoteDescription(peerConnection, {
         type: 'offer',
         sdp: signal.sdp,
@@ -112,12 +133,11 @@ const makePeerSessionActorInternal = Effect.fnUntraced(function* (
       const created = yield* platform.createAnswer(peerConnection);
       const answer = yield* requireDescription(created, 'answer');
       yield* platform.setLocalDescription(peerConnection, answer);
-      yield* sendSignal(
-        new SessionDescriptionSignal({
-          ...answer,
-          negotiationEpoch: signal.negotiationEpoch,
-        }),
-      );
+      yield* sendSignal({
+        _tag: 'SessionDescription',
+        ...answer,
+        negotiationEpoch: signal.negotiationEpoch,
+      });
       return answer.sdp;
     },
   );
@@ -283,16 +303,13 @@ const makePeerSessionActorInternal = Effect.fnUntraced(function* (
     yield* armNegotiationDeadline(generation);
   });
 
-  const handleSignal = Effect.fnUntraced(function* (
-    peerId: PeerId,
-    signal: SessionDescriptionSignal | IceCandidateSignal,
-  ) {
+  const handleSignal = Effect.fnUntraced(function* (peerId: PeerId, signal: PeerSessionSignal) {
     if (state._tag !== 'PeerKnown' || peerId !== state.peerId) {
       return;
     }
 
     switch (signal._tag) {
-      case '@tether/SessionDescriptionSignal': {
+      case 'SessionDescription': {
         if (signal.type === 'offer') {
           if (state.role !== 'answerer') {
             return yield* Effect.logWarning('Ignored offer received in invalid role');
@@ -343,7 +360,7 @@ const makePeerSessionActorInternal = Effect.fnUntraced(function* (
         state = { ...state, answerSdp: signal.sdp };
         return;
       }
-      case '@tether/IceCandidateSignal': {
+      case 'IceCandidate': {
         if (signal.negotiationEpoch !== state.negotiationEpoch) {
           return yield* Effect.logWarning(
             'Ignored ICE candidate for inactive negotiation epoch',
@@ -399,37 +416,6 @@ const makePeerSessionActorInternal = Effect.fnUntraced(function* (
     yield* eventSink.emit({ _tag: 'PeerDeparted', peerId });
   });
 
-  const handleRoomEvent = Effect.fnUntraced(function* (event: RoomEvent) {
-    switch (event._tag) {
-      case '@tether/RoomSessionOpenedEvent': {
-        yield* Deferred.succeed(openedSession, {
-          roomId: event.roomId,
-          sessionToken: event.sessionToken,
-        });
-        yield* eventSink.emit({ _tag: 'RoomOpened', roomId: event.roomId });
-        return yield* handleRoomSessionOpened(event.peerId);
-      }
-      case '@tether/PeerJoinedEvent':
-        return yield* handlePeerJoined(event.peerId);
-      case '@tether/SignalReceivedEvent':
-        return yield* handleSignal(event.peerId, event.signal);
-      case '@tether/PeerLeftEvent':
-        return yield* handlePeerLeft(event.peerId);
-      // Pending-phase events precede negotiation, so they only surface to the UI
-      // and never touch the connection state machine.
-      case '@tether/JoinRequestedEvent':
-        return yield* eventSink.emit({
-          _tag: 'JoinRequestReceived',
-          peerId: event.peerId,
-          displayName: event.displayName,
-        });
-      case '@tether/JoinPendingEvent':
-        return yield* eventSink.emit({ _tag: 'JoinPending' });
-      case '@tether/JoinCancelledEvent':
-        return yield* eventSink.emit({ _tag: 'JoinRequestCancelled', peerId: event.peerId });
-    }
-  });
-
   const handleRemoteDataChannel = Effect.fnUntraced(function* (
     peerConnection: PeerConnectionHandle,
     dataChannel: DataChannelHandle,
@@ -470,9 +456,11 @@ const makePeerSessionActorInternal = Effect.fnUntraced(function* (
     if (state.negotiationEpoch === null) {
       return yield* Effect.logWarning('Ignored local ICE candidate without an active epoch');
     }
-    yield* sendSignal(
-      new IceCandidateSignal({ ...candidate, negotiationEpoch: state.negotiationEpoch }),
-    );
+    yield* sendSignal({
+      _tag: 'IceCandidate',
+      ...candidate,
+      negotiationEpoch: state.negotiationEpoch,
+    });
   });
 
   const handlePeerConnectionFailed = Effect.fnUntraced(function* (
@@ -650,8 +638,14 @@ const makePeerSessionActorInternal = Effect.fnUntraced(function* (
 
   const handleInput = Effect.fnUntraced(function* (input: PeerSessionInput) {
     switch (input._tag) {
-      case 'RoomEvent':
-        return yield* handleRoomEvent(input.event);
+      case 'RoomSessionOpened':
+        return yield* handleRoomSessionOpened(input.peerId);
+      case 'PeerJoined':
+        return yield* handlePeerJoined(input.peerId);
+      case 'SignalReceived':
+        return yield* handleSignal(input.peerId, input.signal);
+      case 'PeerLeft':
+        return yield* handlePeerLeft(input.peerId);
       case 'RemoteDataChannel':
         return yield* handleRemoteDataChannel(input.peerConnection, input.dataChannel);
       case 'LocalIceCandidate':
@@ -679,191 +673,7 @@ const makePeerSessionActorInternal = Effect.fnUntraced(function* (
     }
   });
 
-  return { handleInput, openedSession };
+  return { handleInput };
 });
 
-/**
- * Creates the state machine for one peer session.
- *
- * `PeerSessionHost` serializes its inputs and manages its lifetime. Reconnects
- * replace the current peer-connection generation, and callbacks from older
- * generations are ignored.
- *
- * ```text
- * INPUTS                              SERIALIZED PROCESSOR
- * OpenRoomSession -> RoomEvent -------------+
- * platform callback -> PlatformEvent -------+--> merged stream --> actor
- * sendMessage -> SendMessage ---------------+
- *
- * ACTOR OUTPUTS
- * actor --> SendSignal RPC ---------> offer / answer / ICE
- *       --> PeerSessionPlatform ----> WebRTC operations
- *       --> PeerSessionEventSink ---> UI projection events
- *
- * RESOURCE OWNERSHIP
- *
- * [sessionScope: owned by the host UI]
- *          |
- *          +-- [mediaScope]
- *          |     - owns local camera + microphone
- *          |     - closes when the actor terminates
- *          |
- *          +-- [actor fiber]
- *                |
- *                +-- [actorScope]
- *                      - owns replaceable connection-generation scopes
- *                      - actor owns the server-issued session-token ref
- *
- * The session scope may remain alive to display a terminal state after the
- * actor and media scopes have closed.
- *
- *
- * COMMON START
- *
- * [AwaitingRoomSession]
- *          |
- *          | RoomSessionOpened
- *          | - store the server-issued session token
- *          | - fork a connection-generation scope
- *          | - acquire and observe its peer connection
- *          |
- *          +-- peerId = null ---------> ANSWERER PATH
- *          |
- *          +-- peerId = existing -----> OFFERER PATH
- *
- *
- * ANSWERER PATH (first peer in the room)
- *
- * [WaitingForPeer]
- *          |
- *          | PeerJoined(peerId)
- *          v
- * [PeerKnown]
- *   role: answerer
- *   channel: AwaitingRemoteDataChannel
- *          |
- *          +-- SignalReceived(newer offer epoch)
- *          |     - adopt the epoch and set the remote offer
- *          |     - create and set local answer
- *          |     - SendSignal(answer with the same epoch)
- *          |
- *          +-- RemoteDataChannel(label = "chat")
- *                - observe channel events
- *                v
- * [PeerKnown]
- *   role: answerer
- *   channel: DataChannelConnecting
- *
- *
- * OFFERER PATH (second peer in the room)
- *
- * RoomSessionOpened(peerId = existing peer)
- *          |
- *          | - create and observe local "chat" data channel
- *          | - allocate the next session-local negotiation epoch
- *          | - create and set local offer
- *          | - SendSignal(offer with the allocated epoch)
- *          v
- * [PeerKnown]
- *   role: offerer
- *   channel: DataChannelConnecting
- *          |
- *          | SignalReceived(answer with the active epoch)
- *          | - set remote answer
- *
- *
- * TRANSPORT CONNECTIVITY (independent of the chat data channel)
- *
- * [PeerKnown + connection: connecting]
- *          |
- *          | PeerConnectionConnected
- *          | - emit Connected(peerId), then SasReady(code)
- *          v
- * [PeerKnown + connection: connected]
- *
- *
- * CHAT CHANNEL
- *
- * [PeerKnown + DataChannelConnecting]
- *          |
- *          | DataChannelOpened
- *          v
- * [PeerKnown + DataChannelOpen]
- *          |
- *          +-- DataChannelMessageReceived(text)
- *          |     - emit peer ChatMessageAdded
- *          |
- *          +-- SendMessage(text)
- *                - send over the data channel
- *                - emit self ChatMessageAdded
- *          |
- *          +-- DataChannelClosed
- *                - emit ChatUnavailable
- *                - keep the peer connection and media alive
- *
- *
- * ACTIVE PEER DEPARTURE
- *
- * [PeerKnown + current generation]
- *          |
- *          | PeerLeft(active peer)
- *          | - close current generation and its listeners
- *          | - acquire a fresh generation
- *          | - emit PeerDeparted(peerId)
- *          v
- * [WaitingForPeer + fresh generation]
- *
- * Queued callbacks from the closed generation retain its old opaque handle;
- * connection and channel identity checks reject them.
- *
- *
- * AUTOMATIC RECONNECTION (generation-scoped, not session-scoped)
- *
- * PeerConnectionFailed(current generation while PeerKnown)
- *   OR NegotiationDeadlineElapsed(mid-negotiation, retries remain)
- *          |
- *          | - close current generation
- *          | - acquire and observe a fresh generation
- *          | - emit PeerInterrupted(peerId)
- *          | - preserve role and increment reconnect attempts
- *          |
- *          +-- offerer: allocate a new epoch, create a fresh channel, and send a new offer
- *          |
- *          +-- answerer: await the peer's offer and remote channel
- *
- * PeerConnectionConnected resets the reconnect-attempt budget.
- *
- * PeerConnectionFailed after 2 attempts
- *          |
- *          | - close current generation
- *          | - emit TransportLost(peerId)
- *          v
- * [TransportLost(peerId) + signaling remains alive]
- *          |
- *          | PeerLeft(same peer)
- *          | - acquire a fresh generation
- *          | - emit PeerDeparted
- *          v
- * [WaitingForPeer + fresh generation]
- *
- * NegotiationDeadlineElapsed after 2 attempts
- *   -> emit NegotiationStalled(peerId)
- *
- * PeerConnectionFailed(current generation while WaitingForPeer)
- *          |
- *          | - close the failed generation
- *          | - acquire a fresh generation
- *          v
- * [WaitingForPeer + fresh generation]
- *
- *
- * ICE EXCHANGE (while PeerKnown)
- *
- * LocalIceCandidate(active epoch)
- *   -> SendSignal(ice candidate with the active epoch)
- *
- * SignalReceived(active peer, ice candidate with the active epoch)
- *   -> platform.addIceCandidate(peer connection, candidate)
- * ```
- */
-export const makePeerSessionActor = makePeerSessionActorInternal;
+export { makePeerSessionActor };

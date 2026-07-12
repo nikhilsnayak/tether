@@ -1,12 +1,12 @@
-import { useAtomValue } from '@effect/atom-react';
 import { CatchBoundary, createFileRoute, useNavigate } from '@tanstack/react-router';
-import { peerSessionViewAtom, type RoomSession } from '@tether/client-runtime/modules/room';
+import type { RoomSession } from '@tether/client-runtime/modules/room';
 import { PeerId } from '@tether/contracts/modules/room';
 import { Suspense, useState } from 'react';
 
 import { generatePeerId } from '@/lib/utils';
-import { CallErrorScreen, CallLoadingScreen, CallScreen } from '@/modules/room/components/room';
-import { RoomInviteCard } from '@/modules/room/components/room-invite-card';
+import { CallScreen } from '@/modules/room/components/call-screen';
+import { CallErrorScreen, CallLoadingScreen } from '@/modules/room/components/call-status-screens';
+import { RoomInvite } from '@/modules/room/components/room-invite';
 
 export const Route = createFileRoute('/host')({
   component: HostPage,
@@ -27,22 +27,8 @@ function HostPage() {
             void navigate({ to: '/' });
           }}
         />
-        <HostInvite />
+        <RoomInvite />
       </Suspense>
     </CatchBoundary>
-  );
-}
-
-// Reveals the invite link once the server mints the room, with a manual close.
-function HostInvite() {
-  const view = useAtomValue(peerSessionViewAtom);
-  const [closed, setClosed] = useState(false);
-
-  return (
-    <RoomInviteCard
-      open={view.roomId !== null && !closed}
-      roomId={view.roomId ?? ''}
-      onClose={() => setClosed(true)}
-    />
   );
 }

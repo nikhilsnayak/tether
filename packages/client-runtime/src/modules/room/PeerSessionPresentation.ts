@@ -1,4 +1,4 @@
-import type { PeerSessionView } from './PeerSessionModel';
+import type { PeerSessionView } from '../peer-session/Model';
 
 const ERROR_STATUSES = new Set<PeerSessionView['status']>([
   'room-full',

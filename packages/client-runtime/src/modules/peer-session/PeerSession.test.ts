@@ -18,6 +18,7 @@ import {
   RoomSessionOpenedEvent,
   ServerAtCapacity,
   SessionDescriptionSignal,
+  SessionToken,
   SignalReceivedEvent,
   type RoomEvent,
   type Signal,
@@ -26,12 +27,8 @@ import { Crypto, Deferred, Effect, Exit, Layer, Queue, Scope, Stream } from 'eff
 import { TestClock } from 'effect/testing';
 
 import { AppClient } from '../../AppClient';
-import { makePeerSessionActor } from './PeerSession';
-import { startPeerSession } from './PeerSessionHost';
+import { startPeerSession } from '../room/PeerSessionHost';
 import {
-  initialPeerSessionView,
-  PlatformError,
-  reducePeerSessionView,
   type DataChannelHandle,
   type IceServer,
   type MediaStreamHandle,
@@ -40,8 +37,11 @@ import {
   type PlatformEvent,
   type PlatformEventDispatch,
   type RoomSession,
-} from './PeerSessionModel';
-import { PeerSessionEventSink, PeerSessionPlatform } from './PeerSessionServices';
+} from './Model';
+import { makePeerSessionActor } from './PeerSession';
+import { PlatformError } from './Platform';
+import { PeerSessionEventSink, PeerSessionPlatform, PeerSessionSignaling } from './Services';
+import { initialPeerSessionView, reducePeerSessionView } from './View';
 
 interface TestPeerConnection {
   readonly id: string;
@@ -82,7 +82,7 @@ const bob = PeerId.make('bbbbbbbbbbbb');
 const bobName = DisplayName.make('Bob');
 const charlie = PeerId.make('cccccccccccc');
 const mallory = PeerId.make('mmmmmmmmmmmm');
-const testSessionToken = 'test-session-token';
+const testSessionToken = SessionToken.make('test-session-token');
 const openedEvent = (peerId: PeerId | null) =>
   new RoomSessionOpenedEvent({
     peerId,
@@ -212,6 +212,41 @@ const makeFixture = Effect.fn('makeFixture')(function* (
       ),
     )) as AppClient['Service']['RespondToJoin'];
 
+  const signaling = PeerSessionSignaling.of({
+    sendSignal: (signal) => {
+      sentSessionTokens.push(testSessionToken);
+      const wireSignal =
+        signal._tag === 'SessionDescription'
+          ? new SessionDescriptionSignal({
+              type: signal.type,
+              sdp: signal.sdp,
+              negotiationEpoch: signal.negotiationEpoch,
+            })
+          : new IceCandidateSignal({
+              candidate: signal.candidate,
+              sdpMid: signal.sdpMid,
+              sdpMLineIndex: signal.sdpMLineIndex,
+              usernameFragment: signal.usernameFragment,
+              negotiationEpoch: signal.negotiationEpoch,
+            });
+      return sendSignal !== undefined
+        ? sendSignal({
+            selfId: session.selfId,
+            roomId: session.roomId,
+            sessionToken: testSessionToken,
+            signal: wireSignal,
+          })
+        : Effect.sync(() => {
+            signals.push(wireSignal);
+            operations.push(
+              wireSignal._tag === '@tether/SessionDescriptionSignal'
+                ? `sendSignal:${wireSignal.type}:${wireSignal.sdp}`
+                : `sendSignal:ice:${wireSignal.candidate}`,
+            );
+          });
+    },
+  });
+
   const dependencies = Layer.mergeAll(
     webCrypto,
     Layer.succeed(PeerSessionPlatform, platform),
@@ -250,15 +285,86 @@ const makeFixture = Effect.fn('makeFixture')(function* (
           }),
       }),
     ),
+    Layer.succeed(PeerSessionSignaling, signaling),
   );
 
-  const actor = yield* makePeerSessionActor(session, localMediaStream, [], () => {}).pipe(
-    Effect.provide(dependencies),
-  );
+  const peerActor = yield* makePeerSessionActor(
+    session.selfId,
+    localMediaStream,
+    [],
+    () => {},
+  ).pipe(Effect.provide(dependencies));
+
+  const actor = (input: unknown): Effect.Effect<void, unknown, Scope.Scope> => {
+    if (
+      typeof input === 'object' &&
+      input !== null &&
+      '_tag' in input &&
+      input._tag === 'RoomEvent'
+    ) {
+      const event = (input as unknown as { readonly event: RoomEvent }).event;
+      switch (event._tag) {
+        case '@tether/RoomSessionOpenedEvent':
+          return Effect.gen(function* () {
+            events.push({ _tag: 'RoomOpened', roomId: event.roomId });
+            yield* Queue.offer(eventQueue, { _tag: 'RoomOpened', roomId: event.roomId });
+            yield* peerActor.handleInput({ _tag: 'RoomSessionOpened', peerId: event.peerId });
+          });
+        case '@tether/PeerJoinedEvent':
+          return peerActor.handleInput({ _tag: 'PeerJoined', peerId: event.peerId });
+        case '@tether/PeerLeftEvent':
+          return peerActor.handleInput({ _tag: 'PeerLeft', peerId: event.peerId });
+        case '@tether/SignalReceivedEvent':
+          return peerActor.handleInput({
+            _tag: 'SignalReceived',
+            peerId: event.peerId,
+            signal:
+              event.signal._tag === '@tether/SessionDescriptionSignal'
+                ? {
+                    _tag: 'SessionDescription',
+                    type: event.signal.type,
+                    sdp: event.signal.sdp,
+                    negotiationEpoch: event.signal.negotiationEpoch,
+                  }
+                : {
+                    _tag: 'IceCandidate',
+                    candidate: event.signal.candidate,
+                    sdpMid: event.signal.sdpMid,
+                    sdpMLineIndex: event.signal.sdpMLineIndex,
+                    usernameFragment: event.signal.usernameFragment,
+                    negotiationEpoch: event.signal.negotiationEpoch,
+                  },
+          });
+        case '@tether/JoinRequestedEvent':
+          return Effect.gen(function* () {
+            const output = {
+              _tag: 'JoinRequestReceived' as const,
+              peerId: event.peerId,
+              displayName: event.displayName,
+            };
+            events.push(output);
+            yield* Queue.offer(eventQueue, output);
+          });
+        case '@tether/JoinPendingEvent':
+          return Effect.gen(function* () {
+            const output = { _tag: 'JoinPending' as const };
+            events.push(output);
+            yield* Queue.offer(eventQueue, output);
+          });
+        case '@tether/JoinCancelledEvent':
+          return Effect.gen(function* () {
+            const output = { _tag: 'JoinRequestCancelled' as const, peerId: event.peerId };
+            events.push(output);
+            yield* Queue.offer(eventQueue, output);
+          });
+      }
+    }
+    return peerActor.handleInput(input as never) as Effect.Effect<void, unknown, Scope.Scope>;
+  };
 
   return {
     acquiredIceServers,
-    actor: actor.handleInput,
+    actor,
     dataChannels,
     dependencies,
     dispatchPlatformEvent: (event: PlatformEvent) => {
@@ -373,7 +479,7 @@ describe('startPeerSession', () => {
     ),
   );
 
-  it.effect('defers an early leave until the room opens', () =>
+  it.effect('resolves an early leave without waiting for the room to open', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const roomEventQueue = yield* Queue.unbounded<{ readonly event: RoomEvent }>();
@@ -387,13 +493,9 @@ describe('startPeerSession', () => {
 
         assert.notInclude(fixture.operations, 'leaveRoom');
 
-        yield* Queue.offer(roomEventQueue, { event: openedEvent(null) });
         yield* Effect.promise(() => leavePromise);
 
-        assert.lengthOf(
-          fixture.operations.filter((operation) => operation === 'leaveRoom'),
-          1,
-        );
+        assert.notInclude(fixture.operations, 'leaveRoom');
       }),
     ),
   );

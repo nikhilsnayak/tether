@@ -3,14 +3,14 @@ import { PeerId } from '@tether/contracts/modules/room';
 import { Effect, Layer } from 'effect';
 import { AtomRegistry } from 'effect/unstable/reactivity';
 
+import type { MediaStreamHandle, PeerSessionEvent } from '../peer-session/Model';
+import { PeerSessionEventSink } from '../peer-session/Services';
 import {
   peerLocalStreamAtom,
   peerRemoteStreamAtom,
   peerSessionEventSinkLayer,
   peerSessionViewAtom,
 } from './PeerSessionAtoms';
-import type { MediaStreamHandle, PeerSessionEvent } from './PeerSessionModel';
-import { PeerSessionEventSink } from './PeerSessionServices';
 
 it.effect('projects session events into the atom registry', () =>
   Effect.gen(function* () {

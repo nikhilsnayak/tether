@@ -6,8 +6,8 @@ import {
   type MediaStreamHandle,
   type PeerConnectionHandle,
   type PlatformEventDispatch,
-} from '@tether/client-runtime/modules/room';
-import type { IceServer } from '@tether/client-runtime/modules/room';
+  type IceServer,
+} from '@tether/client-runtime/modules/peer-session';
 import { Crypto, Effect, Layer } from 'effect';
 import * as ExpoCrypto from 'expo-crypto';
 import { MediaStream, RTCPeerConnection, mediaDevices } from 'react-native-webrtc';
