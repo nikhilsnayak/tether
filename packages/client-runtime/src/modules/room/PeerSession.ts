@@ -9,6 +9,7 @@ import {
 import { Crypto, Deferred, Duration, Effect, Exit, Scope } from 'effect';
 
 import { AppClient } from '../../AppClient';
+import { deriveSasCode } from '../call-verification';
 import type {
   PeerConnectionGeneration,
   PeerSessionActorState,
@@ -27,7 +28,6 @@ import {
   type SessionDescription,
 } from './PeerSessionModel';
 import { PeerSessionEventSink, PeerSessionPlatform } from './PeerSessionServices';
-import { deriveSasCode } from './Sas';
 
 /**
  * How long a peer may stay mid-negotiation (offer/answer/data-channel opening)
