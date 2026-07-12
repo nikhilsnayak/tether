@@ -1,11 +1,11 @@
 import { useAtomValue } from '@effect/atom-react';
+import type { RoomSession } from '@tether/client-runtime/modules/peer-session';
 import {
   isPeerSessionErrorStatus,
   peerLocalStreamAtom,
   peerRemoteStreamAtom,
   peerSessionStatusPresentation,
   peerSessionViewAtom,
-  type RoomSession,
 } from '@tether/client-runtime/modules/room';
 import type { PeerId } from '@tether/contracts/modules/room';
 import { useKeepAwake } from 'expo-keep-awake';

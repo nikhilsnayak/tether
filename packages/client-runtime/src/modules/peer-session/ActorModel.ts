@@ -1,7 +1,12 @@
-import type { PeerId, RoomEvent } from '@tether/contracts/modules/room';
+import type { PeerId } from '@tether/contracts/modules/room';
 import type { Scope } from 'effect';
 
-import type { DataChannelHandle, PeerConnectionHandle, PlatformEvent } from './PeerSessionModel';
+import type {
+  DataChannelHandle,
+  PeerConnectionHandle,
+  PeerSessionSignal,
+  PlatformEvent,
+} from './Model';
 
 export type PeerRole = 'offerer' | 'answerer';
 
@@ -49,6 +54,14 @@ export type PeerSessionLocalInput = PlatformEvent | PeerSessionUiCommand | PeerS
 
 export type PeerSessionLocalInputDispatch = (input: PeerSessionLocalInput) => void;
 
-export type PeerSessionInput =
-  | { readonly _tag: 'RoomEvent'; readonly event: RoomEvent }
-  | PeerSessionLocalInput;
+export type PeerSessionRemoteInput =
+  | { readonly _tag: 'RoomSessionOpened'; readonly peerId: PeerId | null }
+  | { readonly _tag: 'PeerJoined'; readonly peerId: PeerId }
+  | { readonly _tag: 'PeerLeft'; readonly peerId: PeerId }
+  | {
+      readonly _tag: 'SignalReceived';
+      readonly peerId: PeerId;
+      readonly signal: PeerSessionSignal;
+    };
+
+export type PeerSessionInput = PeerSessionRemoteInput | PeerSessionLocalInput;

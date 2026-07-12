@@ -1,4 +1,4 @@
-import type { PeerSessionView } from '@tether/client-runtime/modules/room';
+import type { PeerSessionView } from '@tether/client-runtime/modules/peer-session';
 import { SendHorizontal, X } from 'lucide-react-native';
 import { useRef, useState } from 'react';
 import {

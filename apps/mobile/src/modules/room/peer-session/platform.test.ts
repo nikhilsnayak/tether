@@ -3,7 +3,7 @@ import {
   PeerSessionPlatform,
   PlatformError,
   type PlatformEvent,
-} from '@tether/client-runtime/modules/room';
+} from '@tether/client-runtime/modules/peer-session';
 import { Crypto, Effect } from 'effect';
 import { vi } from 'vitest';
 

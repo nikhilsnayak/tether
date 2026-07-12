@@ -1,5 +1,5 @@
 import { useAtomSuspense } from '@effect/atom-react';
-import type { RoomSession } from '@tether/client-runtime/modules/room';
+import type { RoomSession } from '@tether/client-runtime/modules/peer-session';
 
 import { peerSessionAtom } from '../peer-session/runtime';
 

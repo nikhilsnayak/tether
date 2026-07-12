@@ -1,11 +1,11 @@
 import { useAtomValue } from '@effect/atom-react';
+import type { RoomSession } from '@tether/client-runtime/modules/peer-session';
 import {
   peerLocalStreamAtom,
   peerRemoteStreamAtom,
   peerSessionStatusPresentation,
   peerSessionViewAtom,
   type PeerSessionStatusPresentation,
-  type RoomSession,
 } from '@tether/client-runtime/modules/room';
 import type { PeerId } from '@tether/contracts/modules/room';
 import { Badge } from '@tether/ui/components/badge';

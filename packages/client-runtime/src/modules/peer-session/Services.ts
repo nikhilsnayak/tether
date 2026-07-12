@@ -6,11 +6,12 @@ import type {
   IceServer,
   MediaStreamHandle,
   PeerConnectionHandle,
+  PeerSessionSignal,
   PeerSessionEvent,
-  PlatformError,
   PlatformEventDispatch,
   SessionDescription,
-} from './PeerSessionModel';
+} from './Model';
+import type { PlatformError } from './Platform';
 
 /** Platform-neutral WebRTC operations used by the peer-session actor. */
 export class PeerSessionPlatform extends Context.Service<
@@ -60,7 +61,7 @@ export class PeerSessionPlatform extends Context.Service<
       message: string,
     ) => Effect.Effect<void, PlatformError>;
   }
->()('@tether/client-runtime/room/PeerSessionPlatform') {}
+>()('@tether/client-runtime/peer-session/PeerSessionPlatform') {}
 
 /** Emits platform-independent session events to the host UI. */
 export class PeerSessionEventSink extends Context.Service<
@@ -68,4 +69,11 @@ export class PeerSessionEventSink extends Context.Service<
   {
     readonly emit: (event: PeerSessionEvent) => Effect.Effect<void, unknown>;
   }
->()('@tether/client-runtime/room/PeerSessionEventSink') {}
+>()('@tether/client-runtime/peer-session/PeerSessionEventSink') {}
+
+export class PeerSessionSignaling extends Context.Service<
+  PeerSessionSignaling,
+  {
+    readonly sendSignal: (signal: PeerSessionSignal) => Effect.Effect<void, unknown>;
+  }
+>()('@tether/client-runtime/peer-session/PeerSessionSignaling') {}

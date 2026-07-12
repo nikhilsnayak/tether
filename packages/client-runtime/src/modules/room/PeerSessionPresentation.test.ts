@@ -1,6 +1,6 @@
 import { assert, describe, it } from 'vitest';
 
-import type { PeerSessionView } from './PeerSessionModel';
+import type { PeerSessionView } from '../peer-session/Model';
 import { isPeerSessionErrorStatus, peerSessionStatusPresentation } from './PeerSessionPresentation';
 
 const statuses: ReadonlyArray<PeerSessionView['status']> = [

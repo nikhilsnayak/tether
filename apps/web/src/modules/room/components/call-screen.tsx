@@ -1,10 +1,10 @@
 import { useAtomValue } from '@effect/atom-react';
+import type { RoomSession } from '@tether/client-runtime/modules/peer-session';
 import {
   isPeerSessionErrorStatus,
   peerSessionStatusPresentation,
   peerSessionViewAtom,
   type PeerSessionStatusPresentation,
-  type RoomSession,
 } from '@tether/client-runtime/modules/room';
 import { useState } from 'react';
 

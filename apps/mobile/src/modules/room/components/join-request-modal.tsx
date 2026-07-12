@@ -1,4 +1,4 @@
-import type { PeerSessionView } from '@tether/client-runtime/modules/room';
+import type { PeerSessionView } from '@tether/client-runtime/modules/peer-session';
 import type { PeerId } from '@tether/contracts/modules/room';
 import { User } from 'lucide-react-native';
 import { Modal, StyleSheet, Text, View } from 'react-native';
