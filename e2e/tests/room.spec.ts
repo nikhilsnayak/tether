@@ -3,6 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 import {
   admitGuest,
   expectConnected,
+  expectPreflightMediaReleased,
   expectWaitingForPeer,
   installWebRtcProbe,
   joinRoom,
@@ -79,6 +80,7 @@ test('complete room flow', async ({ browser, page }, testInfo) => {
       const inviteLink = page.getByRole('textbox', { name: 'Room invite link' });
       await expect(inviteLink).toHaveValue(/\/room\/[a-z]{3}-[a-z]{4}-[a-z]{3}$/);
       await expect(page.getByRole('button', { name: 'Copy room link' })).toBeVisible();
+      await expectPreflightMediaReleased(page);
       const url = await inviteLink.inputValue();
       const capturedId = url.split('/').at(-1);
       if (capturedId === undefined || capturedId === '') {
@@ -99,6 +101,7 @@ test('complete room flow', async ({ browser, page }, testInfo) => {
       await expect(guestPage.getByRole('button', { name: 'Leave room' })).toBeVisible();
       await expect(guestPage.getByRole('toolbar', { name: 'Call controls' })).toBeHidden();
       await expect(guestPage.getByLabel('Room rendering quality')).toBeHidden();
+      await expectPreflightMediaReleased(guestPage);
       await expect(page.getByRole('region', { name: 'Join request' })).toBeVisible();
       await expect(page.getByLabel('Dusk Suite interactive preview')).toHaveAttribute(
         'data-room-admission',

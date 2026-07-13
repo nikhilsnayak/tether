@@ -19,27 +19,31 @@ export function roomJourneyCue(
   status: PeerSessionView['status'],
   hasRemoteStream: boolean,
 ): RoomJourneyCue {
-  if (
-    status === 'disconnected' ||
-    status === 'failed' ||
-    status === 'room-full' ||
-    status === 'server-at-capacity' ||
-    status === 'peer-already-joined' ||
-    status === 'room-not-found' ||
-    status === 'join-denied'
-  ) {
-    return 'screen-ended';
+  switch (status) {
+    case 'disconnected':
+    case 'failed':
+    case 'room-full':
+    case 'server-at-capacity':
+    case 'peer-already-joined':
+    case 'room-not-found':
+    case 'join-denied':
+      return 'screen-ended';
+    case 'awaiting-approval':
+      return 'outside';
+    case 'peer-departed':
+      return intent === 'join' ? 'screen-departed' : 'waiting';
+    case 'waiting-for-peer':
+      return 'waiting';
+    case 'reconnecting':
+    case 'transport-lost':
+      return 'screen-reconnecting';
+    case 'negotiation-stalled':
+      return 'screen-stalled';
+    case 'connecting':
+      return 'screen-connecting';
+    case 'connected':
+      return hasRemoteStream ? 'screen-live' : 'screen-connecting';
   }
-  if (status === 'awaiting-approval') return 'outside';
-  if (status === 'peer-departed') return intent === 'join' ? 'screen-departed' : 'waiting';
-  if (status === 'waiting-for-peer') return 'waiting';
-  if (status === 'reconnecting' || status === 'transport-lost') return 'screen-reconnecting';
-  if (status === 'connected' && hasRemoteStream) return 'screen-live';
-  if (status === 'negotiation-stalled') return 'screen-stalled';
-  if (status === 'connecting' || status === 'connected') {
-    return 'screen-connecting';
-  }
-  return intent === 'join' ? 'outside' : 'waiting';
 }
 
 export function roomTransition(

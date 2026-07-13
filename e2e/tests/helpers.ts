@@ -21,6 +21,7 @@ declare global {
 
 export const installWebRtcProbe = (context: BrowserContext) =>
   context.addInitScript(() => {
+    if (navigator.mediaDevices === undefined) return;
     const probe: WebRtcProbe = {
       configurations: [],
       dataChannels: [],
@@ -99,6 +100,22 @@ export const expectWaitingForPeer = (page: Page) =>
       'waiting',
     ),
   ]);
+
+export const expectPreflightMediaReleased = (page: Page) =>
+  expect
+    .poll(() =>
+      page.evaluate(() => ({
+        acquiredStreams: window.__tetherE2E.localStreams.length,
+        actorHasLiveMedia: window.__tetherE2E.localStreams
+          .slice(1)
+          .some((stream) => stream.getTracks().some((track) => track.readyState === 'live')),
+        preflightStopped:
+          window.__tetherE2E.localStreams[0]
+            ?.getTracks()
+            .every((track) => track.readyState === 'ended') ?? false,
+      })),
+    )
+    .toEqual({ acquiredStreams: 2, actorHasLiveMedia: true, preflightStopped: true });
 
 export const continueInBrowser = (page: Page) =>
   page.getByRole('button', { name: 'Join in this browser' }).click();

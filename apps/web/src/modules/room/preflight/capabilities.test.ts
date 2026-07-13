@@ -1,4 +1,4 @@
-import { assert, describe, it } from 'vitest';
+import { afterEach, assert, describe, it, vi } from 'vitest';
 
 import { detectRoomCapabilities, type RoomCapabilityEnvironment } from './capabilities';
 
@@ -10,6 +10,8 @@ const supported: RoomCapabilityEnvironment = {
 };
 
 describe('room capabilities', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
   it('accepts a supported browser without requesting media', () => {
     assert.deepStrictEqual(detectRoomCapabilities(supported), { supported: true, missing: [] });
   });
@@ -27,5 +29,12 @@ describe('room capabilities', () => {
         missing: ['secure-context', 'webgpu', 'user-media', 'peer-connection'],
       },
     );
+  });
+
+  it('detects capabilities from the browser environment by default', () => {
+    vi.stubGlobal('window', { isSecureContext: true, RTCPeerConnection: class {} });
+    vi.stubGlobal('navigator', { gpu: {}, mediaDevices: { getUserMedia() {} } });
+
+    assert.deepStrictEqual(detectRoomCapabilities(), { supported: true, missing: [] });
   });
 });

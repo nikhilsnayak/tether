@@ -4,6 +4,7 @@ import {
   clampLook,
   type AdaptiveQualityState,
   isFiniteTransform,
+  isQualityPreference,
   QUALITY_CONFIGS,
   initialAdaptiveQualityState,
   resolveQualityTier,
@@ -64,6 +65,28 @@ describe('scene configuration', () => {
     assert.strictEqual(state.tier, 'medium');
     state = sampleAdaptiveQuality(state, 60);
     assert.strictEqual(state.tier, 'high');
+  });
+
+  it('moves between every adaptive quality tier', () => {
+    const medium = sampleAdaptiveQuality(
+      { tier: 'medium', slowSamples: 2, fastSamples: 0, cooldownSamples: 0 },
+      20,
+    );
+    assert.strictEqual(medium.tier, 'low');
+
+    const low = sampleAdaptiveQuality(
+      { tier: 'low', slowSamples: 0, fastSamples: 11, cooldownSamples: 0 },
+      60,
+    );
+    assert.strictEqual(low.tier, 'medium');
+  });
+
+  it('recognizes only supported persisted quality values', () => {
+    for (const preference of ['auto', 'high', 'medium', 'low']) {
+      assert.isTrue(isQualityPreference(preference));
+    }
+    assert.isFalse(isQualityPreference('ultra'));
+    assert.isFalse(isQualityPreference(null));
   });
 
   it('rejects non-finite transforms', () => {

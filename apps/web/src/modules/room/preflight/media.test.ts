@@ -23,6 +23,10 @@ describe('media preflight helpers', () => {
     for (const mediaTrack of tracks) assert.strictEqual(mediaTrack.stop.mock.calls.length, 1);
   });
 
+  it('accepts an absent stream when there is nothing to stop', () => {
+    stopMediaStream(null);
+  });
+
   it('applies current settings once to each fresh call stream', () => {
     const firstAudio = track();
     const first = {

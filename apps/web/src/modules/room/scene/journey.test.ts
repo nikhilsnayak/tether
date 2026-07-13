@@ -52,6 +52,11 @@ describe('roomJourneyCue', () => {
       kind: 'none',
       durationMs: 0,
     });
+    expect(roomTransition('waiting', 'waiting', false)).toEqual({ kind: 'none', durationMs: 0 });
+    expect(roomTransition('waiting', 'screen-live', false)).toEqual({
+      kind: 'none',
+      durationMs: 0,
+    });
   });
 
   it('announces queued requests once and in queue order', () => {

@@ -1,8 +1,10 @@
 import { RoomTemplateId } from '@tether/contracts/modules/room';
-import { assert, describe, it } from 'vitest';
+import { assert, describe, it, vi } from 'vitest';
 
 import { isFiniteTransform } from '../scene/config';
 import { DUSK_SUITE_TEMPLATE, resolveRoomTemplate } from './registry';
+
+vi.mock('../scene/dusk-suite-scene', () => ({ default: () => null }));
 
 describe('room template registry', () => {
   it('resolves Dusk Suite', () => {
@@ -32,6 +34,15 @@ describe('room template registry', () => {
         [...framing.position, ...framing.target, framing.fieldOfView].every(Number.isFinite),
       ),
     );
+  });
+
+  it('loads the bundled Dusk Suite scene', async () => {
+    const lazyScene = DUSK_SUITE_TEMPLATE.scene as unknown as {
+      readonly _payload: { readonly _result: () => Promise<{ readonly default: unknown }> };
+    };
+
+    const sceneModule = await lazyScene._payload._result();
+    assert.isFunction(sceneModule.default);
   });
 
   it('keeps template IDs unique', () => {

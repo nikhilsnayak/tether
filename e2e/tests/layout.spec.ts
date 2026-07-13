@@ -38,7 +38,7 @@ test('reduced motion keeps the full 3D room without camera travel', async ({ pag
   await expect(scene.locator('canvas')).toBeVisible();
 });
 
-test('the WebGPU call room fits a portrait viewport without covering controls', async ({
+test('the WebGPU call room fits phone viewports without covering controls', async ({
   browser,
 }, testInfo) => {
   const baseURL = requireBaseURL(testInfo.project.use.baseURL);
@@ -58,6 +58,19 @@ test('the WebGPU call room fits a portrait viewport without covering controls', 
     expect(preview).not.toBeNull();
     if (controls !== null && preview !== null) {
       expect(preview.y + preview.height).toBeLessThanOrEqual(controls.y);
+    }
+
+    await host.setViewportSize({ width: 844, height: 390 });
+    await expect(host.getByRole('button', { name: 'Leave call' })).toBeVisible();
+    await expect(host.getByLabel('Local video preview')).toBeVisible();
+    expect(await fitsViewport(host)).toBe(true);
+
+    const landscapeControls = await host.getByRole('button', { name: 'Leave call' }).boundingBox();
+    const landscapePreview = await host.getByLabel('Local video preview').boundingBox();
+    expect(landscapeControls).not.toBeNull();
+    expect(landscapePreview).not.toBeNull();
+    if (landscapeControls !== null && landscapePreview !== null) {
+      expect(landscapePreview.y + landscapePreview.height).toBeLessThanOrEqual(landscapeControls.y);
     }
   } finally {
     await cleanup();
