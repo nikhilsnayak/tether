@@ -29,9 +29,14 @@ export default defineConfig({
         ...devices['Desktop Chrome'],
         launchOptions: {
           args: [
-            '--enable-features=Vulkan',
-            '--enable-unsafe-webgpu',
-            '--use-angle=vulkan',
+            // The Dusk Suite scene needs a WebGL2 context. Locally we use the
+            // hardware ANGLE/Vulkan backend for fidelity, but GitHub-hosted
+            // runners have no GPU and no system Vulkan driver, so there we force
+            // Chromium's bundled SwiftShader — otherwise WebGL2 is unavailable
+            // and every room spec times out at the capability gate.
+            ...(CI
+              ? ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']
+              : ['--enable-features=Vulkan', '--enable-unsafe-webgpu', '--use-angle=vulkan']),
             '--use-fake-device-for-media-stream',
             '--use-fake-ui-for-media-stream',
           ],
