@@ -66,7 +66,7 @@ export function peerSessionStatusPresentation(
         tone: 'warning',
         pulse: true,
         label: 'Waiting for the other person',
-        hint: 'Share this room to invite someone.',
+        hint: 'They left the call. You can wait here in case they rejoin.',
       };
     case 'awaiting-approval':
       return {

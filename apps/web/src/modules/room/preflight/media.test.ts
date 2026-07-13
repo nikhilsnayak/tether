@@ -17,6 +17,21 @@ describe('media preflight helpers', () => {
     assert.isFalse(video.enabled);
   });
 
+  it('applies mixed media settings and can re-enable tracks', () => {
+    const audio = track();
+    const video = { enabled: false, stop: vi.fn() };
+    const stream = {
+      getAudioTracks: () => [audio],
+      getVideoTracks: () => [video],
+    } as unknown as MediaStream;
+    applyMediaSettings(stream, { microphone: true, camera: false });
+    assert.isTrue(audio.enabled);
+    assert.isFalse(video.enabled);
+    applyMediaSettings(stream, { microphone: false, camera: true });
+    assert.isFalse(audio.enabled);
+    assert.isTrue(video.enabled);
+  });
+
   it('stops every stream track', () => {
     const tracks = [track(), track(), track()];
     stopMediaStream({ getTracks: () => tracks } as unknown as MediaStream);

@@ -89,6 +89,17 @@ export function CallHandoffScreen({ onJoinInBrowser }: { readonly onJoinInBrowse
   );
 }
 
+const MISSING_CAPABILITY_LABELS: Readonly<Record<string, string>> = {
+  'secure-context': 'secure context (HTTPS)',
+  webgl2: 'WebGL2',
+  'user-media': 'camera and microphone access',
+  'peer-connection': 'WebRTC',
+};
+
+function formatMissingCapabilities(missing: ReadonlyArray<string>): string {
+  return missing.map((id) => MISSING_CAPABILITY_LABELS[id] ?? id).join(', ');
+}
+
 export function UnsupportedBrowserScreen({
   missing,
   onLeave,
@@ -103,7 +114,7 @@ export function UnsupportedBrowserScreen({
       icon={<AlertTriangle className='size-9' />}
       iconClassName='bg-destructive/15 text-destructive'
       label='This browser cannot enter the room'
-      hint={`A secure browser with WebGL2, camera access, and WebRTC is required. Missing: ${missing.join(', ')}.`}
+      hint={`A secure browser with WebGL2, camera access, and WebRTC is required. Missing: ${formatMissingCapabilities(missing)}.`}
       action={<Button onClick={onLeave}>Return home</Button>}
     />
   );

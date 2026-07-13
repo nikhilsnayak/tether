@@ -27,11 +27,7 @@ describe('room template registry', () => {
   });
 
   it('loads the bundled Dusk Suite scene', async () => {
-    const lazyScene = DUSK_SUITE_TEMPLATE.scene as unknown as {
-      readonly _payload: { readonly _result: () => Promise<{ readonly default: unknown }> };
-    };
-
-    const sceneModule = await lazyScene._payload._result();
+    const sceneModule = await import('../scene/dusk-suite-scene');
     assert.isFunction(sceneModule.default);
   });
 

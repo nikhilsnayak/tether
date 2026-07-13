@@ -28,7 +28,7 @@ test('missing WebGL2 stops entry before media is requested', async ({ page }) =>
 
   await page.goto('/host');
   await expect(page.getByText('This browser cannot enter the room')).toBeVisible();
-  await expect(page.getByText(/Missing: webgl2/)).toBeVisible();
+  await expect(page.getByText(/Missing: WebGL2/)).toBeVisible();
   expect(await page.evaluate(() => Reflect.get(window, '__tetherMediaRequests'))).toBe(0);
 });
 
@@ -38,7 +38,7 @@ test('Dusk Suite loads without third-party room assets', async ({ page }, testIn
   const appOrigin = new URL(baseURL).origin;
   const externalAssets: string[] = [];
   page.on('request', (request) => {
-    if (!['font', 'image', 'media'].includes(request.resourceType())) return;
+    if (!['font', 'image', 'media', 'fetch', 'xhr'].includes(request.resourceType())) return;
     const url = new URL(request.url());
     if (url.origin !== appOrigin) externalAssets.push(url.href);
   });
