@@ -1,6 +1,7 @@
 import { useAtomValue } from '@effect/atom-react';
 import type { RoomSession } from '@tether/client-runtime/modules/peer-session';
 import {
+  isPeerSessionErrorStatus,
   peerLocalStreamAtom,
   peerRemoteStreamAtom,
   peerSessionStatusPresentation,
@@ -9,21 +10,27 @@ import {
 } from '@tether/client-runtime/modules/room';
 import type { PeerId } from '@tether/contracts/modules/room';
 import { Badge } from '@tether/ui/components/badge';
+import { Button } from '@tether/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@tether/ui/components/tooltip';
 import { cn } from '@tether/ui/lib/utils';
-import { ShieldCheck, User } from 'lucide-react';
+import { ShieldCheck } from 'lucide-react';
 import { MessageSquare, Mic, MicOff, PhoneOff, Video, VideoOff } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
 import { LogoMark, Wordmark } from '@/components/logo';
 import { useViewportAspectRatio } from '@/hooks/use-viewport-aspect-ratio';
 
+import { useRemoteVideoAvailability } from '../hooks/use-remote-video-availability';
 import { mediaStreamValue } from '../peer-session/platform';
 import { createMediaSettingsApplicator, type InitialMediaSettings } from '../preflight/media';
+import { roomJourneyCue, roomJourneyLabel } from '../scene/journey';
+import { RoomScenePreview } from '../scene/room-scene-preview';
+import { DUSK_SUITE_TEMPLATE } from '../templates/registry';
 import { AudioOutputControl, SPEAKER_OFF } from './audio-output-control';
 import { CallControlButton } from './call-controls';
 import { JoinRequestOverlay } from './join-request-overlay';
-import { DraggableSelfPreview, RemoteVideo, SelfVideo } from './media-stage';
+import { DraggableSelfPreview, SelfVideo } from './media-stage';
+import { RemoteAudio } from './remote-audio';
 import { SafetyCodeCard } from './safety-code-card';
 
 const INDICATOR_TONE_CLASS = {
@@ -56,6 +63,7 @@ export function CallStage({
   const remoteStreamHandle = useAtomValue(peerRemoteStreamAtom);
   const localStream = localStreamHandle === null ? null : mediaStreamValue(localStreamHandle);
   const remoteStream = remoteStreamHandle === null ? null : mediaStreamValue(remoteStreamHandle);
+  const remoteVideoAvailable = useRemoteVideoAvailability(remoteStream);
   const [micOn, setMicOn] = useState(initialMediaSettings.microphone);
   const [cameraOn, setCameraOn] = useState(initialMediaSettings.camera);
   const mediaSettingsApplicatorRef = useRef(createMediaSettingsApplicator(initialMediaSettings));
@@ -64,11 +72,21 @@ export function CallStage({
   const [confirmedSas, setConfirmedSas] = useState<string | null>(null);
   const [handlingJoinPeerIds, setHandlingJoinPeerIds] = useState<ReadonlySet<PeerId>>(new Set());
   const stageRef = useRef<HTMLDivElement>(null);
+  const selfPreviewBoundaryRef = useRef<HTMLDivElement>(null);
   const aspectRatio = useViewportAspectRatio();
   const presentation = peerSessionStatusPresentation(view.status);
   const pendingJoin =
     view.pendingJoinRequests.find((request) => !handlingJoinPeerIds.has(request.peerId)) ?? null;
   const sasConfirmed = view.sas !== null && confirmedSas === view.sas;
+  const journey = roomJourneyCue(session.intent, view.status, remoteStream !== null);
+  const displayLabel =
+    journey === 'screen-live' && !remoteVideoAvailable
+      ? 'The other person is here'
+      : roomJourneyLabel(journey);
+  const displayHint =
+    journey === 'screen-live' && !remoteVideoAvailable
+      ? 'Their camera is unavailable.'
+      : presentation.hint;
 
   useEffect(() => {
     if (localStream !== null) mediaSettingsApplicatorRef.current.apply(localStream);
@@ -108,21 +126,24 @@ export function CallStage({
   };
 
   return (
-    <div className='relative z-40 grid h-svh grid-rows-[minmax(0,1fr)_auto]'>
-      <div ref={stageRef} className='relative flex items-center justify-center overflow-hidden'>
-        {remoteStream ? (
-          <RemoteVideo stream={remoteStream} sinkId={sinkId} muted={!speakerOn} />
-        ) : (
-          <div className='grid justify-items-center gap-5 px-6 text-center'>
-            <div className='border-border grid size-20 place-items-center border'>
-              <User className='text-muted-foreground size-9' />
-            </div>
-            <div className='space-y-2'>
-              <p className='font-mono text-sm tracking-[0.2em] uppercase'>{presentation.label}</p>
-              <p className='text-muted-foreground text-sm'>{presentation.hint}</p>
-            </div>
-          </div>
-        )}
+    <div ref={stageRef} className='relative z-40 h-svh overflow-hidden'>
+      <RoomScenePreview
+        template={DUSK_SUITE_TEMPLATE}
+        remoteStream={journey === 'screen-live' && remoteVideoAvailable ? remoteStream : null}
+        journey={journey}
+        mode='call'
+      />
+      <RemoteAudio stream={remoteStream} sinkId={sinkId} muted={!speakerOn} />
+      {!remoteVideoAvailable && (
+        <div
+          aria-label={displayLabel}
+          className='pointer-events-none absolute top-[32%] left-1/2 grid w-[min(48vw,32rem)] -translate-x-1/2 justify-items-center gap-2 px-4 text-center drop-shadow-lg max-sm:top-[30%] max-sm:w-[78vw]'
+        >
+          <p className='font-mono text-xs tracking-[0.2em] uppercase'>{displayLabel}</p>
+          <p className='text-muted-foreground text-xs'>{displayHint}</p>
+        </div>
+      )}
+      <div className='pointer-events-none absolute inset-0'>
         <div className='absolute inset-x-0 top-0 flex items-center justify-between gap-3 bg-linear-to-b from-black/60 to-transparent p-4 pb-10'>
           <div className='flex min-w-0 items-center gap-3'>
             <Wordmark className='drop-shadow-md max-sm:hidden' />
@@ -176,24 +197,47 @@ export function CallStage({
             )}
           </div>
         </div>
-        <DraggableSelfPreview boundaryRef={stageRef} aspectRatio={aspectRatio}>
-          <SelfVideo stream={localStream} cameraOn={cameraOn} selfId={session.selfId} />
-        </DraggableSelfPreview>
+        <div
+          ref={selfPreviewBoundaryRef}
+          className='pointer-events-none absolute inset-x-4 top-16 bottom-24'
+        >
+          <div className='pointer-events-auto'>
+            <DraggableSelfPreview boundaryRef={selfPreviewBoundaryRef} aspectRatio={aspectRatio}>
+              <SelfVideo stream={localStream} cameraOn={cameraOn} selfId={session.selfId} />
+            </DraggableSelfPreview>
+          </div>
+        </div>
         {view.sas !== null && !sasConfirmed && (
-          <SafetyCodeCard
-            code={view.sas}
-            onLeave={handleLeave}
-            onConfirm={() => setConfirmedSas(view.sas)}
-          />
+          <div className='pointer-events-auto'>
+            <SafetyCodeCard
+              code={view.sas}
+              onLeave={handleLeave}
+              onConfirm={() => setConfirmedSas(view.sas)}
+            />
+          </div>
         )}
         {pendingJoin !== null && (
-          <JoinRequestOverlay
-            displayName={pendingJoin.displayName}
-            onDecision={(decision) => handleJoinDecision(pendingJoin.peerId, decision)}
-          />
+          <div className='pointer-events-auto'>
+            <JoinRequestOverlay
+              displayName={pendingJoin.displayName}
+              onDecision={(decision) => handleJoinDecision(pendingJoin.peerId, decision)}
+            />
+          </div>
+        )}
+        {isPeerSessionErrorStatus(view.status) && (
+          <section
+            aria-label='Call failed'
+            className='border-border bg-background/90 pointer-events-auto absolute top-1/2 left-1/2 w-[min(24rem,calc(100%-2rem))] -translate-x-1/2 -translate-y-1/2 space-y-3 border p-5 text-center backdrop-blur-sm'
+          >
+            <h2 className='font-mono text-xs tracking-[0.2em] uppercase'>{presentation.label}</h2>
+            <p className='text-muted-foreground text-sm'>{presentation.hint}</p>
+            <Button variant='secondary' onClick={handleLeave}>
+              Back to room setup
+            </Button>
+          </section>
         )}
       </div>
-      <div className='border-border flex items-center justify-center gap-2 border-t p-4 sm:gap-3'>
+      <div className='border-border bg-background/85 absolute inset-x-0 bottom-0 flex items-center justify-center gap-2 border-t p-3 backdrop-blur-sm sm:gap-3 sm:p-4'>
         <CallControlButton
           label={micOn ? 'Mute microphone' : 'Unmute microphone'}
           caption='mic'

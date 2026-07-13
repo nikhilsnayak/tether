@@ -1,4 +1,5 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber/webgpu';
+import { cn } from '@tether/ui/lib/utils';
 import { Suspense, useEffect, useRef, useState, type RefObject } from 'react';
 import { Euler, MathUtils, Quaternion, Vector3 } from 'three';
 
@@ -15,6 +16,7 @@ import {
   selectFraming,
   shouldAnimateCamera,
 } from './config';
+import type { RoomJourneyCue } from './journey';
 
 function CameraRig({
   template,
@@ -45,7 +47,7 @@ function CameraRig({
     if (element === null) return;
 
     const pointerDown = (event: PointerEvent) => {
-      if ((event.target as Element).closest('[data-room-overlay]') !== null) return;
+      if ((event.target as Element).closest('[data-room-scene-ignore-gesture]') !== null) return;
       drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
       element.setPointerCapture(event.pointerId);
       lastInteraction.current = performance.now();
@@ -128,7 +130,17 @@ function readQualityPreference(): QualityPreference {
   return isQualityPreference(stored) ? stored : 'auto';
 }
 
-export function RoomScenePreview({ template }: { readonly template: RoomTemplate }) {
+export function RoomScenePreview({
+  template,
+  remoteStream,
+  journey,
+  mode = 'preview',
+}: {
+  readonly template: RoomTemplate;
+  readonly remoteStream?: MediaStream | null;
+  readonly journey?: RoomJourneyCue;
+  readonly mode?: 'preview' | 'call';
+}) {
   const [qualityPreference, setQualityPreference] = useState(readQualityPreference);
   const [contextLost, setContextLost] = useState(false);
   const surfaceRef = useRef<HTMLDivElement>(null);
@@ -164,7 +176,11 @@ export function RoomScenePreview({ template }: { readonly template: RoomTemplate
     <div
       ref={surfaceRef}
       data-room-scene-gesture-surface
-      className='bg-card relative aspect-video touch-none overflow-hidden border'
+      className={
+        mode === 'call'
+          ? 'bg-card absolute inset-0 touch-none overflow-hidden'
+          : 'bg-card relative aspect-video touch-none overflow-hidden border'
+      }
       aria-label={`${template.name} interactive preview`}
     >
       <Canvas
@@ -184,10 +200,21 @@ export function RoomScenePreview({ template }: { readonly template: RoomTemplate
         <CameraRig template={template} reducedMotion={reducedMotion} surfaceRef={surfaceRef} />
         <ContextLossGuard onLost={() => setContextLost(true)} />
         <Suspense fallback={null}>
-          <Scene quality={quality} qualityTier={qualityTier} />
+          <Scene
+            quality={quality}
+            qualityTier={qualityTier}
+            remoteStream={remoteStream}
+            journey={journey}
+          />
         </Suspense>
       </Canvas>
-      <div data-room-overlay className='absolute right-3 bottom-3 flex items-center gap-2'>
+      <div
+        data-room-scene-ignore-gesture
+        className={cn(
+          'absolute right-3 z-10 flex items-center gap-2',
+          mode === 'call' ? 'top-14' : 'bottom-3',
+        )}
+      >
         <label className='sr-only' htmlFor='room-quality'>
           Room rendering quality
         </label>
@@ -203,12 +230,14 @@ export function RoomScenePreview({ template }: { readonly template: RoomTemplate
           <option value='low'>Low quality</option>
         </select>
       </div>
-      <p
-        data-room-overlay
-        className='text-muted-foreground bg-background/70 absolute bottom-3 left-3 px-2 py-1 text-[11px]'
-      >
-        Drag to look around
-      </p>
+      {mode === 'preview' && (
+        <p
+          data-room-scene-ignore-gesture
+          className='text-muted-foreground bg-background/70 absolute bottom-3 left-3 px-2 py-1 text-[11px]'
+        >
+          Drag to look around
+        </p>
+      )}
     </div>
   );
 }

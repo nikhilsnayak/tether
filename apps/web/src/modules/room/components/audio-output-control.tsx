@@ -1,3 +1,5 @@
+import { useAtomValue } from '@effect/atom-react';
+import { peerLocalStreamAtom } from '@tether/client-runtime/modules/room';
 import { Button } from '@tether/ui/components/button';
 import {
   DropdownMenu,
@@ -72,5 +74,3 @@ export function AudioOutputControl({
     </DropdownMenu>
   );
 }
-import { useAtomValue } from '@effect/atom-react';
-import { peerLocalStreamAtom } from '@tether/client-runtime/modules/room';

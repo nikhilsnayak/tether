@@ -8,10 +8,13 @@ import type {
   ResolvedQualityTier,
   SceneAnchors,
 } from '../scene/config';
+import type { RoomJourneyCue } from '../scene/journey';
 
 export interface RoomSceneProps {
   readonly quality: QualityConfig;
   readonly qualityTier: ResolvedQualityTier;
+  readonly journey?: RoomJourneyCue;
+  readonly remoteStream?: MediaStream | null;
 }
 
 export interface RoomTemplate {

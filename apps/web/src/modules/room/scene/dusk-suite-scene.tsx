@@ -1,11 +1,48 @@
 import { RoundedBox } from '@react-three/drei';
 import type { ThreeElements } from '@react-three/fiber/webgpu';
+import { useEffect, useState } from 'react';
 
 import type { RoomSceneProps } from '../templates/registry';
+import { createRemoteVideoSurface, containedVideoSize } from './remote-media';
 
 const wallMaterial = { color: '#18191d', roughness: 0.82, metalness: 0.04 } as const;
 const trimMaterial = { color: '#29282a', roughness: 0.5, metalness: 0.18 } as const;
 type Surface = { readonly color: string; readonly roughness: number; readonly metalness: number };
+
+const DISPLAY_SIZE = [6.5, 3.66] as const;
+
+function RemoteVideoDisplay({ stream }: { readonly stream: MediaStream }) {
+  const [surface, setSurface] = useState<ReturnType<typeof createRemoteVideoSurface> | null>(null);
+  const [videoSize, setVideoSize] = useState<readonly [number, number]>(DISPLAY_SIZE);
+
+  useEffect(() => {
+    const next = createRemoteVideoSurface(stream);
+    const updateSize = () => {
+      setVideoSize(
+        containedVideoSize(
+          next.element.videoWidth,
+          next.element.videoHeight,
+          DISPLAY_SIZE[0],
+          DISPLAY_SIZE[1],
+        ),
+      );
+    };
+    next.element.addEventListener('loadedmetadata', updateSize);
+    setSurface(next);
+    return () => {
+      next.element.removeEventListener('loadedmetadata', updateSize);
+      next.dispose();
+    };
+  }, [stream]);
+
+  if (surface === null) return null;
+  return (
+    <mesh position={[0, 2.35, -4.595]} scale={[videoSize[0], videoSize[1], 1]}>
+      <planeGeometry />
+      <meshBasicMaterial map={surface.texture} toneMapped={false} />
+    </mesh>
+  );
+}
 
 function Box({
   surface,
@@ -19,7 +56,7 @@ function Box({
   );
 }
 
-export default function DuskSuiteScene({ quality, qualityTier }: RoomSceneProps) {
+export default function DuskSuiteScene({ quality, qualityTier, remoteStream }: RoomSceneProps) {
   const detailed = quality.ambientDetail;
 
   return (
@@ -79,9 +116,12 @@ export default function DuskSuiteScene({ quality, qualityTier }: RoomSceneProps)
         <meshStandardMaterial color='#090a0c' roughness={0.3} metalness={0.55} />
       </RoundedBox>
       <mesh position={[0, 2.35, -4.61]}>
-        <planeGeometry args={[6.5, 3.66]} />
+        <planeGeometry args={[...DISPLAY_SIZE]} />
         <meshBasicMaterial color='#071026' toneMapped={false} />
       </mesh>
+      {remoteStream !== undefined && remoteStream !== null && (
+        <RemoteVideoDisplay stream={remoteStream} />
+      )}
 
       <RoundedBox
         args={[6.55, 0.58, 0.78]}
