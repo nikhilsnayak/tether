@@ -42,6 +42,7 @@ const audioContext = (stereo: boolean, rejectLifecycle: boolean) => {
     voiceOutput,
     panner,
     oscillator,
+    knockGain,
   };
 };
 
@@ -104,9 +105,26 @@ describe('room audio routing', () => {
     expect(context.resume).toHaveBeenCalledOnce();
     expect(context.voiceOutput.gain.setTargetAtTime).toHaveBeenNthCalledWith(1, 0, 4, 0.02);
     expect(context.voiceOutput.gain.setTargetAtTime).toHaveBeenNthCalledWith(2, 1, 4, 0.02);
+    expect(context.knockGain.connect).toHaveBeenCalledWith(context.destination);
     expect(context.oscillator.start).toHaveBeenCalledOnce();
     expect(context.oscillator.stop).toHaveBeenCalledWith(4.13);
     expect(context.close).toHaveBeenCalledOnce();
     expect(context.panner.disconnect).toHaveBeenCalledTimes(stereo ? 1 : 0);
+  });
+
+  it.fails('silences the knock path when room audio is muted', () => {
+    const context = audioContext(true, false);
+    vi.stubGlobal(
+      'AudioContext',
+      vi.fn(function AudioContextMock() {
+        return context;
+      }),
+    );
+
+    const engine = createRoomAudioEngine({} as HTMLAudioElement);
+    engine.setMuted(true);
+    engine.playKnock();
+
+    expect(context.knockGain.connect).toHaveBeenCalledWith(context.voiceOutput);
   });
 });

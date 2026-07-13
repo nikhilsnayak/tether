@@ -12,6 +12,7 @@ import {
   isQualityPreference,
   QUALITY_CONFIGS,
   QUALITY_STORAGE_KEY,
+  renderingQualitySettings,
   sampleAdaptiveQuality,
   type QualityPreference,
   resolveQualityTier,
@@ -199,6 +200,7 @@ export function RoomScenePreview({
           typeof devicePixelRatio === 'number' ? devicePixelRatio : 1,
         );
   const quality = QUALITY_CONFIGS[qualityTier];
+  const rendering = renderingQualitySettings(quality);
   const Scene = template.scene;
 
   const updateQuality = (preference: QualityPreference) => {
@@ -250,12 +252,8 @@ export function RoomScenePreview({
               ? template.camera.outside.fieldOfView
               : template.camera.landscape.fieldOfView,
         }}
-        dpr={[...quality.dpr]}
-        renderer={{
-          antialias: quality.antialias,
-          forceWebGL: false,
-          powerPreference: 'high-performance',
-        }}
+        dpr={rendering.canvas.dpr}
+        renderer={rendering.renderer}
       >
         <color attach='background' args={['#090b13']} />
         <CameraRig

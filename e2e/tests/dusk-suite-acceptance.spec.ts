@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-import { createRoom } from './helpers';
+import { createRoom, installWebRtcProbe } from './helpers';
 
 test('missing WebGPU stops entry before media is requested', async ({ page }) => {
   await page.addInitScript(() => {
@@ -41,4 +41,28 @@ test('Dusk Suite loads without third-party room assets', async ({ page }, testIn
   await createRoom(page);
   await expect(page.getByLabel('Dusk Suite interactive preview').locator('canvas')).toBeVisible();
   expect(externalAssets).toEqual([]);
+});
+
+test('backing out of media setup stops the preview stream', async ({ page }) => {
+  await installWebRtcProbe(page.context());
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Call' }).click();
+  await page.getByRole('button', { name: 'Set up Dusk Suite' }).click();
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(page.getByLabel('Camera preview')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Back' }).click();
+
+  await expect(page.getByRole('button', { name: 'Set up Dusk Suite' })).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(() => ({
+        acquiredStreams: window.__tetherE2E.localStreams.length,
+        previewStopped:
+          window.__tetherE2E.localStreams[0]
+            ?.getTracks()
+            .every((track) => track.readyState === 'ended') ?? false,
+      })),
+    )
+    .toEqual({ acquiredStreams: 1, previewStopped: true });
 });

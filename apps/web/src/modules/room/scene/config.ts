@@ -35,6 +35,17 @@ export interface QualityConfig {
   readonly ambientDetail: boolean;
 }
 
+export interface RenderingQualitySettings {
+  readonly canvas: {
+    readonly dpr: [minimum: number, maximum: number];
+  };
+  readonly renderer: {
+    readonly antialias: boolean;
+    readonly forceWebGL: false;
+    readonly powerPreference: 'high-performance';
+  };
+}
+
 export interface AdaptiveQualityState {
   readonly tier: ResolvedQualityTier;
   readonly slowSamples: number;
@@ -70,6 +81,17 @@ export const QUALITY_CONFIGS: Readonly<Record<ResolvedQualityTier, QualityConfig
 };
 
 export const QUALITY_STORAGE_KEY = 'tether.room.quality';
+
+export function renderingQualitySettings(quality: QualityConfig): RenderingQualitySettings {
+  return {
+    canvas: { dpr: [...quality.dpr] },
+    renderer: {
+      antialias: quality.antialias,
+      forceWebGL: false,
+      powerPreference: 'high-performance',
+    },
+  };
+}
 
 export function resolveQualityTier(
   preference: QualityPreference,

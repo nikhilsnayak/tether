@@ -7,6 +7,7 @@ import {
   isQualityPreference,
   QUALITY_CONFIGS,
   initialAdaptiveQualityState,
+  renderingQualitySettings,
   resolveQualityTier,
   sampleAdaptiveQuality,
   selectFraming,
@@ -45,6 +46,35 @@ describe('scene configuration', () => {
     assert.strictEqual(resolveQualityTier('auto', 2), 'medium');
     assert.strictEqual(resolveQualityTier('auto', 1), 'high');
     assert.strictEqual(resolveQualityTier('low', 2), 'low');
+  });
+
+  it.each(['high', 'medium', 'low'] as const)(
+    'translates %s quality into live Canvas and renderer-construction settings',
+    (tier) => {
+      const quality = QUALITY_CONFIGS[tier];
+
+      assert.deepStrictEqual(renderingQualitySettings(quality), {
+        canvas: { dpr: [...quality.dpr] },
+        renderer: {
+          antialias: quality.antialias,
+          forceWebGL: false,
+          powerPreference: 'high-performance',
+        },
+      });
+    },
+  );
+
+  it.fails('enables the Canvas shadow system for shadowed quality tiers', () => {
+    const settings = renderingQualitySettings(QUALITY_CONFIGS.high);
+
+    assert.strictEqual(Reflect.get(settings.canvas, 'shadows'), true);
+  });
+
+  it.fails('does not model antialiasing as a live quality-tier change', () => {
+    const high = renderingQualitySettings(QUALITY_CONFIGS.high);
+    const low = renderingQualitySettings(QUALITY_CONFIGS.low);
+
+    assert.strictEqual(high.renderer.antialias, low.renderer.antialias);
   });
 
   it('degrades only after sustained slow samples and then observes a cooldown', () => {

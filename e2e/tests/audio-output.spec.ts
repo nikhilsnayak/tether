@@ -25,6 +25,14 @@ test('audio output menu selects a device and toggles sound off', async ({ browse
 
     await host.getByRole('menuitemradio', { name: 'Off' }).click();
     await expect.poll(remoteMuted).toBe(true);
+    await expect(host.getByRole('button', { name: 'Audio output' })).toHaveClass(
+      /text-destructive/,
+    );
+
+    await expect(host.getByRole('menuitemradio', { name: 'Off' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
 
     await host.getByRole('menuitemradio', { name: 'Fake Default Audio Output' }).click();
     await expect.poll(remoteMuted).toBe(false);
