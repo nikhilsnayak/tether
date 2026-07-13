@@ -50,7 +50,8 @@ export interface PreparedLocalMedia {
 
 /**
  * Acquires one preview stream in its own scope. Transfer hands its finalizer to
- * the peer-session media scope; cancellation before transfer closes it here.
+ * the peer-session media scope on claim; cancel closes it here if it is
+ * abandoned before a claim adopts it.
  */
 export const prepareLocalMedia = Effect.fn('prepareLocalMedia')(function* () {
   const resourceScope = yield* Scope.make();
@@ -60,14 +61,20 @@ export const prepareLocalMedia = Effect.fn('prepareLocalMedia')(function* () {
   );
   let ownership: 'preview' | 'transferred' | 'claimed' | 'released' = 'preview';
 
+  // Idempotent: the preview, transfer-abandonment, and claim-scope paths can all
+  // reach here, but the stream must be torn down exactly once.
   const close = () => {
+    if (ownership === 'released') return Promise.resolve();
     ownership = 'released';
     return Effect.runPromise(Scope.close(resourceScope, Exit.void));
   };
 
   return {
     stream: mediaStreamValue(handle),
-    cancel: () => (ownership === 'preview' ? close() : Promise.resolve()),
+    // Releases the stream while this side still owns it (preview, or transferred
+    // but never claimed). Once a claim adopts it, its scope owns the teardown.
+    cancel: () =>
+      ownership === 'preview' || ownership === 'transferred' ? close() : Promise.resolve(),
     transfer: () => {
       if (ownership !== 'preview') {
         throw new Error('Prepared local media can only be transferred once');

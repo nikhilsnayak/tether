@@ -158,9 +158,6 @@ describe('web peer-session platform', () => {
       const transferred = prepared.transfer();
       assert.throws(() => prepared.transfer(), 'Prepared local media can only be transferred once');
 
-      yield* Effect.promise(prepared.cancel);
-      assert.strictEqual(mediaStream.track.stop.mock.calls.length, 0);
-
       const scope = yield* Scope.make();
       const handle = yield* transferred.claim.pipe(Scope.provide(scope));
       assert.strictEqual(mediaStreamValue(handle), mediaStream as unknown as MediaStream);
@@ -168,9 +165,30 @@ describe('web peer-session platform', () => {
       const secondClaimError = yield* transferred.claim.pipe(Scope.provide(scope), Effect.flip);
       assert.instanceOf(secondClaimError, PlatformError);
 
+      // Once claimed, the session scope owns teardown; cancel is a no-op.
+      yield* Effect.promise(prepared.cancel);
+      assert.strictEqual(mediaStream.track.stop.mock.calls.length, 0);
+
       yield* Scope.close(scope, Exit.void);
       yield* Scope.close(scope, Exit.void);
       assert.strictEqual(mediaStream.track.stop.mock.calls.length, 1);
+    }),
+  );
+
+  it.effect('releases transferred media that is abandoned without claim', () =>
+    Effect.gen(function* () {
+      mediaStream.track.stop.mockClear();
+      const prepared = yield* prepareLocalMedia();
+      prepared.transfer();
+
+      // No claim. The only cleanup entry point left on PreparedLocalMedia is cancel.
+      yield* Effect.promise(prepared.cancel);
+
+      assert.strictEqual(
+        mediaStream.track.stop.mock.calls.length,
+        1,
+        'transferred-but-unclaimed media must still be releasable (leak if 0)',
+      );
     }),
   );
 
