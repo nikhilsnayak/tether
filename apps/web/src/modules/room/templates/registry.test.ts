@@ -1,7 +1,6 @@
 import { RoomTemplateId } from '@tether/contracts/modules/room';
 import { assert, describe, it, vi } from 'vitest';
 
-import { isFiniteTransform } from '../scene/config';
 import { DUSK_SUITE_TEMPLATE, resolveRoomTemplate } from './registry';
 
 vi.mock('../scene/dusk-suite-scene', () => ({ default: () => null }));
@@ -14,17 +13,8 @@ describe('room template registry', () => {
     });
   });
 
-  it('provides a lazy scene and every required finite anchor', () => {
+  it('provides a lazy scene and finite camera framing', () => {
     assert.strictEqual(DUSK_SUITE_TEMPLATE.scene.$$typeof, Symbol.for('react.lazy'));
-    assert.deepStrictEqual(Object.keys(DUSK_SUITE_TEMPLATE.anchors).sort(), [
-      'audio',
-      'console',
-      'display',
-      'door',
-      'warmLight',
-      'window',
-    ]);
-    assert.isTrue(Object.values(DUSK_SUITE_TEMPLATE.anchors).every(isFiniteTransform));
     assert.isTrue(
       [
         DUSK_SUITE_TEMPLATE.camera.landscape,
@@ -43,11 +33,6 @@ describe('room template registry', () => {
 
     const sceneModule = await lazyScene._payload._result();
     assert.isFunction(sceneModule.default);
-  });
-
-  it('keeps template IDs unique', () => {
-    const templates = [DUSK_SUITE_TEMPLATE];
-    assert.strictEqual(new Set(templates.map(({ id }) => id)).size, templates.length);
   });
 
   it('requires an update for an unknown template', () => {

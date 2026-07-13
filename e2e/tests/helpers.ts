@@ -145,7 +145,6 @@ export const completeMediaSetup = async (page: Page, actionLabel: string) => {
 };
 
 export const startHostingRoom = async (page: Page) => {
-  await page.getByRole('button', { name: 'Set up Dusk Suite' }).click();
   await completeMediaSetup(page, 'Create room');
 };
 

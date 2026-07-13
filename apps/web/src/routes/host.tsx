@@ -11,7 +11,6 @@ import {
   UnsupportedBrowserScreen,
 } from '@/modules/room/components/call-status-screens';
 import { RoomInvite } from '@/modules/room/components/room-invite';
-import { TemplateSelectionPanel } from '@/modules/room/components/template-selection-panel';
 import { detectRoomCapabilities } from '@/modules/room/preflight/capabilities';
 import type { PreparedMediaSelection } from '@/modules/room/preflight/media';
 import { MediaSetupPanel } from '@/modules/room/preflight/media-setup-panel';
@@ -30,7 +29,6 @@ function HostPage() {
     roomTemplateId: DUSK_SUITE_TEMPLATE_ID,
   }));
   const [capabilities] = useState(detectRoomCapabilities);
-  const [templateSelected, setTemplateSelected] = useState(false);
   const [preparedMedia, setPreparedMedia] = useState<PreparedMediaSelection | null>(null);
 
   const leave = () => void navigate({ to: '/' });
@@ -39,16 +37,12 @@ function HostPage() {
     return <UnsupportedBrowserScreen missing={capabilities.missing} onLeave={leave} />;
   }
 
-  if (!templateSelected) {
-    return <TemplateSelectionPanel onSelect={() => setTemplateSelected(true)} onBack={leave} />;
-  }
-
   if (preparedMedia === null) {
     return (
       <MediaSetupPanel
         template={DUSK_SUITE_TEMPLATE}
         actionLabel='Create room'
-        onBack={() => setTemplateSelected(false)}
+        onBack={leave}
         onComplete={setPreparedMedia}
       />
     );
@@ -57,7 +51,12 @@ function HostPage() {
   return (
     <CatchBoundary errorComponent={CallErrorScreen} getResetKey={() => selfId}>
       <Suspense fallback={<CallLoadingScreen />}>
-        <CallScreen session={session} preparedMedia={preparedMedia} onLeaveRoom={leave} />
+        <CallScreen
+          session={session}
+          template={DUSK_SUITE_TEMPLATE}
+          preparedMedia={preparedMedia}
+          onLeaveRoom={leave}
+        />
         <RoomInvite />
       </Suspense>
     </CatchBoundary>

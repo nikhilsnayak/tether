@@ -6,7 +6,6 @@ import type {
   CameraLookConfig,
   QualityConfig,
   ResolvedQualityTier,
-  SceneAnchors,
 } from '../scene/config';
 import type { RoomJourneyCue } from '../scene/journey';
 
@@ -29,7 +28,6 @@ export interface RoomTemplate {
     readonly outside: CameraFraming;
     readonly look: CameraLookConfig;
   };
-  readonly anchors: SceneAnchors;
 }
 
 export type RoomTemplateResolution =
@@ -50,38 +48,6 @@ export const DUSK_SUITE_TEMPLATE: RoomTemplate = {
       pitch: [-0.18, 0.14],
       recenterAfterMs: 2_800,
       recenterSeconds: 1.15,
-    },
-  },
-  anchors: {
-    display: {
-      position: [0, 2.35, -4.72],
-      rotation: [0, 0, 0],
-      scale: [6.6, 3.71, 0.12],
-    },
-    console: {
-      position: [0, 0.52, -4.18],
-      rotation: [0, 0, 0],
-      scale: [6.45, 0.55, 0.72],
-    },
-    door: {
-      position: [4.72, 1.35, 1.65],
-      rotation: [0, -Math.PI / 2, 0],
-      scale: [1.35, 2.7, 0.12],
-    },
-    window: {
-      position: [-4.72, 2.25, -0.8],
-      rotation: [0, Math.PI / 2, 0],
-      scale: [3.8, 3.8, 0.1],
-    },
-    warmLight: {
-      position: [3.7, 3.35, -2.8],
-      rotation: [-0.2, 0, 0],
-      scale: [1, 1, 1],
-    },
-    audio: {
-      position: [0, 1.9, -4.25],
-      rotation: [0, 0, 0],
-      scale: [1, 1, 1],
     },
   },
 };

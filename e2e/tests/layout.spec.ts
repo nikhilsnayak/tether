@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
-import { connectPeers, createRoom, requireBaseURL } from './helpers';
+import { completeMediaSetup, connectPeers, createRoom, requireBaseURL } from './helpers';
 
 const fitsViewport = (page: Page) =>
   page.evaluate(() => {
@@ -32,6 +32,7 @@ test('room waiting screen fits the viewport', async ({ page }) => {
   expect(await fitsViewport(page)).toBe(true);
 
   await page.reload();
+  await completeMediaSetup(page, 'Create room');
   await expect(page.getByLabel('Room rendering quality')).toHaveValue('low');
   await expect(page.getByLabel('Dusk Suite interactive preview')).toHaveAttribute(
     'data-room-quality-tier',

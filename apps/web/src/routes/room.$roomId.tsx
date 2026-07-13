@@ -136,7 +136,12 @@ function GuestRoomEntry({
 
   return (
     <Suspense fallback={<CallLoadingScreen />}>
-      <CallScreen session={session} preparedMedia={preparedMedia} onLeaveRoom={onLeave} />
+      <CallScreen
+        session={session}
+        template={resolution.template}
+        preparedMedia={preparedMedia}
+        onLeaveRoom={onLeave}
+      />
     </Suspense>
   );
 }

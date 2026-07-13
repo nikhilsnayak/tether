@@ -47,13 +47,15 @@ test('backing out of media setup stops the preview stream', async ({ page }) => 
   await installWebRtcProbe(page.context());
   await page.goto('/');
   await page.getByRole('button', { name: 'Call' }).click();
-  await page.getByRole('button', { name: 'Set up Dusk Suite' }).click();
+  await expect(page.getByRole('heading', { name: 'Look and sound ready?' })).toBeVisible();
+  expect(await page.evaluate(() => window.__tetherE2E.localStreams.length)).toBe(0);
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await expect(page.getByLabel('Camera preview')).toBeVisible();
 
   await page.getByRole('button', { name: 'Back' }).click();
 
-  await expect(page.getByRole('button', { name: 'Set up Dusk Suite' })).toBeVisible();
+  await expect(page).toHaveURL('/');
+  await expect(page.getByRole('button', { name: 'Call' })).toBeVisible();
   await expect
     .poll(() =>
       page.evaluate(() => ({

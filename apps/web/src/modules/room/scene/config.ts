@@ -1,11 +1,5 @@
 export type Vector3Tuple = readonly [x: number, y: number, z: number];
 
-export interface SceneTransform {
-  readonly position: Vector3Tuple;
-  readonly rotation: Vector3Tuple;
-  readonly scale: Vector3Tuple;
-}
-
 export interface CameraFraming {
   readonly position: Vector3Tuple;
   readonly target: Vector3Tuple;
@@ -18,10 +12,6 @@ export interface CameraLookConfig {
   readonly recenterAfterMs: number;
   readonly recenterSeconds: number;
 }
-
-export type SceneAnchorId = 'display' | 'console' | 'door' | 'window' | 'warmLight' | 'audio';
-
-export type SceneAnchors = Readonly<Record<SceneAnchorId, SceneTransform>>;
 
 export type QualityPreference = 'auto' | 'high' | 'medium' | 'low';
 export type ResolvedQualityTier = Exclude<QualityPreference, 'auto'>;
@@ -159,8 +149,4 @@ export function selectFraming(
 
 export function shouldAnimateCamera(prefersReducedMotion: boolean): boolean {
   return !prefersReducedMotion;
-}
-
-export function isFiniteTransform(transform: SceneTransform): boolean {
-  return [...transform.position, ...transform.rotation, ...transform.scale].every(Number.isFinite);
 }

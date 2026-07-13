@@ -3,7 +3,6 @@ import { assert, describe, it } from 'vitest';
 import {
   clampLook,
   type AdaptiveQualityState,
-  isFiniteTransform,
   isQualityPreference,
   QUALITY_CONFIGS,
   ROOM_RENDERER_SETTINGS,
@@ -108,14 +107,5 @@ describe('scene configuration', () => {
     }
     assert.isFalse(isQualityPreference('ultra'));
     assert.isFalse(isQualityPreference(null));
-  });
-
-  it('rejects non-finite transforms', () => {
-    assert.isTrue(
-      isFiniteTransform({ position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] }),
-    );
-    assert.isFalse(
-      isFiniteTransform({ position: [0, Number.NaN, 0], rotation: [0, 0, 0], scale: [1, 1, 1] }),
-    );
   });
 });

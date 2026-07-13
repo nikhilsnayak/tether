@@ -23,7 +23,7 @@ import { mediaStreamValue } from '../peer-session/platform';
 import type { InitialMediaSettings } from '../preflight/media';
 import { roomJourneyCue, roomJourneyLabel } from '../scene/journey';
 import { RoomScenePreview } from '../scene/room-scene-preview';
-import { DUSK_SUITE_TEMPLATE } from '../templates/registry';
+import type { RoomTemplate } from '../templates/registry';
 import { SPEAKER_OFF } from './audio-output-control';
 import { CallControlsToolbar } from './call-controls-toolbar';
 import { JoinRequestOverlay } from './join-request-overlay';
@@ -43,12 +43,14 @@ const statusIndicatorClassName = (presentation: PeerSessionStatusPresentation) =
 
 export function CallStage({
   session,
+  template,
   respondToJoin,
   onLeave,
   onSendMessage,
   initialMediaSettings,
 }: {
   readonly session: RoomSession;
+  readonly template: RoomTemplate;
   readonly respondToJoin: (peerId: PeerId, decision: 'allow' | 'deny') => Promise<void>;
   readonly onLeave: () => void;
   readonly onSendMessage: (message: string) => boolean;
@@ -115,7 +117,7 @@ export function CallStage({
   return (
     <div className='relative z-40 h-svh overflow-hidden'>
       <RoomScenePreview
-        template={DUSK_SUITE_TEMPLATE}
+        template={template}
         admissionPending={pendingJoin !== null}
         remoteStream={
           remoteStream !== null && (journey === 'screen-live' || journey === 'screen-reconnecting')

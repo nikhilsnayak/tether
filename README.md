@@ -119,8 +119,8 @@ cp apps/web/.env.example apps/web/.env
 bun run dev --filter=server --filter=web
 ```
 
-Open `http://localhost:5173` in two tabs. Select Dusk Suite and complete the media check in the
-first tab, then open its invite link in the second, enter a name, and knock. The guest waits outside
+Open `http://localhost:5173` in two tabs. Start a call and complete the media check in the first tab,
+then open its invite link in the second, enter a name, and knock. The guest waits outside
 the room until the host allows the request; admission starts the peer connection and brings both
 callers to the room display. Localhost is treated as a secure browser context, so camera,
 microphone, and WebGPU APIs are available during development.
