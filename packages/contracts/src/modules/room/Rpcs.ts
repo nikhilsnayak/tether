@@ -1,6 +1,9 @@
 import { Rpc, RpcGroup } from 'effect/unstable/rpc';
 
+import { RoomNotFound } from './Errors';
 import {
+  GetRoomMetadataPayload,
+  GetRoomMetadataSuccess,
   LeaveRoomPayload,
   OpenRoomSessionError,
   OpenRoomSessionPayload,
@@ -16,6 +19,12 @@ const OpenRoomSessionRpc = Rpc.make('OpenRoomSession', {
   payload: OpenRoomSessionPayload,
   success: OpenRoomSessionSuccess,
   error: OpenRoomSessionError,
+});
+
+const GetRoomMetadataRpc = Rpc.make('GetRoomMetadata', {
+  payload: GetRoomMetadataPayload,
+  success: GetRoomMetadataSuccess,
+  error: RoomNotFound,
 });
 
 const RespondToJoinRpc = Rpc.make('RespondToJoin', {
@@ -34,6 +43,7 @@ const LeaveRoomRpc = Rpc.make('LeaveRoom', {
 
 export const RoomRpcs = RpcGroup.make(
   OpenRoomSessionRpc,
+  GetRoomMetadataRpc,
   RespondToJoinRpc,
   SendSignalRpc,
   LeaveRoomRpc,

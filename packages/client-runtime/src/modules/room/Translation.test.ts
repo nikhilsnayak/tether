@@ -1,5 +1,6 @@
 import { assert, describe, it } from '@effect/vitest';
 import {
+  DUSK_SUITE_TEMPLATE_ID,
   DisplayName,
   IceCandidateSignal,
   JoinCancelledEvent,
@@ -24,10 +25,17 @@ const sessionToken = SessionToken.make('session-token');
 describe('translateRoomEventData', () => {
   it('translates a room opening into session, UI, and authentication data', () => {
     assert.deepStrictEqual(
-      translateRoomEventData(new RoomSessionOpenedEvent({ peerId: null, roomId, sessionToken })),
+      translateRoomEventData(
+        new RoomSessionOpenedEvent({
+          peerId: null,
+          roomId,
+          roomTemplateId: DUSK_SUITE_TEMPLATE_ID,
+          sessionToken,
+        }),
+      ),
       {
         input: { _tag: 'RoomSessionOpened', peerId: null },
-        uiEvent: { _tag: 'RoomOpened', roomId },
+        uiEvent: { _tag: 'RoomOpened', roomId, roomTemplateId: DUSK_SUITE_TEMPLATE_ID },
         openedSession: { roomId, sessionToken },
       },
     );

@@ -4,6 +4,7 @@ import type {
   PeerId,
   RoomEvent,
   RoomId,
+  RoomTemplateId,
   SessionToken,
 } from '@tether/contracts/modules/room';
 import type { Deferred, Queue, Stream } from 'effect';
@@ -23,6 +24,7 @@ export type AdmitResult = {
   readonly sessionToken: SessionToken;
   readonly hostPeerId: PeerId;
   readonly events: Queue.Queue<BroadcastRoomEvent>;
+  readonly roomTemplateId: RoomTemplateId;
 };
 
 export type PendingJoin = {
@@ -35,6 +37,7 @@ export type PendingJoin = {
 export type RoomContext = {
   members: Member[];
   pending: PendingJoin[];
+  readonly roomTemplateId: RoomTemplateId;
 };
 
 export type RegistryState = Map<RoomId, RoomContext>;

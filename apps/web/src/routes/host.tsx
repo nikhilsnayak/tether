@@ -1,6 +1,6 @@
 import { CatchBoundary, createFileRoute, useNavigate } from '@tanstack/react-router';
 import type { RoomSession } from '@tether/client-runtime/modules/room';
-import { PeerId } from '@tether/contracts/modules/room';
+import { DUSK_SUITE_TEMPLATE_ID, PeerId } from '@tether/contracts/modules/room';
 import { Suspense, useState } from 'react';
 
 import { generatePeerId } from '@/lib/utils';
@@ -16,7 +16,11 @@ function HostPage() {
   const navigate = useNavigate();
   const [selfId] = useState(() => PeerId.make(generatePeerId()));
   // The host mints no roomId; the server does, and it arrives in the view.
-  const [session] = useState<RoomSession>(() => ({ intent: 'host', selfId }));
+  const [session] = useState<RoomSession>(() => ({
+    intent: 'host',
+    selfId,
+    roomTemplateId: DUSK_SUITE_TEMPLATE_ID,
+  }));
 
   return (
     <CatchBoundary errorComponent={CallErrorScreen} getResetKey={() => selfId}>

@@ -1,6 +1,13 @@
 import { Schema } from 'effect';
 
-import { PeerId, RoomId } from './Identity';
+import { PeerId, RoomId, RoomTemplateId } from './Identity';
+
+export class UnsupportedRoomTemplate extends Schema.TaggedErrorClass<UnsupportedRoomTemplate>()(
+  '@tether/UnsupportedRoomTemplate',
+  { roomTemplateId: RoomTemplateId },
+) {}
+
+export const isUnsupportedRoomTemplate = Schema.is(UnsupportedRoomTemplate);
 
 export class RoomFull extends Schema.TaggedErrorClass<RoomFull>()('@tether/RoomFull', {
   roomId: RoomId,

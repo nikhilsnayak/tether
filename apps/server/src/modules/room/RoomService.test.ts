@@ -1,5 +1,6 @@
 import { assert, describe, it } from '@effect/vitest';
 import {
+  DUSK_SUITE_TEMPLATE_ID,
   DisplayName,
   JoinCancelledEvent,
   JoinDenied,
@@ -14,9 +15,11 @@ import {
   RoomId,
   RoomNotFound,
   RoomSessionOpenedEvent,
+  RoomTemplateId,
   ServerAtCapacity,
   SessionDescriptionSignal,
   SignalReceivedEvent,
+  UnsupportedRoomTemplate,
 } from '@tether/contracts/modules/room';
 import { Crypto, Deferred, Effect, Exit, Fiber, Layer, Schema, Scope, Stream } from 'effect';
 import { TestClock } from 'effect/testing';
@@ -48,6 +51,8 @@ const letters = (length: number, index: number) => {
   return value.join('');
 };
 const randomPeerId = (index: number) => PeerId.make(letters(12, index));
+const hostRoom = (room: RoomService['Service'], selfId: PeerId) =>
+  room.host(selfId, DUSK_SUITE_TEMPLATE_ID);
 
 const withRoomService = <A, E, R>(effect: Effect.Effect<A, E, R | RoomService>) =>
   effect.pipe(Effect.provide(RoomService.layer), Effect.provide(ServerCrypto.layer));
@@ -76,7 +81,7 @@ const isOpened = (event: { readonly _tag: string }) =>
 const openHostRoomId = Effect.fnUntraced(function* (self: PeerId) {
   const room = yield* RoomService;
   const roomIdDeferred = yield* Deferred.make<RoomId>();
-  const stream = yield* room.host(self);
+  const stream = yield* hostRoom(room, self);
   yield* stream.pipe(
     Stream.tap((event) =>
       isOpened(event)
@@ -100,7 +105,7 @@ const connect = Effect.fnUntraced(function* (options: {
   const aliceTokenDeferred = yield* Deferred.make<string>();
   const bobTokenDeferred = yield* Deferred.make<string>();
 
-  const aliceStream = yield* room.host(alice);
+  const aliceStream = yield* hostRoom(room, alice);
   const aliceFiber = yield* aliceStream.pipe(
     Stream.tap((event) =>
       isOpened(event)
@@ -140,13 +145,37 @@ const offer = (sdp: string) =>
   new SessionDescriptionSignal({ negotiationEpoch: 0, type: 'offer', sdp });
 
 describe('RoomService knock-to-join', () => {
+  it.effect('deletes template metadata when the ephemeral room closes', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const room = yield* RoomService;
+        const hostScope = yield* Scope.make();
+        const events = yield* room
+          .host(alice, DUSK_SUITE_TEMPLATE_ID)
+          .pipe(Scope.provide(hostScope));
+        const opened = requireOpenedEvent(
+          (yield* events.pipe(Stream.take(1), Stream.runCollect))[0],
+        );
+
+        assert.deepStrictEqual(yield* room.getRoomMetadata(opened.roomId), {
+          roomTemplateId: DUSK_SUITE_TEMPLATE_ID,
+        });
+        yield* Scope.close(hostScope, Exit.void);
+        assert.instanceOf(
+          yield* room.getRoomMetadata(opened.roomId).pipe(Effect.flip),
+          RoomNotFound,
+        );
+      }),
+    ),
+  );
+
   it.effect('mints a room id and surfaces a knock to the host', () =>
     withRoomService(
       Effect.gen(function* () {
         const room = yield* RoomService;
         const roomIdDeferred = yield* Deferred.make<RoomId>();
 
-        const aliceStream = yield* room.host(alice);
+        const aliceStream = yield* hostRoom(room, alice);
         const aliceFiber = yield* aliceStream.pipe(
           Stream.tap((event) =>
             isOpened(event)
@@ -168,6 +197,10 @@ describe('RoomService knock-to-join', () => {
 
         assert.strictEqual(aliceOpened.roomId, roomId);
         assert.strictEqual(aliceOpened.peerId, null);
+        assert.strictEqual(aliceOpened.roomTemplateId, DUSK_SUITE_TEMPLATE_ID);
+        assert.deepStrictEqual(yield* room.getRoomMetadata(roomId), {
+          roomTemplateId: DUSK_SUITE_TEMPLATE_ID,
+        });
         assert.deepStrictEqual(
           aliceEvents[1],
           new JoinRequestedEvent({ peerId: bob, displayName: bobName }),
@@ -192,6 +225,7 @@ describe('RoomService knock-to-join', () => {
         assert.deepStrictEqual(bobEvents[0], new JoinPendingEvent({}));
         assert.strictEqual(bobOpened.peerId, alice);
         assert.strictEqual(bobOpened.roomId, roomId);
+        assert.strictEqual(bobOpened.roomTemplateId, DUSK_SUITE_TEMPLATE_ID);
         assert.notStrictEqual(aliceToken, bobToken);
 
         // Both admitted members can signal without error.
@@ -212,7 +246,7 @@ describe('RoomService knock-to-join', () => {
         const aliceTokenDeferred = yield* Deferred.make<string>();
         const bobOpenedDeferred = yield* Deferred.make<void>();
 
-        const aliceStream = yield* room.host(alice);
+        const aliceStream = yield* hostRoom(room, alice);
         yield* aliceStream.pipe(
           Stream.tap((event) =>
             isOpened(event)
@@ -268,7 +302,7 @@ describe('RoomService knock-to-join', () => {
         const aliceScope = yield* Scope.make();
         const bobScope = yield* Scope.make();
 
-        const aliceStream = yield* room.host(alice).pipe(Scope.provide(aliceScope));
+        const aliceStream = yield* hostRoom(room, alice).pipe(Scope.provide(aliceScope));
         yield* aliceStream.pipe(
           Stream.tap((event) =>
             isOpened(event)
@@ -313,7 +347,7 @@ describe('RoomService knock-to-join', () => {
         const roomIdDeferred = yield* Deferred.make<RoomId>();
         const aliceTokenDeferred = yield* Deferred.make<string>();
 
-        const aliceStream = yield* room.host(alice);
+        const aliceStream = yield* hostRoom(room, alice);
         yield* aliceStream.pipe(
           Stream.tap((event) =>
             isOpened(event)
@@ -357,7 +391,7 @@ describe('RoomService knock-to-join', () => {
         const roomIdDeferred = yield* Deferred.make<RoomId>();
         const aliceTokenDeferred = yield* Deferred.make<string>();
 
-        const aliceStream = yield* room.host(alice);
+        const aliceStream = yield* hostRoom(room, alice);
         yield* aliceStream.pipe(
           Stream.tap((event) =>
             isOpened(event)
@@ -459,7 +493,7 @@ describe('RoomService knock-to-join', () => {
         const roomIdDeferred = yield* Deferred.make<RoomId>();
         const aliceScope = yield* Scope.make();
 
-        const aliceStream = yield* room.host(alice).pipe(Scope.provide(aliceScope));
+        const aliceStream = yield* hostRoom(room, alice).pipe(Scope.provide(aliceScope));
         yield* aliceStream.pipe(
           Stream.tap((event) =>
             isOpened(event)
@@ -496,7 +530,7 @@ describe('RoomService knock-to-join', () => {
         const roomIdDeferred = yield* Deferred.make<RoomId>();
         const aliceTokenDeferred = yield* Deferred.make<string>();
 
-        const aliceStream = yield* room.host(alice);
+        const aliceStream = yield* hostRoom(room, alice);
         yield* aliceStream.pipe(
           Stream.tap((event) =>
             isOpened(event)
@@ -540,7 +574,7 @@ describe('RoomService knock-to-join', () => {
         const roomIdDeferred = yield* Deferred.make<RoomId>();
         const aliceTokenDeferred = yield* Deferred.make<string>();
 
-        const aliceStream = yield* room.host(alice);
+        const aliceStream = yield* hostRoom(room, alice);
         yield* aliceStream.pipe(
           Stream.tap((event) =>
             isOpened(event)
@@ -578,7 +612,7 @@ describe('RoomService knock-to-join', () => {
         const room = yield* RoomService;
         const roomIdDeferred = yield* Deferred.make<RoomId>();
 
-        const aliceStream = yield* room.host(alice);
+        const aliceStream = yield* hostRoom(room, alice);
         const aliceFiber = yield* aliceStream.pipe(
           Stream.tap((event) =>
             isOpened(event)
@@ -616,7 +650,7 @@ describe('RoomService knock-to-join', () => {
         const room = yield* RoomService;
         const roomIdDeferred = yield* Deferred.make<RoomId>();
 
-        const aliceStream = yield* room.host(alice);
+        const aliceStream = yield* hostRoom(room, alice);
         const aliceFiber = yield* aliceStream.pipe(
           Stream.tap((event) =>
             isOpened(event)
@@ -650,7 +684,7 @@ describe('RoomService knock-to-join', () => {
         const room = yield* RoomService;
         const roomIdDeferred = yield* Deferred.make<RoomId>();
         const aliceTokenDeferred = yield* Deferred.make<string>();
-        const aliceStream = yield* room.host(alice);
+        const aliceStream = yield* hostRoom(room, alice);
         const aliceFiber = yield* aliceStream.pipe(
           Stream.tap((event) =>
             isOpened(event)
@@ -836,7 +870,7 @@ describe('RoomService signalling', () => {
         const roomIdDeferred = yield* Deferred.make<RoomId>();
         const aliceTokenDeferred = yield* Deferred.make<string>();
 
-        const aliceStream = yield* room.host(alice);
+        const aliceStream = yield* hostRoom(room, alice);
         const aliceFiber = yield* aliceStream.pipe(
           Stream.tap((event) =>
             isOpened(event)
@@ -882,13 +916,34 @@ describe('RoomService signalling', () => {
 });
 
 describe('RoomService capacity', () => {
+  it.effect('rejects unsupported templates before consuming creation capacity', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const room = yield* RoomService;
+        const futureTemplate = RoomTemplateId.make('future-room');
+
+        const unsupported = yield* room.host(alice, futureTemplate).pipe(Effect.flip);
+        assert.deepStrictEqual(
+          unsupported,
+          new UnsupportedRoomTemplate({ roomTemplateId: futureTemplate }),
+        );
+
+        yield* Effect.forEach(
+          Array.from({ length: ROOM_CREATE_BUCKET_CAPACITY }, (_, index) => index),
+          (index) => hostRoom(room, randomPeerId(index)),
+          { discard: true },
+        );
+      }),
+    ),
+  );
+
   it.effect('rejects a room after exhausting colliding minted ids', () =>
     withDeterministicRoomService(
       Effect.gen(function* () {
         const room = yield* RoomService;
-        yield* room.host(alice);
+        yield* hostRoom(room, alice);
 
-        const error = yield* room.host(bob).pipe(Effect.flip);
+        const error = yield* hostRoom(room, bob).pipe(Effect.flip);
         assert.instanceOf(error, ServerAtCapacity);
       }),
     ),
@@ -901,11 +956,13 @@ describe('RoomService capacity', () => {
 
         yield* Effect.forEach(
           Array.from({ length: ROOM_CREATE_BUCKET_CAPACITY }, (_, index) => index),
-          (index) => room.host(randomPeerId(index)),
+          (index) => hostRoom(room, randomPeerId(index)),
           { discard: true },
         );
 
-        const error = yield* room.host(randomPeerId(ROOM_CREATE_BUCKET_CAPACITY)).pipe(Effect.flip);
+        const error = yield* hostRoom(room, randomPeerId(ROOM_CREATE_BUCKET_CAPACITY)).pipe(
+          Effect.flip,
+        );
         assert.instanceOf(error, ServerAtCapacity);
       }),
     ),
@@ -918,16 +975,16 @@ describe('RoomService capacity', () => {
 
         yield* Effect.forEach(
           Array.from({ length: ROOM_CREATE_BUCKET_CAPACITY }, (_, index) => index),
-          (index) => room.host(randomPeerId(index)),
+          (index) => hostRoom(room, randomPeerId(index)),
           { discard: true },
         );
 
-        const rejected = yield* room.host(randomPeerId(100)).pipe(Effect.flip);
+        const rejected = yield* hostRoom(room, randomPeerId(100)).pipe(Effect.flip);
         assert.instanceOf(rejected, ServerAtCapacity);
 
         yield* TestClock.adjust(ROOM_CREATE_BUCKET_REFILL_EVERY);
 
-        const events = yield* room.host(randomPeerId(101));
+        const events = yield* hostRoom(room, randomPeerId(101));
         const opened = requireOpenedEvent(
           (yield* events.pipe(Stream.take(1), Stream.runCollect))[0],
         );
@@ -944,11 +1001,11 @@ describe('RoomService capacity', () => {
 
         yield* Effect.forEach(
           Array.from({ length: ROOM_CREATE_BUCKET_CAPACITY - 1 }, (_, index) => index),
-          (index) => room.host(randomPeerId(index)),
+          (index) => hostRoom(room, randomPeerId(index)),
           { discard: true },
         );
 
-        const rejected = yield* room.host(randomPeerId(500)).pipe(Effect.flip);
+        const rejected = yield* hostRoom(room, randomPeerId(500)).pipe(Effect.flip);
         assert.instanceOf(rejected, ServerAtCapacity);
 
         const joinerStream = yield* room.join(roomId, bob, bobName);
@@ -967,13 +1024,13 @@ describe('RoomService capacity', () => {
         yield* Effect.forEach(
           Array.from({ length: MAX_LIVE_ROOMS - 1 }, (_, index) => index),
           (index) =>
-            room
-              .host(randomPeerId(index))
-              .pipe(Effect.tap(() => TestClock.adjust(ROOM_CREATE_BUCKET_REFILL_EVERY))),
+            hostRoom(room, randomPeerId(index)).pipe(
+              Effect.tap(() => TestClock.adjust(ROOM_CREATE_BUCKET_REFILL_EVERY)),
+            ),
           { discard: true },
         );
 
-        const error = yield* room.host(randomPeerId(9999)).pipe(Effect.flip);
+        const error = yield* hostRoom(room, randomPeerId(9999)).pipe(Effect.flip);
         assert.instanceOf(error, ServerAtCapacity);
 
         const joinerStream = yield* room.join(roomId, bob, bobName);

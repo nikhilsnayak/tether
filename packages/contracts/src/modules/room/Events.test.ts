@@ -7,6 +7,7 @@ import {
   isRoomFull,
   isRoomNotFound,
   isServerAtCapacity,
+  isUnsupportedRoomTemplate,
   JoinCancelledEvent,
   JoinDenied,
   OpenRoomSessionError,
@@ -16,6 +17,7 @@ import {
   RoomNotFound,
   RoomSessionOpenedEvent,
   ServerAtCapacity,
+  UnsupportedRoomTemplate,
 } from './index';
 import { iceCandidate, sessionDescription, succeeds } from './test-helpers';
 
@@ -27,6 +29,7 @@ describe('room events and errors', () => {
         peerId: null,
         sessionToken: 'session-token',
         roomId: 'abc-defg-hij',
+        roomTemplateId: 'dusk-suite',
       }),
     );
     assert.isTrue(
@@ -71,6 +74,11 @@ describe('room events and errors', () => {
       ],
       [RoomNotFound, isRoomNotFound, { _tag: '@tether/RoomNotFound', roomId: 'abc-defg-hij' }],
       [JoinDenied, isJoinDenied, { _tag: '@tether/JoinDenied' }],
+      [
+        UnsupportedRoomTemplate,
+        isUnsupportedRoomTemplate,
+        { _tag: '@tether/UnsupportedRoomTemplate', roomTemplateId: 'future-room' },
+      ],
     ] as const;
 
     for (const [guard, input] of cases.map(([, guard, input]) => [guard, input] as const)) {

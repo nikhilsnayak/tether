@@ -8,9 +8,10 @@ import {
   RoomFull,
   RoomNotFound,
   ServerAtCapacity,
+  UnsupportedRoomTemplate,
 } from './Errors';
 import { RoomEvent } from './Events';
-import { DisplayName, PeerId, RoomId, SessionToken } from './Identity';
+import { DisplayName, PeerId, RoomId, RoomTemplateId, SessionToken } from './Identity';
 import { Signal } from './Signals';
 
 // A host mints a fresh room; a joiner must name the room and itself. Modelling
@@ -20,6 +21,7 @@ export const OpenRoomSessionPayload = Schema.Union([
   Schema.Struct({
     intent: Schema.Literal('host'),
     selfId: PeerId,
+    roomTemplateId: RoomTemplateId,
   }),
   Schema.Struct({
     intent: Schema.Literal('join'),
@@ -40,7 +42,12 @@ export const OpenRoomSessionError = Schema.Union([
   PeerAlreadyJoined,
   RoomNotFound,
   JoinDenied,
+  UnsupportedRoomTemplate,
 ]);
+
+export const GetRoomMetadataPayload = Schema.Struct({ roomId: RoomId });
+
+export const GetRoomMetadataSuccess = Schema.Struct({ roomTemplateId: RoomTemplateId });
 
 export const RespondToJoinPayload = Schema.Struct({
   roomId: RoomId,

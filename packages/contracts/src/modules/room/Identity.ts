@@ -8,6 +8,14 @@ const RoomIdString = Schema.String.check(Schema.isPattern(/^[a-z]{3}-[a-z]{4}-[a
 export const RoomId = RoomIdString.pipe(Schema.brand('RoomId'));
 export type RoomId = typeof RoomId.Type;
 
+const RoomTemplateIdString = Schema.String.check(
+  Schema.isPattern(/^(?=.{1,64}$)[a-z0-9]+(?:-[a-z0-9]+)*$/),
+);
+export const RoomTemplateId = RoomTemplateIdString.pipe(Schema.brand('RoomTemplateId'));
+export type RoomTemplateId = typeof RoomTemplateId.Type;
+
+export const DUSK_SUITE_TEMPLATE_ID = RoomTemplateId.make('dusk-suite');
+
 export const SessionToken = Schema.String.check(
   Schema.isMinLength(1),
   Schema.isMaxLength(128),

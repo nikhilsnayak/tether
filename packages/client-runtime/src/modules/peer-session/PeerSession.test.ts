@@ -1,5 +1,6 @@
 import { assert, describe, it } from '@effect/vitest';
 import {
+  DUSK_SUITE_TEMPLATE_ID,
   DisplayName,
   IceCandidateSignal,
   JoinCancelledEvent,
@@ -88,10 +89,15 @@ const openedEvent = (peerId: PeerId | null) =>
     peerId,
     sessionToken: testSessionToken,
     roomId: session.roomId,
+    roomTemplateId: DUSK_SUITE_TEMPLATE_ID,
   });
 
 // Every RoomSessionOpenedEvent makes the actor surface the minted roomId first.
-const roomOpened: PeerSessionEvent = { _tag: 'RoomOpened', roomId: session.roomId };
+const roomOpened: PeerSessionEvent = {
+  _tag: 'RoomOpened',
+  roomId: session.roomId,
+  roomTemplateId: DUSK_SUITE_TEMPLATE_ID,
+};
 
 const makeFixture = Effect.fn('makeFixture')(function* (
   openRoomSession: AppClient['Service']['OpenRoomSession'] = (() =>
@@ -253,6 +259,10 @@ const makeFixture = Effect.fn('makeFixture')(function* (
     Layer.succeed(
       AppClient,
       AppClient.of({
+        GetRoomMetadata: (() =>
+          Effect.succeed({
+            roomTemplateId: DUSK_SUITE_TEMPLATE_ID,
+          })) as AppClient['Service']['GetRoomMetadata'],
         LeaveRoom: () =>
           Effect.sync(() => {
             operations.push('leaveRoom');
@@ -306,8 +316,13 @@ const makeFixture = Effect.fn('makeFixture')(function* (
       switch (event._tag) {
         case '@tether/RoomSessionOpenedEvent':
           return Effect.gen(function* () {
-            events.push({ _tag: 'RoomOpened', roomId: event.roomId });
-            yield* Queue.offer(eventQueue, { _tag: 'RoomOpened', roomId: event.roomId });
+            const opened: PeerSessionEvent = {
+              _tag: 'RoomOpened',
+              roomId: event.roomId,
+              roomTemplateId: event.roomTemplateId,
+            };
+            events.push(opened);
+            yield* Queue.offer(eventQueue, opened);
             yield* peerActor.handleInput({ _tag: 'RoomSessionOpened', peerId: event.peerId });
           });
         case '@tether/PeerJoinedEvent':
@@ -2680,6 +2695,7 @@ describe('reducePeerSessionView', () => {
         sas: '11111 22222 33333 44444 55555',
         pendingJoinRequests: [],
         roomId: null,
+        roomTemplateId: null,
       },
       { _tag: 'SessionStarted' },
     );
@@ -2712,6 +2728,7 @@ describe('reducePeerSessionView', () => {
       sas: '11111 22222 33333 44444 55555',
       pendingJoinRequests: [],
       roomId: null,
+      roomTemplateId: null,
     });
   });
 
@@ -2724,6 +2741,7 @@ describe('reducePeerSessionView', () => {
         sas: '11111 22222 33333 44444 55555',
         pendingJoinRequests: [],
         roomId: null,
+        roomTemplateId: null,
       },
       { _tag: 'SignalingDisconnected' },
     );
@@ -2735,6 +2753,7 @@ describe('reducePeerSessionView', () => {
       sas: '11111 22222 33333 44444 55555',
       pendingJoinRequests: [],
       roomId: null,
+      roomTemplateId: null,
     });
   });
 
@@ -2747,6 +2766,7 @@ describe('reducePeerSessionView', () => {
         sas: '11111 22222 33333 44444 55555',
         pendingJoinRequests: [],
         roomId: null,
+        roomTemplateId: null,
       },
       { _tag: 'ChatUnavailable' },
     );
@@ -2758,6 +2778,7 @@ describe('reducePeerSessionView', () => {
       sas: '11111 22222 33333 44444 55555',
       pendingJoinRequests: [],
       roomId: null,
+      roomTemplateId: null,
     });
   });
 
@@ -2770,6 +2791,7 @@ describe('reducePeerSessionView', () => {
         sas: null,
         pendingJoinRequests: [],
         roomId: null,
+        roomTemplateId: null,
       },
       { _tag: 'SessionFailed' },
     );
@@ -2781,6 +2803,7 @@ describe('reducePeerSessionView', () => {
       sas: null,
       pendingJoinRequests: [],
       roomId: null,
+      roomTemplateId: null,
     });
   });
 
@@ -2793,6 +2816,7 @@ describe('reducePeerSessionView', () => {
         sas: null,
         pendingJoinRequests: [],
         roomId: null,
+        roomTemplateId: null,
       },
       { _tag: 'RoomJoinRejected', reason: 'room-full' },
     );
@@ -2804,6 +2828,7 @@ describe('reducePeerSessionView', () => {
       sas: null,
       pendingJoinRequests: [],
       roomId: null,
+      roomTemplateId: null,
     });
   });
 
@@ -2816,6 +2841,7 @@ describe('reducePeerSessionView', () => {
         sas: null,
         pendingJoinRequests: [],
         roomId: null,
+        roomTemplateId: null,
       },
       { _tag: 'RoomJoinRejected', reason: 'peer-already-joined' },
     );
@@ -2827,6 +2853,7 @@ describe('reducePeerSessionView', () => {
       sas: null,
       pendingJoinRequests: [],
       roomId: null,
+      roomTemplateId: null,
     });
   });
 
@@ -2839,6 +2866,7 @@ describe('reducePeerSessionView', () => {
         sas: '11111 22222 33333 44444 55555',
         pendingJoinRequests: [],
         roomId: null,
+        roomTemplateId: null,
       },
       { _tag: 'PeerDeparted', peerId: bob },
     );
@@ -2850,6 +2878,7 @@ describe('reducePeerSessionView', () => {
       sas: null,
       pendingJoinRequests: [],
       roomId: null,
+      roomTemplateId: null,
     });
   });
 });

@@ -10,11 +10,14 @@ export const RoomHandlers = RoomRpcs.toLayer(
     return RoomRpcs.of({
       OpenRoomSession: Effect.fnUntraced(function* (payload) {
         const events = yield* payload.intent === 'host'
-          ? room.host(payload.selfId)
+          ? room.host(payload.selfId, payload.roomTemplateId)
           : room.join(payload.roomId, payload.selfId, payload.displayName);
 
         return events.pipe(Stream.map((event) => ({ event })));
       }, Stream.unwrap),
+      GetRoomMetadata: Effect.fnUntraced(function* ({ roomId }) {
+        return yield* room.getRoomMetadata(roomId);
+      }),
       RespondToJoin: Effect.fnUntraced(function* ({
         roomId,
         selfId,

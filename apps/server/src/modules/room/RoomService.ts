@@ -1,4 +1,9 @@
-import { RoomId, type DisplayName, type PeerId } from '@tether/contracts/modules/room';
+import {
+  RoomId,
+  type DisplayName,
+  type PeerId,
+  type RoomTemplateId,
+} from '@tether/contracts/modules/room';
 import { Context, Effect, Layer } from 'effect';
 
 import { RoomAdmission } from './Admission';
@@ -12,11 +17,21 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
     const admission = yield* RoomAdmission;
     const signaling = yield* RoomSignaling;
 
-    const host = Effect.fn('@tether/RoomService.host')(function* (selfId: PeerId) {
-      const resource = yield* Effect.acquireRelease(membership.openHost(selfId), (opened) =>
-        membership.removeMember(opened.roomId, selfId),
+    const host = Effect.fn('@tether/RoomService.host')(function* (
+      selfId: PeerId,
+      roomTemplateId: RoomTemplateId,
+    ) {
+      const resource = yield* Effect.acquireRelease(
+        membership.openHost(selfId, roomTemplateId),
+        (opened) => membership.removeMember(opened.roomId, selfId),
       );
       return resource.events;
+    });
+
+    const getRoomMetadata = Effect.fn('@tether/RoomService.getRoomMetadata')(function* (
+      roomId: RoomId,
+    ) {
+      return yield* membership.getRoomMetadata(roomId);
     });
 
     const join = Effect.fn('@tether/RoomService.join')(function* (
@@ -47,7 +62,7 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
       yield* membership.removeMember(roomId, selfId, sessionToken);
     });
 
-    return { host, join, respondToJoin, sendSignal: signaling.sendSignal, leave };
+    return { host, getRoomMetadata, join, respondToJoin, sendSignal: signaling.sendSignal, leave };
   }),
 }) {
   // Leaves Crypto.Crypto as an open requirement; the composition root and tests
