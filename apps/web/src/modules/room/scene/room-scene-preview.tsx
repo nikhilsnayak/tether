@@ -148,7 +148,11 @@ function FramePerformanceMonitor({ onSample }: { readonly onSample: (fps: number
   return null;
 }
 
-function ContextLossGuard({ onLost }: { readonly onLost: () => void }) {
+function ContextLossGuard({
+  updateContextLost,
+}: {
+  readonly updateContextLost: (lost: true) => void;
+}) {
   const { renderer } = useThree();
 
   useEffect(() => {
@@ -156,13 +160,13 @@ function ContextLossGuard({ onLost }: { readonly onLost: () => void }) {
     const backend = renderer.backend as { readonly device?: GPUDevice };
     if (backend.device !== undefined) {
       void backend.device.lost.then(() => {
-        if (active) onLost();
+        if (active) updateContextLost(true);
       });
     }
     return () => {
       active = false;
     };
-  }, [renderer, onLost]);
+  }, [renderer, updateContextLost]);
 
   return null;
 }
@@ -269,7 +273,7 @@ export function RoomScenePreview({
             onSample={(fps) => setAdaptiveQuality((state) => sampleAdaptiveQuality(state, fps))}
           />
         )}
-        <ContextLossGuard onLost={() => setContextLost(true)} />
+        <ContextLossGuard updateContextLost={setContextLost} />
         <Suspense fallback={null}>
           <Scene
             admissionPending={admissionPending}
