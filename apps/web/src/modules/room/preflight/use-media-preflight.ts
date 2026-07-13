@@ -1,10 +1,12 @@
+import { Effect } from 'effect';
 import { useEffect, useRef, useState } from 'react';
 
+import { prepareLocalMedia, type PreparedLocalMedia } from '../peer-session/platform';
 import {
   applyMediaSettings,
   DEFAULT_MEDIA_SETTINGS,
-  stopMediaStream,
   type InitialMediaSettings,
+  type PreparedMediaSelection,
 } from './media';
 
 export type MediaPreflightStatus = 'idle' | 'acquiring' | 'ready' | 'failed';
@@ -14,13 +16,13 @@ export function useMediaPreflight() {
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [settings, setSettings] = useState<InitialMediaSettings>(DEFAULT_MEDIA_SETTINGS);
   const [error, setError] = useState<unknown>(null);
-  const streamRef = useRef<MediaStream | null>(null);
+  const preparedMediaRef = useRef<PreparedLocalMedia | null>(null);
   const requestGenerationRef = useRef(0);
 
   const release = () => {
     requestGenerationRef.current += 1;
-    stopMediaStream(streamRef.current);
-    streamRef.current = null;
+    void preparedMediaRef.current?.cancel();
+    preparedMediaRef.current = null;
     setStream(null);
   };
 
@@ -30,14 +32,14 @@ export function useMediaPreflight() {
     setStatus('acquiring');
     setError(null);
     try {
-      const next = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      const next = await Effect.runPromise(prepareLocalMedia());
       if (requestGeneration !== requestGenerationRef.current) {
-        stopMediaStream(next);
+        await next.cancel();
         return;
       }
-      applyMediaSettings(next, settings);
-      streamRef.current = next;
-      setStream(next);
+      applyMediaSettings(next.stream, settings);
+      preparedMediaRef.current = next;
+      setStream(next.stream);
       setStatus('ready');
     } catch (cause) {
       if (requestGeneration !== requestGenerationRef.current) return;
@@ -48,17 +50,26 @@ export function useMediaPreflight() {
 
   const updateSettings = (next: InitialMediaSettings) => {
     setSettings(next);
-    if (streamRef.current !== null) applyMediaSettings(streamRef.current, next);
+    if (preparedMediaRef.current !== null)
+      applyMediaSettings(preparedMediaRef.current.stream, next);
+  };
+
+  const transfer = (): PreparedMediaSelection => {
+    const preparedMedia = preparedMediaRef.current;
+    if (preparedMedia === null) throw new Error('Local media is not ready');
+    const media = preparedMedia.transfer();
+    preparedMediaRef.current = null;
+    return { media, settings };
   };
 
   useEffect(
     () => () => {
       requestGenerationRef.current += 1;
-      stopMediaStream(streamRef.current);
-      streamRef.current = null;
+      void preparedMediaRef.current?.cancel();
+      preparedMediaRef.current = null;
     },
     [],
   );
 
-  return { status, stream, settings, error, acquire, release, updateSettings } as const;
+  return { status, stream, settings, error, acquire, release, transfer, updateSettings } as const;
 }

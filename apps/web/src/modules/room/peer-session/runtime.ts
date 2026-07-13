@@ -1,5 +1,9 @@
 import type { RoomSession } from '@tether/client-runtime/modules/peer-session';
-import { peerSessionEventSinkLayer, startPeerSession } from '@tether/client-runtime/modules/room';
+import {
+  peerSessionEventSinkLayer,
+  startPeerSession,
+  type PreparedMedia,
+} from '@tether/client-runtime/modules/room';
 import { Layer } from 'effect';
 import { Atom } from 'effect/unstable/reactivity';
 
@@ -21,6 +25,7 @@ const peerSessionRuntime = Atom.runtime(
  * suspend during acquisition and release the actor and WebRTC resources when
  * the family member is no longer retained.
  */
-export const peerSessionAtom = Atom.family((session: RoomSession) =>
-  peerSessionRuntime.atom(startPeerSession(session)),
+export const peerSessionAtom = Atom.family(
+  ({ session, preparedMedia }: { session: RoomSession; preparedMedia: PreparedMedia }) =>
+    peerSessionRuntime.atom(startPeerSession(session, preparedMedia)),
 );

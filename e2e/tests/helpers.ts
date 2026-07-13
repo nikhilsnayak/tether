@@ -6,6 +6,7 @@ type WebRtcProbe = {
   readonly configurations: RTCConfiguration[];
   readonly dataChannels: RTCDataChannel[];
   readonly localStreams: MediaStream[];
+  preflightPreviewStream: MediaStream | null;
   readonly peerConnections: RTCPeerConnection[];
   addIceCandidateCalls: number;
   failNextIceCandidate: boolean;
@@ -26,6 +27,7 @@ export const installWebRtcProbe = (context: BrowserContext) =>
       configurations: [],
       dataChannels: [],
       localStreams: [],
+      preflightPreviewStream: null,
       peerConnections: [],
       addIceCandidateCalls: 0,
       failNextIceCandidate: false,
@@ -101,21 +103,30 @@ export const expectWaitingForPeer = (page: Page) =>
     ),
   ]);
 
-export const expectPreflightMediaReleased = (page: Page) =>
+export const expectPreparedMediaTransferred = (page: Page) =>
   expect
     .poll(() =>
       page.evaluate(() => ({
         acquiredStreams: window.__tetherE2E.localStreams.length,
-        actorHasLiveMedia: window.__tetherE2E.localStreams
-          .slice(1)
-          .some((stream) => stream.getTracks().some((track) => track.readyState === 'live')),
-        preflightStopped:
+        actorUsesPreview:
+          window.__tetherE2E.preflightPreviewStream !== null &&
+          window.__tetherE2E.preflightPreviewStream ===
+            document.querySelector<HTMLVideoElement>('video[aria-label="Local video preview"]')
+              ?.srcObject,
+        previewWasAcquired:
+          window.__tetherE2E.preflightPreviewStream === window.__tetherE2E.localStreams[0],
+        streamIsLive:
           window.__tetherE2E.localStreams[0]
             ?.getTracks()
-            .every((track) => track.readyState === 'ended') ?? false,
+            .some((track) => track.readyState === 'live') ?? false,
       })),
     )
-    .toEqual({ acquiredStreams: 2, actorHasLiveMedia: true, preflightStopped: true });
+    .toEqual({
+      acquiredStreams: 1,
+      actorUsesPreview: true,
+      previewWasAcquired: true,
+      streamIsLive: true,
+    });
 
 export const continueInBrowser = (page: Page) =>
   page.getByRole('button', { name: 'Join in this browser' }).click();
@@ -123,7 +134,13 @@ export const continueInBrowser = (page: Page) =>
 export const completeMediaSetup = async (page: Page, actionLabel: string) => {
   await expect(page.getByRole('heading', { name: 'Look and sound ready?' })).toBeVisible();
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
-  await expect(page.getByLabel('Camera preview')).toBeVisible();
+  const preview = page.getByLabel('Camera preview');
+  await expect(preview).toBeVisible();
+  await preview.evaluate((video: HTMLVideoElement) => {
+    if (window.__tetherE2E !== undefined) {
+      window.__tetherE2E.preflightPreviewStream = video.srcObject as MediaStream | null;
+    }
+  });
   await page.getByRole('button', { name: actionLabel, exact: true }).click();
 };
 

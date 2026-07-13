@@ -28,7 +28,7 @@ import { Crypto, Deferred, Effect, Exit, Layer, Queue, Scope, Stream } from 'eff
 import { TestClock } from 'effect/testing';
 
 import { AppClient } from '../../AppClient';
-import { startPeerSession } from '../room/PeerSessionHost';
+import { startPeerSession, type PreparedMedia } from '../room/PeerSessionHost';
 import {
   type DataChannelHandle,
   type IceServer,
@@ -465,6 +465,45 @@ describe('startPeerSession', () => {
         ]);
       }),
     ),
+  );
+
+  it.effect('uses a prepared media handle and adopts its finalizer', () =>
+    Effect.gen(function* () {
+      const scope = yield* Scope.make();
+      const fixture = yield* makeFixture(
+        (() => Stream.never) as AppClient['Service']['OpenRoomSession'],
+      ).pipe(Scope.provide(scope));
+      const preparedStream: MediaStreamHandle = { value: { id: 'prepared-media' } };
+      const preparedMedia: PreparedMedia = {
+        claim: Effect.acquireRelease(
+          Effect.sync(() => {
+            fixture.operations.push('claimPreparedMedia');
+            return preparedStream;
+          }),
+          () => Effect.sync(() => fixture.operations.push('releasePreparedMedia')),
+        ),
+      };
+
+      yield* startPeerSession(session, preparedMedia).pipe(
+        Effect.provide(fixture.dependencies),
+        Scope.provide(scope),
+      );
+      yield* Queue.take(fixture.eventQueue);
+      const localStreamReady = yield* Queue.take(fixture.eventQueue);
+
+      assert.deepStrictEqual(localStreamReady, {
+        _tag: 'LocalStreamReady',
+        stream: preparedStream,
+      });
+      assert.notInclude(fixture.operations, 'acquireLocalMedia');
+      assert.include(fixture.operations, 'claimPreparedMedia');
+
+      yield* Scope.close(scope, Exit.void);
+      assert.lengthOf(
+        fixture.operations.filter((operation) => operation === 'releasePreparedMedia'),
+        1,
+      );
+    }),
   );
 
   it.effect('explicitly leaves the room at most once', () =>

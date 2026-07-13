@@ -2,19 +2,22 @@ import type { RoomSession } from '@tether/client-runtime/modules/peer-session';
 
 import { usePeerConnection } from '../hooks/use-peer-connection';
 import { useScreenWakeLock } from '../hooks/use-screen-wake-lock';
-import type { InitialMediaSettings } from '../preflight/media';
+import type { PreparedMediaSelection } from '../preflight/media';
 import { CallStage } from './call-stage';
 
 export function CallScreen({
   onLeaveRoom,
   session,
-  initialMediaSettings,
+  preparedMedia,
 }: {
   readonly onLeaveRoom: () => void;
   readonly session: RoomSession;
-  readonly initialMediaSettings: InitialMediaSettings;
+  readonly preparedMedia: PreparedMediaSelection;
 }) {
-  const { leave, sendMessage, respondToJoin } = usePeerConnection({ input: session });
+  const { leave, sendMessage, respondToJoin } = usePeerConnection({
+    session,
+    preparedMedia: preparedMedia.media,
+  });
 
   useScreenWakeLock();
 
@@ -24,7 +27,7 @@ export function CallScreen({
   return (
     <CallStage
       session={session}
-      initialMediaSettings={initialMediaSettings}
+      initialMediaSettings={preparedMedia.settings}
       respondToJoin={respondToJoin}
       onLeave={handleLeave}
       onSendMessage={sendMessage}

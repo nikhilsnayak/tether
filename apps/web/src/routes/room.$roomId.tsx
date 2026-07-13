@@ -25,7 +25,7 @@ import {
 } from '@/modules/room/components/call-status-screens';
 import { JoinNamePanel } from '@/modules/room/components/join-name-panel';
 import { detectRoomCapabilities } from '@/modules/room/preflight/capabilities';
-import type { InitialMediaSettings } from '@/modules/room/preflight/media';
+import type { PreparedMediaSelection } from '@/modules/room/preflight/media';
 import { MediaSetupPanel } from '@/modules/room/preflight/media-setup-panel';
 import { resolveRoomTemplate } from '@/modules/room/templates/registry';
 
@@ -41,9 +41,7 @@ function RoomPage() {
   // (and its media grab) until the caller opts to stay in the browser.
   const [joinInBrowser, setJoinInBrowser] = useState(() => !canOfferDesktopApp());
   const [displayName, setDisplayName] = useState<DisplayName | null>(null);
-  const [initialMediaSettings, setInitialMediaSettings] = useState<InitialMediaSettings | null>(
-    null,
-  );
+  const [preparedMedia, setPreparedMedia] = useState<PreparedMediaSelection | null>(null);
   const [capabilities] = useState(detectRoomCapabilities);
   const typedRoomId = RoomId.make(roomId);
   const leave = () => void navigate({ to: '/' });
@@ -80,9 +78,9 @@ function RoomPage() {
           roomId={typedRoomId}
           selfId={selfId}
           displayName={displayName}
-          initialMediaSettings={initialMediaSettings}
+          preparedMedia={preparedMedia}
           onName={setDisplayName}
-          onMedia={setInitialMediaSettings}
+          onMedia={setPreparedMedia}
           onLeave={leave}
         />
       </Suspense>
@@ -94,7 +92,7 @@ function GuestRoomEntry({
   roomId,
   selfId,
   displayName,
-  initialMediaSettings,
+  preparedMedia,
   onName,
   onMedia,
   onLeave,
@@ -102,9 +100,9 @@ function GuestRoomEntry({
   readonly roomId: RoomId;
   readonly selfId: PeerId;
   readonly displayName: DisplayName | null;
-  readonly initialMediaSettings: InitialMediaSettings | null;
+  readonly preparedMedia: PreparedMediaSelection | null;
   readonly onName: (name: DisplayName) => void;
-  readonly onMedia: (settings: InitialMediaSettings) => void;
+  readonly onMedia: (selection: PreparedMediaSelection) => void;
   readonly onLeave: () => void;
 }) {
   const metadata = useAtomSuspense(AppAtomClient.query('GetRoomMetadata', { roomId })).value;
@@ -118,7 +116,7 @@ function GuestRoomEntry({
     return <JoinNamePanel onSubmit={onName} />;
   }
 
-  if (initialMediaSettings === null) {
+  if (preparedMedia === null) {
     return (
       <MediaSetupPanel
         template={resolution.template}
@@ -138,11 +136,7 @@ function GuestRoomEntry({
 
   return (
     <Suspense fallback={<CallLoadingScreen />}>
-      <CallScreen
-        session={session}
-        initialMediaSettings={initialMediaSettings}
-        onLeaveRoom={onLeave}
-      />
+      <CallScreen session={session} preparedMedia={preparedMedia} onLeaveRoom={onLeave} />
     </Suspense>
   );
 }

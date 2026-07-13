@@ -7,7 +7,7 @@ import { LogoMark } from '@/components/logo';
 import { CallControlButton } from '../components/call-controls';
 import { MediaStreamVideo } from '../components/media-stream-video';
 import type { RoomTemplate } from '../templates/registry';
-import type { InitialMediaSettings } from './media';
+import type { PreparedMediaSelection } from './media';
 import { useMediaPreflight } from './use-media-preflight';
 
 export function MediaSetupPanel({
@@ -19,13 +19,13 @@ export function MediaSetupPanel({
   readonly template: RoomTemplate;
   readonly actionLabel: string;
   readonly onBack: () => void;
-  readonly onComplete: (settings: InitialMediaSettings) => void;
+  readonly onComplete: (selection: PreparedMediaSelection) => void;
 }) {
-  const { status, stream, settings, error, acquire, release, updateSettings } = useMediaPreflight();
+  const { status, stream, settings, error, acquire, release, transfer, updateSettings } =
+    useMediaPreflight();
 
   const finish = () => {
-    release();
-    onComplete(settings);
+    onComplete(transfer());
   };
 
   return (

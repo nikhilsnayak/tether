@@ -85,7 +85,7 @@ test('leaving a call and joining a new room starts with clean media', async ({
     await expect(guest).toHaveURL('/');
 
     // Create a fresh room via the Call button (SPA navigation) so the probe
-    // keeps both streams. A lone waiting peer now only exists as a host.
+    // keeps both scoped streams. A lone waiting peer now only exists as a host.
     await guest.getByRole('button', { name: 'Call' }).click();
     await expect(guest).toHaveURL(/\/host$/);
     await startHostingRoom(guest);
@@ -103,9 +103,9 @@ test('leaving a call and joining a new room starts with clean media', async ({
         stream.getTracks().every((track) => track.readyState === 'ended') ? 'ended' : 'live',
       ),
     );
-    // Each room entry acquires a disposable preflight stream followed by the
-    // call stream. Leaving and hosting again must stop all three older streams.
-    expect(streamStates).toEqual(['ended', 'ended', 'ended', 'live']);
+    // Each room entry acquires one stream that moves from preview into the call.
+    // Leaving must stop the prior room's stream while the new host stream stays live.
+    expect(streamStates).toEqual(['ended', 'live']);
   } finally {
     await cleanup();
   }

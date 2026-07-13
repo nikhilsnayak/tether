@@ -14,13 +14,13 @@ import { Button } from '@tether/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@tether/ui/components/tooltip';
 import { cn } from '@tether/ui/lib/utils';
 import { ShieldCheck } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 
 import { LogoMark, Wordmark } from '@/components/logo';
 
 import { useRemoteVideoAvailability } from '../hooks/use-remote-video-availability';
 import { mediaStreamValue } from '../peer-session/platform';
-import { createMediaSettingsApplicator, type InitialMediaSettings } from '../preflight/media';
+import type { InitialMediaSettings } from '../preflight/media';
 import { roomJourneyCue, roomJourneyLabel } from '../scene/journey';
 import { RoomScenePreview } from '../scene/room-scene-preview';
 import { DUSK_SUITE_TEMPLATE } from '../templates/registry';
@@ -62,7 +62,6 @@ export function CallStage({
   const remoteVideoAvailable = useRemoteVideoAvailability(remoteStream);
   const [micOn, setMicOn] = useState(initialMediaSettings.microphone);
   const [cameraOn, setCameraOn] = useState(initialMediaSettings.camera);
-  const mediaSettingsApplicatorRef = useRef(createMediaSettingsApplicator(initialMediaSettings));
   const [sinkId, setSinkId] = useState('');
   const [speakerOn, setSpeakerOn] = useState(true);
   const [confirmedSas, setConfirmedSas] = useState<string | null>(null);
@@ -82,21 +81,15 @@ export function CallStage({
       ? 'Their camera is unavailable.'
       : presentation.hint;
 
-  useEffect(() => {
-    if (localStream !== null) mediaSettingsApplicatorRef.current.apply(localStream);
-  }, [localStream]);
-
   const handleLeave = () => onLeave();
   const handleMicToggle = () => {
     const enabled = !micOn;
     for (const track of localStream?.getAudioTracks() ?? []) track.enabled = enabled;
-    mediaSettingsApplicatorRef.current.update({ microphone: enabled, camera: cameraOn });
     setMicOn(enabled);
   };
   const handleCameraToggle = () => {
     const enabled = !cameraOn;
     for (const track of localStream?.getVideoTracks() ?? []) track.enabled = enabled;
-    mediaSettingsApplicatorRef.current.update({ microphone: micOn, camera: enabled });
     setCameraOn(enabled);
   };
   const handleAudioOutputChange = (value: string) => {

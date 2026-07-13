@@ -8,7 +8,8 @@ import {
   type PlatformEventDispatch,
 } from '@tether/client-runtime/modules/peer-session';
 import type { IceServer } from '@tether/client-runtime/modules/peer-session';
-import { Crypto, Effect, Layer } from 'effect';
+import type { PreparedMedia } from '@tether/client-runtime/modules/room';
+import { Crypto, Effect, Exit, Layer, Scope } from 'effect';
 
 export const webCryptoLayer = Layer.succeed(
   Crypto.Crypto,
@@ -40,6 +41,56 @@ const acquireLocalMedia = Effect.acquireRelease(
       }
     }),
 );
+
+export interface PreparedLocalMedia {
+  readonly stream: MediaStream;
+  readonly cancel: () => Promise<void>;
+  readonly transfer: () => PreparedMedia;
+}
+
+/**
+ * Acquires one preview stream in its own scope. Transfer hands its finalizer to
+ * the peer-session media scope; cancellation before transfer closes it here.
+ */
+export const prepareLocalMedia = Effect.fn('prepareLocalMedia')(function* () {
+  const resourceScope = yield* Scope.make();
+  const handle = yield* acquireLocalMedia.pipe(
+    Scope.provide(resourceScope),
+    Effect.onError(() => Scope.close(resourceScope, Exit.void)),
+  );
+  let ownership: 'preview' | 'transferred' | 'claimed' | 'released' = 'preview';
+
+  const close = () => {
+    ownership = 'released';
+    return Effect.runPromise(Scope.close(resourceScope, Exit.void));
+  };
+
+  return {
+    stream: mediaStreamValue(handle),
+    cancel: () => (ownership === 'preview' ? close() : Promise.resolve()),
+    transfer: () => {
+      if (ownership !== 'preview') {
+        throw new Error('Prepared local media can only be transferred once');
+      }
+      ownership = 'transferred';
+      return {
+        claim: Effect.acquireRelease(
+          Effect.try({
+            try: () => {
+              if (ownership !== 'transferred') {
+                throw new Error('Prepared local media can only be claimed once');
+              }
+              ownership = 'claimed';
+              return handle;
+            },
+            catch: (cause) => new PlatformError({ operation: 'acquire-local-media', cause }),
+          }),
+          () => Effect.promise(close),
+        ),
+      };
+    },
+  } satisfies PreparedLocalMedia;
+});
 
 const acquirePeerConnection = (iceServers: ReadonlyArray<IceServer>) =>
   Effect.acquireRelease(
