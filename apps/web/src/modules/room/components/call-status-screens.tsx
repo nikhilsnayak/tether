@@ -1,6 +1,6 @@
 import { Button } from '@tether/ui/components/button';
 import { cn } from '@tether/ui/lib/utils';
-import { AlertTriangle, LoaderCircle, Monitor } from 'lucide-react';
+import { AlertTriangle, LoaderCircle, Monitor, RefreshCw } from 'lucide-react';
 import { type ReactNode } from 'react';
 
 import { LogoMark, Wordmark } from '@/components/logo';
@@ -52,10 +52,22 @@ export function CallLoadingScreen() {
   return (
     <CallStatusScreen
       indicatorClassName='animate-pulse bg-warning'
-      pillLabel='Starting'
+      pillLabel='Entering'
       icon={<LoaderCircle className='size-9 animate-spin' />}
-      label='Starting your call…'
-      hint='Setting up your connection.'
+      label='Entering the room…'
+      hint='Setting up your private connection.'
+    />
+  );
+}
+
+export function RoomMetadataLoadingScreen() {
+  return (
+    <CallStatusScreen
+      indicatorClassName='animate-pulse bg-warning'
+      pillLabel='Preparing room'
+      icon={<LoaderCircle className='size-9 animate-spin' />}
+      label='Checking the room…'
+      hint='Reading the room details before requesting camera access.'
     />
   );
 }
@@ -73,6 +85,53 @@ export function CallHandoffScreen({ onJoinInBrowser }: { readonly onJoinInBrowse
           Join in this browser
         </Button>
       }
+    />
+  );
+}
+
+export function UnsupportedBrowserScreen({
+  missing,
+  onLeave,
+}: {
+  readonly missing: ReadonlyArray<string>;
+  readonly onLeave: () => void;
+}) {
+  return (
+    <CallStatusScreen
+      indicatorClassName='bg-destructive'
+      pillLabel='Unsupported'
+      icon={<AlertTriangle className='size-9' />}
+      iconClassName='bg-destructive/15 text-destructive'
+      label='This browser cannot enter the room'
+      hint={`A secure browser with WebGL 2, camera access, and WebRTC is required. Missing: ${missing.join(', ')}.`}
+      action={<Button onClick={onLeave}>Return home</Button>}
+    />
+  );
+}
+
+export function UpdateRequiredScreen({ onLeave }: { readonly onLeave: () => void }) {
+  return (
+    <CallStatusScreen
+      indicatorClassName='bg-warning'
+      pillLabel='Update required'
+      icon={<RefreshCw className='size-9' />}
+      label='This room needs a newer Tether'
+      hint='The room uses a template this version does not recognize.'
+      action={<Button onClick={onLeave}>Return home</Button>}
+    />
+  );
+}
+
+export function RoomMissingScreen({ onLeave }: { readonly onLeave: () => void }) {
+  return (
+    <CallStatusScreen
+      indicatorClassName='bg-destructive'
+      pillLabel='Room unavailable'
+      icon={<AlertTriangle className='size-9' />}
+      iconClassName='bg-destructive/15 text-destructive'
+      label='This room is no longer here'
+      hint='Check the room code or ask the host for a new invitation.'
+      action={<Button onClick={onLeave}>Return home</Button>}
     />
   );
 }

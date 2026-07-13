@@ -13,12 +13,13 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@tether/ui/components/t
 import { cn } from '@tether/ui/lib/utils';
 import { ShieldCheck, User } from 'lucide-react';
 import { MessageSquare, Mic, MicOff, PhoneOff, Video, VideoOff } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { LogoMark, Wordmark } from '@/components/logo';
 import { useViewportAspectRatio } from '@/hooks/use-viewport-aspect-ratio';
 
 import { mediaStreamValue } from '../peer-session/platform';
+import { createMediaSettingsApplicator, type InitialMediaSettings } from '../preflight/media';
 import { AudioOutputControl, SPEAKER_OFF } from './audio-output-control';
 import { CallControlButton } from './call-controls';
 import { JoinRequestOverlay } from './join-request-overlay';
@@ -41,20 +42,23 @@ export function CallStage({
   onLeave,
   hasUnread,
   onOpenChat,
+  initialMediaSettings,
 }: {
   readonly session: RoomSession;
   readonly respondToJoin: (peerId: PeerId, decision: 'allow' | 'deny') => Promise<void>;
   readonly onLeave: () => void;
   readonly hasUnread: boolean;
   readonly onOpenChat: () => void;
+  readonly initialMediaSettings: InitialMediaSettings;
 }) {
   const view = useAtomValue(peerSessionViewAtom);
   const localStreamHandle = useAtomValue(peerLocalStreamAtom);
   const remoteStreamHandle = useAtomValue(peerRemoteStreamAtom);
   const localStream = localStreamHandle === null ? null : mediaStreamValue(localStreamHandle);
   const remoteStream = remoteStreamHandle === null ? null : mediaStreamValue(remoteStreamHandle);
-  const [micOn, setMicOn] = useState(true);
-  const [cameraOn, setCameraOn] = useState(true);
+  const [micOn, setMicOn] = useState(initialMediaSettings.microphone);
+  const [cameraOn, setCameraOn] = useState(initialMediaSettings.camera);
+  const mediaSettingsApplicatorRef = useRef(createMediaSettingsApplicator(initialMediaSettings));
   const [sinkId, setSinkId] = useState('');
   const [speakerOn, setSpeakerOn] = useState(true);
   const [confirmedSas, setConfirmedSas] = useState<string | null>(null);
@@ -66,15 +70,21 @@ export function CallStage({
     view.pendingJoinRequests.find((request) => !handlingJoinPeerIds.has(request.peerId)) ?? null;
   const sasConfirmed = view.sas !== null && confirmedSas === view.sas;
 
+  useEffect(() => {
+    if (localStream !== null) mediaSettingsApplicatorRef.current.apply(localStream);
+  }, [localStream]);
+
   const handleLeave = () => onLeave();
   const handleMicToggle = () => {
     const enabled = !micOn;
     for (const track of localStream?.getAudioTracks() ?? []) track.enabled = enabled;
+    mediaSettingsApplicatorRef.current.update({ microphone: enabled, camera: cameraOn });
     setMicOn(enabled);
   };
   const handleCameraToggle = () => {
     const enabled = !cameraOn;
     for (const track of localStream?.getVideoTracks() ?? []) track.enabled = enabled;
+    mediaSettingsApplicatorRef.current.update({ microphone: micOn, camera: enabled });
     setCameraOn(enabled);
   };
   const handleAudioOutputChange = (value: string) => {

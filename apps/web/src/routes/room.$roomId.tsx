@@ -1,8 +1,16 @@
+import { useAtomSuspense } from '@effect/atom-react';
 import { CatchBoundary, createFileRoute, useNavigate } from '@tanstack/react-router';
 import type { RoomSession } from '@tether/client-runtime/modules/room';
-import { DisplayName, PeerId, RoomId } from '@tether/contracts/modules/room';
+import {
+  DisplayName,
+  isRoomNotFound,
+  PeerId,
+  RoomId,
+  type RoomTemplateId,
+} from '@tether/contracts/modules/room';
 import { Suspense, useEffect, useState } from 'react';
 
+import { AppAtomClient } from '@/lib/app-client';
 import { canOfferDesktopApp, desktopRoomUrl } from '@/lib/desktop-handoff';
 import { generatePeerId } from '@/lib/utils';
 import { CallScreen } from '@/modules/room/components/call-screen';
@@ -10,8 +18,16 @@ import {
   CallErrorScreen,
   CallHandoffScreen,
   CallLoadingScreen,
+  RoomMetadataLoadingScreen,
+  RoomMissingScreen,
+  UnsupportedBrowserScreen,
+  UpdateRequiredScreen,
 } from '@/modules/room/components/call-status-screens';
 import { JoinNamePanel } from '@/modules/room/components/join-name-panel';
+import { detectRoomCapabilities } from '@/modules/room/preflight/capabilities';
+import type { InitialMediaSettings } from '@/modules/room/preflight/media';
+import { MediaSetupPanel } from '@/modules/room/preflight/media-setup-panel';
+import { resolveRoomTemplate } from '@/modules/room/templates/registry';
 
 export const Route = createFileRoute('/room/$roomId')({
   component: RoomPage,
@@ -25,6 +41,12 @@ function RoomPage() {
   // (and its media grab) until the caller opts to stay in the browser.
   const [joinInBrowser, setJoinInBrowser] = useState(() => !canOfferDesktopApp());
   const [displayName, setDisplayName] = useState<DisplayName | null>(null);
+  const [initialMediaSettings, setInitialMediaSettings] = useState<InitialMediaSettings | null>(
+    null,
+  );
+  const [capabilities] = useState(detectRoomCapabilities);
+  const typedRoomId = RoomId.make(roomId);
+  const leave = () => void navigate({ to: '/' });
 
   // Fire the tether:// scheme once; the browser's native "Open Tether?" prompt
   // takes over. If the app is absent or declined, the caller taps to join here.
@@ -38,27 +60,89 @@ function RoomPage() {
     return <CallHandoffScreen onJoinInBrowser={() => setJoinInBrowser(true)} />;
   }
 
+  if (!capabilities.supported) {
+    return <UnsupportedBrowserScreen missing={capabilities.missing} onLeave={leave} />;
+  }
+
+  return (
+    <CatchBoundary
+      errorComponent={(props) =>
+        isRoomNotFound(props.error) ? (
+          <RoomMissingScreen onLeave={leave} />
+        ) : (
+          <CallErrorScreen {...props} />
+        )
+      }
+      getResetKey={() => roomId}
+    >
+      <Suspense fallback={<RoomMetadataLoadingScreen />}>
+        <GuestRoomEntry
+          roomId={typedRoomId}
+          selfId={selfId}
+          displayName={displayName}
+          initialMediaSettings={initialMediaSettings}
+          onName={setDisplayName}
+          onMedia={setInitialMediaSettings}
+          onLeave={leave}
+        />
+      </Suspense>
+    </CatchBoundary>
+  );
+}
+
+function GuestRoomEntry({
+  roomId,
+  selfId,
+  displayName,
+  initialMediaSettings,
+  onName,
+  onMedia,
+  onLeave,
+}: {
+  readonly roomId: RoomId;
+  readonly selfId: PeerId;
+  readonly displayName: DisplayName | null;
+  readonly initialMediaSettings: InitialMediaSettings | null;
+  readonly onName: (name: DisplayName) => void;
+  readonly onMedia: (settings: InitialMediaSettings) => void;
+  readonly onLeave: () => void;
+}) {
+  const metadata = useAtomSuspense(AppAtomClient.query('GetRoomMetadata', { roomId })).value;
+  const resolution = resolveRoomTemplate(metadata.roomTemplateId as RoomTemplateId);
+
+  if (resolution._tag === 'UpdateRequired') {
+    return <UpdateRequiredScreen onLeave={onLeave} />;
+  }
+
   if (displayName === null) {
-    return <JoinNamePanel onSubmit={setDisplayName} />;
+    return <JoinNamePanel onSubmit={onName} />;
+  }
+
+  if (initialMediaSettings === null) {
+    return (
+      <MediaSetupPanel
+        template={resolution.template}
+        actionLabel='Knock to join'
+        onBack={onLeave}
+        onComplete={onMedia}
+      />
+    );
   }
 
   const session: RoomSession = {
     intent: 'join',
-    roomId: RoomId.make(roomId),
+    roomId,
     selfId,
     displayName,
   };
 
   return (
-    <CatchBoundary errorComponent={CallErrorScreen} getResetKey={() => roomId}>
-      <Suspense fallback={<CallLoadingScreen />}>
-        <CallScreen
-          session={session}
-          onLeaveRoom={() => {
-            void navigate({ to: '/' });
-          }}
-        />
-      </Suspense>
-    </CatchBoundary>
+    <Suspense fallback={<CallLoadingScreen />}>
+      <CallScreen
+        session={session}
+        initialMediaSettings={initialMediaSettings}
+        onLeaveRoom={onLeave}
+      />
+    </Suspense>
   );
 }

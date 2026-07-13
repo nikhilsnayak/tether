@@ -10,6 +10,7 @@ import { useState } from 'react';
 
 import { usePeerConnection } from '../hooks/use-peer-connection';
 import { useScreenWakeLock } from '../hooks/use-screen-wake-lock';
+import type { InitialMediaSettings } from '../preflight/media';
 import { CallStage } from './call-stage';
 import { CallSessionErrorScreen } from './call-status-screens';
 import { ChatDrawer } from './chat-drawer';
@@ -27,9 +28,11 @@ const statusIndicatorClassName = (presentation: PeerSessionStatusPresentation) =
 export function CallScreen({
   onLeaveRoom,
   session,
+  initialMediaSettings,
 }: {
   readonly onLeaveRoom: () => void;
   readonly session: RoomSession;
+  readonly initialMediaSettings: InitialMediaSettings;
 }) {
   const { leave, sendMessage, respondToJoin } = usePeerConnection({ input: session });
   const view = useAtomValue(peerSessionViewAtom);
@@ -60,6 +63,7 @@ export function CallScreen({
     <>
       <CallStage
         session={session}
+        initialMediaSettings={initialMediaSettings}
         respondToJoin={respondToJoin}
         onLeave={handleLeave}
         hasUnread={hasUnread}
