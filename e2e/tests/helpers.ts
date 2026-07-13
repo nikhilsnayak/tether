@@ -97,6 +97,18 @@ export const expectWaitingForPeer = (page: Page) =>
 export const continueInBrowser = (page: Page) =>
   page.getByRole('button', { name: 'Join in this browser' }).click();
 
+export const completeMediaSetup = async (page: Page, actionLabel: string) => {
+  await expect(page.getByRole('heading', { name: 'Look and sound ready?' })).toBeVisible();
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(page.getByLabel('Camera preview')).toBeVisible();
+  await page.getByRole('button', { name: actionLabel, exact: true }).click();
+};
+
+export const startHostingRoom = async (page: Page) => {
+  await page.getByRole('button', { name: 'Set up Dusk Suite' }).click();
+  await completeMediaSetup(page, 'Create room');
+};
+
 // Joins as a guest: enter the code, continue in-browser, then present a name
 // and knock. The host must still admit before the call connects.
 export const joinRoom = async (page: Page, roomId: string, displayName = 'Guest') => {
@@ -106,7 +118,8 @@ export const joinRoom = async (page: Page, roomId: string, displayName = 'Guest'
   await expect(page).toHaveURL(new RegExp(`/room/${roomId}$`));
   await continueInBrowser(page);
   await page.getByRole('textbox', { name: 'Your name' }).fill(displayName);
-  await page.getByRole('button', { name: 'Knock to join' }).click();
+  await page.getByRole('button', { name: 'Continue to media check' }).click();
+  await completeMediaSetup(page, 'Knock to join');
 };
 
 export const admitGuest = (host: Page) =>
@@ -121,6 +134,7 @@ export const createRoom = async (page: Page) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Call' }).click();
   await expect(page).toHaveURL(/\/host$/);
+  await startHostingRoom(page);
   const inviteLink = page.getByRole('textbox', { name: 'Room invite link' });
   await expect(inviteLink).toBeVisible({ timeout: 20_000 });
   const url = await inviteLink.inputValue();

@@ -16,6 +16,8 @@
   "dependencies": {
     "@effect/atom-react": "catalog:",
     "@effect/vitest": "catalog:",
+    "@react-three/drei": "catalog:",
+    "@react-three/fiber": "catalog:",
     "@rolldown/plugin-babel": "catalog:",
     "@tailwindcss/vite": "catalog:",
     "@tanstack/devtools-vite": "catalog:",
@@ -37,6 +39,7 @@
     "motion": "^12.42.2",
     "react": "catalog:",
     "react-dom": "catalog:",
+    "three": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",
     "vitest": "catalog:"

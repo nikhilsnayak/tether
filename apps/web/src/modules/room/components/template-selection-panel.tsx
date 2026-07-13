@@ -2,6 +2,7 @@ import { Button } from '@tether/ui/components/button';
 
 import { LogoMark } from '@/components/logo';
 
+import { RoomScenePreview } from '../scene/room-scene-preview';
 import { DUSK_SUITE_TEMPLATE, type RoomTemplate } from '../templates/registry';
 
 export function TemplateSelectionPanel({
@@ -24,6 +25,7 @@ export function TemplateSelectionPanel({
           </p>
           <h1 className='text-2xl tracking-tight'>Choose a place to meet</h1>
         </div>
+        <RoomScenePreview template={DUSK_SUITE_TEMPLATE} />
         <button
           type='button'
           onClick={() => onSelect(DUSK_SUITE_TEMPLATE)}

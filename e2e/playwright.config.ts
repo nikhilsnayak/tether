@@ -25,7 +25,13 @@ export default defineConfig({
       use: {
         ...devices['Desktop Chrome'],
         launchOptions: {
-          args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
+          args: [
+            '--enable-features=Vulkan',
+            '--enable-unsafe-webgpu',
+            '--use-angle=vulkan',
+            '--use-fake-device-for-media-stream',
+            '--use-fake-ui-for-media-stream',
+          ],
         },
       },
     },

@@ -7,6 +7,7 @@ import {
   installWebRtcProbe,
   joinRoom,
   requireBaseURL,
+  startHostingRoom,
 } from './helpers';
 import { seededStorageState } from './storage-seed';
 
@@ -69,6 +70,7 @@ test('complete room flow', async ({ browser, page }, testInfo) => {
       await page.goto('/');
       await page.getByRole('button', { name: 'Call' }).click();
       await expect(page).toHaveURL(/\/host$/);
+      await startHostingRoom(page);
       await expect(page.getByText('Room ready')).toBeVisible({ timeout: 20_000 });
       const inviteLink = page.getByRole('textbox', { name: 'Room invite link' });
       await expect(inviteLink).toHaveValue(/\/room\/[a-z]{3}-[a-z]{4}-[a-z]{3}$/);

@@ -6,7 +6,7 @@ const supported: RoomCapabilityEnvironment = {
   isSecureContext: true,
   hasUserMedia: true,
   hasPeerConnection: true,
-  hasWebGl2: true,
+  hasWebGpu: true,
 };
 
 describe('room capabilities', () => {
@@ -20,11 +20,11 @@ describe('room capabilities', () => {
         isSecureContext: false,
         hasUserMedia: false,
         hasPeerConnection: false,
-        hasWebGl2: false,
+        hasWebGpu: false,
       }),
       {
         supported: false,
-        missing: ['secure-context', 'webgl2', 'user-media', 'peer-connection'],
+        missing: ['secure-context', 'webgpu', 'user-media', 'peer-connection'],
       },
     );
   });

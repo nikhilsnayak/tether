@@ -103,7 +103,7 @@ export function UnsupportedBrowserScreen({
       icon={<AlertTriangle className='size-9' />}
       iconClassName='bg-destructive/15 text-destructive'
       label='This browser cannot enter the room'
-      hint={`A secure browser with WebGL 2, camera access, and WebRTC is required. Missing: ${missing.join(', ')}.`}
+      hint={`A secure browser with WebGPU, camera access, and WebRTC is required. Missing: ${missing.join(', ')}.`}
       action={<Button onClick={onLeave}>Return home</Button>}
     />
   );

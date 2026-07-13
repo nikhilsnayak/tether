@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
-import { connectPeers, expectConnected, requireBaseURL } from './helpers';
+import { connectPeers, expectConnected, requireBaseURL, startHostingRoom } from './helpers';
 
 const sendMessage = async (sender: Page, recipient: Page, message: string) => {
   await Promise.all([
@@ -88,6 +88,7 @@ test('leaving a call and joining a new room starts with clean media', async ({
     // keeps both streams. A lone waiting peer now only exists as a host.
     await guest.getByRole('button', { name: 'Call' }).click();
     await expect(guest).toHaveURL(/\/host$/);
+    await startHostingRoom(guest);
     await guest.getByRole('button', { name: 'Close' }).click();
     await expect(guest.getByText('Share this room to invite someone.')).toBeVisible();
 
@@ -99,7 +100,9 @@ test('leaving a call and joining a new room starts with clean media', async ({
         stream.getTracks().every((track) => track.readyState === 'ended') ? 'ended' : 'live',
       ),
     );
-    expect(streamStates).toEqual(['ended', 'live']);
+    // Each room entry acquires a disposable preflight stream followed by the
+    // call stream. Leaving and hosting again must stop all three older streams.
+    expect(streamStates).toEqual(['ended', 'ended', 'ended', 'live']);
   } finally {
     await cleanup();
   }
