@@ -1,6 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { attachRemoteAudio, setRemoteAudioSink } from './remote-audio';
+import { attachRemoteAudio, createKnockPlaybackQueue, setRemoteAudioSink } from './remote-audio';
 
 function fakeAudio() {
   const play = vi.fn(async () => undefined);
@@ -36,5 +36,87 @@ describe('remote audio lifecycle', () => {
     const { element, setSinkId } = fakeAudio();
     setRemoteAudioSink(element, 'speaker-2');
     expect(setSinkId).toHaveBeenCalledWith('speaker-2');
+  });
+});
+
+describe('knock playback queue', () => {
+  beforeEach(() => {
+    vi.stubGlobal('window', globalThis);
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('plays one cue per new pending peer, spaced apart in knock order', () => {
+    const queue = createKnockPlaybackQueue();
+    const play = vi.fn();
+
+    queue.enqueue(['alice', 'bob']);
+    queue.flush(play);
+    expect(play).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(320);
+    expect(play).toHaveBeenCalledTimes(2);
+
+    vi.advanceTimersByTime(320);
+    expect(play).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not replay a peer that is still pending', () => {
+    const queue = createKnockPlaybackQueue();
+    const play = vi.fn();
+
+    queue.enqueue(['alice']);
+    queue.flush(play);
+    vi.advanceTimersByTime(320);
+    expect(play).toHaveBeenCalledTimes(1);
+
+    queue.enqueue(['alice']);
+    queue.flush(play);
+    expect(play).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops a queued cue when the peer withdraws before it plays', () => {
+    const queue = createKnockPlaybackQueue();
+    const play = vi.fn();
+
+    queue.enqueue(['alice', 'bob']);
+    queue.flush(play);
+    expect(play).toHaveBeenCalledTimes(1);
+
+    // Bob withdraws before his cue's turn; the scheduled cue must not fire.
+    queue.enqueue(['alice']);
+    vi.advanceTimersByTime(320);
+    expect(play).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-announces a peer that withdrew and knocked again', () => {
+    const queue = createKnockPlaybackQueue();
+    const play = vi.fn();
+
+    queue.enqueue(['alice']);
+    queue.flush(play);
+    vi.advanceTimersByTime(320);
+    expect(play).toHaveBeenCalledTimes(1);
+
+    queue.enqueue([]);
+    queue.enqueue(['alice']);
+    queue.flush(play);
+    expect(play).toHaveBeenCalledTimes(2);
+  });
+
+  it('pause cancels the next scheduled cue', () => {
+    const queue = createKnockPlaybackQueue();
+    const play = vi.fn();
+
+    queue.enqueue(['alice', 'bob']);
+    queue.flush(play);
+    expect(play).toHaveBeenCalledTimes(1);
+
+    queue.pause();
+    vi.advanceTimersByTime(1_000);
+    expect(play).toHaveBeenCalledTimes(1);
   });
 });

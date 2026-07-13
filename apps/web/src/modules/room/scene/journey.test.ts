@@ -1,7 +1,7 @@
 import type { PeerSessionView } from '@tether/client-runtime/modules/peer-session';
 import { describe, expect, it } from 'vitest';
 
-import { nextUnannouncedPeerId, roomJourneyCue, roomJourneyLabel, roomTransition } from './journey';
+import { roomJourneyCue, roomJourneyLabel, roomTransition } from './journey';
 
 const statuses: ReadonlyArray<PeerSessionView['status']> = [
   'connecting',
@@ -57,13 +57,6 @@ describe('roomJourneyCue', () => {
       kind: 'none',
       durationMs: 0,
     });
-  });
-
-  it('announces queued requests once and in queue order', () => {
-    const requests = [{ peerId: 'first' }, { peerId: 'second' }] as const;
-    expect(nextUnannouncedPeerId(requests, new Set())).toBe('first');
-    expect(nextUnannouncedPeerId(requests, new Set(['first']))).toBe('second');
-    expect(nextUnannouncedPeerId(requests, new Set(['first', 'second']))).toBeNull();
   });
 
   it('maps every runtime status to readable display content', () => {

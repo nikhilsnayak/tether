@@ -2,13 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 
 import { createRoomAudioEngine, type RoomAudioEngine } from '../scene/room-audio';
 
-interface KnockPlaybackQueue {
+export interface KnockPlaybackQueue {
   readonly enqueue: (peerIds: ReadonlyArray<string>) => void;
   readonly flush: (play: () => void) => void;
   readonly pause: () => void;
 }
 
-function createKnockPlaybackQueue(): KnockPlaybackQueue {
+export function createKnockPlaybackQueue(): KnockPlaybackQueue {
   const knownPeerIds = new Set<string>();
   const queuedPeerIds: Array<string> = [];
   let timer: number | null = null;
@@ -30,6 +30,17 @@ function createKnockPlaybackQueue(): KnockPlaybackQueue {
 
   return {
     enqueue(peerIds) {
+      const pending = new Set(peerIds);
+      // Reconcile against the current knocks: forget peers that are no longer
+      // pending so knownPeerIds stays bounded (and a re-knock re-announces), and
+      // drop their queued cues so a withdrawn knock never plays.
+      for (const peerId of knownPeerIds) {
+        if (!pending.has(peerId)) knownPeerIds.delete(peerId);
+      }
+      const stillPending = queuedPeerIds.filter((peerId) => pending.has(peerId));
+      queuedPeerIds.length = 0;
+      queuedPeerIds.push(...stillPending);
+      // Enqueue newly-pending peers in knock order.
       for (const peerId of peerIds) {
         if (knownPeerIds.has(peerId)) continue;
         knownPeerIds.add(peerId);
@@ -71,6 +82,9 @@ export function RemoteAudio({
   const [knockQueue] = useState(createKnockPlaybackQueue);
   const audioRef = useRef<HTMLAudioElement>(null);
   const engineRef = useRef<RoomAudioEngine | null>(null);
+  // Read at engine creation so a speaker toggled off before the first gesture
+  // starts the engine muted, without recreating it on every mute change.
+  const mutedRef = useRef(muted);
 
   useEffect(() => {
     if (activated) return;
@@ -98,6 +112,7 @@ export function RemoteAudio({
     if (!activated || typeof AudioContext === 'undefined') return;
     try {
       const engine = createRoomAudioEngine();
+      engine.setMuted(mutedRef.current);
       engineRef.current = engine;
       return () => {
         knockQueue.pause();
@@ -110,6 +125,7 @@ export function RemoteAudio({
   }, [activated, knockQueue]);
 
   useEffect(() => {
+    mutedRef.current = muted;
     engineRef.current?.setMuted(muted);
   }, [muted]);
 

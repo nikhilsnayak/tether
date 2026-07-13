@@ -58,13 +58,6 @@ export function roomTransition(
   return { kind: 'none', durationMs: 0 };
 }
 
-export function nextUnannouncedPeerId<T extends string>(
-  requests: ReadonlyArray<{ readonly peerId: T }>,
-  announcedPeerIds: ReadonlySet<T>,
-): T | null {
-  return requests.find(({ peerId }) => !announcedPeerIds.has(peerId))?.peerId ?? null;
-}
-
 export const roomJourneyLabel = (cue: RoomJourneyCue): string => {
   switch (cue) {
     case 'waiting':

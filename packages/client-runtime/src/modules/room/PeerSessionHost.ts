@@ -59,6 +59,16 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
   const sessionScope = yield* Scope.Scope;
   const mediaScope = yield* Scope.fork(sessionScope);
   const actorScope = yield* Scope.fork(sessionScope);
+
+  // Claim local media before any suspending work so its finalizer is registered
+  // in mediaScope up front. A prepared preview stream is already live on the
+  // platform side; if the session scope closed before this claim ran, its
+  // teardown would leak. Camera + microphone outlive individual connection
+  // generations and are released once the session reaches a terminal state.
+  const localStream = yield* (preparedMedia?.claim ?? platform.acquireLocalMedia).pipe(
+    Scope.provide(mediaScope),
+  );
+
   const openedSession = yield* Deferred.make<{
     readonly roomId: RoomId;
     readonly sessionToken: SessionToken;
@@ -115,12 +125,6 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
   const localInputStream = Stream.fromQueue(localInputQueue);
 
   yield* peerSessionEventSink.emit({ _tag: 'SessionStarted' });
-
-  // Local camera + microphone outlive individual connection generations but
-  // are released as soon as the session actor reaches a terminal state.
-  const localStream = yield* (preparedMedia?.claim ?? platform.acquireLocalMedia).pipe(
-    Scope.provide(mediaScope),
-  );
   yield* peerSessionEventSink.emit({ _tag: 'LocalStreamReady', stream: localStream });
 
   const actor = yield* makePeerSessionActor(

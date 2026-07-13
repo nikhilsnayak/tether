@@ -506,6 +506,57 @@ describe('startPeerSession', () => {
     }),
   );
 
+  it.effect('claims prepared media before subscribing to the room session stream', () =>
+    Effect.gen(function* () {
+      const scope = yield* Scope.make();
+      const roomStreamSubscribed = yield* Deferred.make<void>();
+      const fixture = yield* makeFixture(
+        (() =>
+          Stream.unwrap(
+            Effect.gen(function* () {
+              fixture.operations.push('openRoomSessionSubscribed');
+              yield* Deferred.succeed(roomStreamSubscribed, undefined);
+              return Stream.never;
+            }),
+          )) as AppClient['Service']['OpenRoomSession'],
+      ).pipe(Scope.provide(scope));
+      const preparedStream: MediaStreamHandle = { value: { id: 'prepared-media' } };
+      const preparedMedia: PreparedMedia = {
+        claim: Effect.acquireRelease(
+          Effect.sync(() => {
+            fixture.operations.push('claimPreparedMedia');
+            return preparedStream;
+          }),
+          () => Effect.sync(() => fixture.operations.push('releasePreparedMedia')),
+        ),
+      };
+
+      yield* startPeerSession(session, preparedMedia).pipe(
+        Effect.provide(fixture.dependencies),
+        Scope.provide(scope),
+      );
+      // Wait until the forked actor loop actually subscribes to the room stream.
+      yield* Deferred.await(roomStreamSubscribed);
+
+      // The prepared preview stream is already live on the platform side, so its
+      // release finalizer must be adopted before any suspending work: the claim
+      // has to precede the room session stream subscription. If it ran after,
+      // a teardown in between would leak the camera and microphone.
+      const claimIndex = fixture.operations.indexOf('claimPreparedMedia');
+      const subscribeIndex = fixture.operations.indexOf('openRoomSessionSubscribed');
+      assert.isAtLeast(claimIndex, 0);
+      assert.isAtLeast(subscribeIndex, 0);
+      assert.isBelow(claimIndex, subscribeIndex);
+
+      // Tearing down without ever connecting still releases the prepared media.
+      yield* Scope.close(scope, Exit.void);
+      assert.lengthOf(
+        fixture.operations.filter((operation) => operation === 'releasePreparedMedia'),
+        1,
+      );
+    }),
+  );
+
   it.effect('explicitly leaves the room at most once', () =>
     Effect.scoped(
       Effect.gen(function* () {
