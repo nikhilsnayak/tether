@@ -61,10 +61,9 @@ export const prepareLocalMedia = Effect.fn('prepareLocalMedia')(function* () {
   );
   let ownership: 'preview' | 'transferred' | 'claimed' | 'released' = 'preview';
 
-  // Idempotent: the preview, transfer-abandonment, and claim-scope paths can all
-  // reach here, but the stream must be torn down exactly once.
+  // cancel only reaches here while unclaimed and a claimed stream is torn down
+  // once by its adopting scope, so the stream is always released exactly once.
   const close = () => {
-    if (ownership === 'released') return Promise.resolve();
     ownership = 'released';
     return Effect.runPromise(Scope.close(resourceScope, Exit.void));
   };

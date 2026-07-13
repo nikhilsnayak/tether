@@ -42,4 +42,16 @@ describe('room capabilities', () => {
 
     assert.deepStrictEqual(detectRoomCapabilities(), { supported: true, missing: [] });
   });
+
+  it('treats a throwing WebGL2 probe as unsupported', () => {
+    vi.stubGlobal('window', { isSecureContext: true, RTCPeerConnection: class {} });
+    vi.stubGlobal('navigator', { mediaDevices: { getUserMedia() {} } });
+    vi.stubGlobal('document', {
+      createElement: () => {
+        throw new Error('canvas unavailable');
+      },
+    });
+
+    assert.deepStrictEqual(detectRoomCapabilities(), { supported: false, missing: ['webgl2'] });
+  });
 });

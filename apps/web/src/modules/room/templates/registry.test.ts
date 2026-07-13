@@ -1,7 +1,7 @@
 import { RoomTemplateId } from '@tether/contracts/modules/room';
 import { assert, describe, it, vi } from 'vitest';
 
-import { DUSK_SUITE_TEMPLATE, resolveRoomTemplate } from './registry';
+import { DUSK_SUITE_TEMPLATE, loadDuskSuiteScene, resolveRoomTemplate } from './registry';
 
 vi.mock('../scene/dusk-suite-scene', () => ({ default: () => null }));
 
@@ -27,7 +27,7 @@ describe('room template registry', () => {
   });
 
   it('loads the bundled Dusk Suite scene', async () => {
-    const sceneModule = await import('../scene/dusk-suite-scene');
+    const sceneModule = await loadDuskSuiteScene();
     assert.isFunction(sceneModule.default);
   });
 

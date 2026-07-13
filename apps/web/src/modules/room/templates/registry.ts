@@ -34,11 +34,13 @@ export type RoomTemplateResolution =
   | { readonly _tag: 'Supported'; readonly template: RoomTemplate }
   | { readonly _tag: 'UpdateRequired'; readonly roomTemplateId: RoomTemplateId };
 
+export const loadDuskSuiteScene = () => import('../scene/dusk-suite-scene');
+
 export const DUSK_SUITE_TEMPLATE: RoomTemplate = {
   id: DUSK_SUITE_TEMPLATE_ID,
   name: 'Dusk Suite',
   description: 'A quiet private suite balanced between warm interior light and the evening sky.',
-  scene: lazy(() => import('../scene/dusk-suite-scene')),
+  scene: lazy(loadDuskSuiteScene),
   camera: {
     landscape: { position: [0, 1.55, 6.8], target: [0, 1.7, -2.4], fieldOfView: 43 },
     portrait: { position: [0, 1.65, 8.8], target: [0, 1.65, -2.2], fieldOfView: 52 },
