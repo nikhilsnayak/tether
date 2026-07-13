@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 
 import { createRoom, installWebRtcProbe } from './helpers';
 
-test('missing WebGPU stops entry before media is requested', async ({ page }) => {
+test('missing WebGL2 stops entry before media is requested', async ({ page }) => {
   await page.addInitScript(() => {
     const mediaDevices = navigator.mediaDevices;
     const getUserMedia = mediaDevices.getUserMedia.bind(mediaDevices);
@@ -11,10 +11,15 @@ test('missing WebGPU stops entry before media is requested', async ({ page }) =>
       mediaRequests += 1;
       return getUserMedia(...args);
     };
-    Object.defineProperty(navigator, 'gpu', {
-      configurable: true,
-      value: undefined,
-    });
+    const originalCreateElement = document.createElement.bind(document);
+    document.createElement = ((tagName: string, options?: ElementCreationOptions) => {
+      const element = originalCreateElement(tagName, options);
+      if (tagName.toLowerCase() === 'canvas') {
+        const canvas = element as HTMLCanvasElement;
+        canvas.getContext = () => null;
+      }
+      return element;
+    }) as typeof document.createElement;
     Object.defineProperty(window, '__tetherMediaRequests', {
       configurable: true,
       get: () => mediaRequests,
@@ -23,7 +28,7 @@ test('missing WebGPU stops entry before media is requested', async ({ page }) =>
 
   await page.goto('/host');
   await expect(page.getByText('This browser cannot enter the room')).toBeVisible();
-  await expect(page.getByText(/Missing: webgpu/)).toBeVisible();
+  await expect(page.getByText(/Missing: webgl2/)).toBeVisible();
   expect(await page.evaluate(() => Reflect.get(window, '__tetherMediaRequests'))).toBe(0);
 });
 

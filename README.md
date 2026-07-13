@@ -109,7 +109,7 @@ metadata but keeps its existing native call interface.
 ### Requirements
 
 - [Bun](https://bun.sh/) 1.3.14
-- A secure modern browser with WebGPU, WebRTC, and camera/microphone access
+- A secure modern browser with WebGL2, WebRTC, and camera/microphone access
 
 ```sh
 git clone https://github.com/nikhilsnayak/tether.git
@@ -123,7 +123,7 @@ Open `http://localhost:5173` in two tabs. Start a call and complete the media ch
 then open its invite link in the second, enter a name, and knock. The guest waits outside
 the room until the host allows the request; admission starts the peer connection and brings both
 callers to the room display. Localhost is treated as a secure browser context, so camera,
-microphone, and WebGPU APIs are available during development.
+microphone, and graphics APIs are available during development.
 
 ## Configuration
 
@@ -148,10 +148,10 @@ configuration. Calls that cannot establish a direct peer-to-peer path will fail.
 
 Production browser deployments require HTTPS and a corresponding `wss://` signaling URL for camera and microphone access.
 
-The web room requires `navigator.gpu`. Three.js may fall back to its WebGL2 renderer backend if a
-WebGPU device cannot be initialized after that capability check, but browsers without the WebGPU
-API stop at the compatibility screen before requesting media. Quality selection and automatic
-quality reduction are local to each caller; they do not change the other caller's room.
+The web room requires WebGL2. React Three Fiber prefers WebGPU when available and falls back to
+WebGL2 otherwise; browsers without WebGL2 stop at the compatibility screen before requesting media.
+Quality selection and automatic quality reduction are local to each caller; they do not change the
+other caller's room.
 
 ### Mobile
 

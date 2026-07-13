@@ -6,7 +6,7 @@ const supported: RoomCapabilityEnvironment = {
   isSecureContext: true,
   hasUserMedia: true,
   hasPeerConnection: true,
-  hasWebGpu: true,
+  hasWebGl2: true,
 };
 
 describe('room capabilities', () => {
@@ -22,18 +22,23 @@ describe('room capabilities', () => {
         isSecureContext: false,
         hasUserMedia: false,
         hasPeerConnection: false,
-        hasWebGpu: false,
+        hasWebGl2: false,
       }),
       {
         supported: false,
-        missing: ['secure-context', 'webgpu', 'user-media', 'peer-connection'],
+        missing: ['secure-context', 'webgl2', 'user-media', 'peer-connection'],
       },
     );
   });
 
   it('detects capabilities from the browser environment by default', () => {
     vi.stubGlobal('window', { isSecureContext: true, RTCPeerConnection: class {} });
-    vi.stubGlobal('navigator', { gpu: {}, mediaDevices: { getUserMedia() {} } });
+    vi.stubGlobal('navigator', { mediaDevices: { getUserMedia() {} } });
+    vi.stubGlobal('document', {
+      createElement: () => ({
+        getContext: (type: string) => (type === 'webgl2' ? {} : null),
+      }),
+    });
 
     assert.deepStrictEqual(detectRoomCapabilities(), { supported: true, missing: [] });
   });
