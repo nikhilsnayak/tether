@@ -80,7 +80,7 @@ export const reducePeerSessionView = (
         : { ...view, pendingJoinRequests };
     }
     case 'PeerDeparted':
-      return { ...view, status: 'waiting-for-peer', chatReady: false, sas: null };
+      return { ...view, status: 'peer-departed', chatReady: false, sas: null };
   }
 };
 

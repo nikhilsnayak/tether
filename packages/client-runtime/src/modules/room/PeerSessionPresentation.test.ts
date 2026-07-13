@@ -18,6 +18,7 @@ const statuses: ReadonlyArray<PeerSessionView['status']> = [
   'join-denied',
   'awaiting-approval',
   'waiting-for-peer',
+  'peer-departed',
 ];
 
 describe('PeerSessionPresentation', () => {

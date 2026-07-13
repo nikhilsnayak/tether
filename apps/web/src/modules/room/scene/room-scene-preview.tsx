@@ -8,24 +8,28 @@ import { useReducedMotionPreference } from '@/hooks/use-reduced-motion-preferenc
 import type { RoomTemplate } from '../templates/registry';
 import {
   clampLook,
+  initialAdaptiveQualityState,
   isQualityPreference,
   QUALITY_CONFIGS,
   QUALITY_STORAGE_KEY,
+  sampleAdaptiveQuality,
   type QualityPreference,
   resolveQualityTier,
   selectFraming,
   shouldAnimateCamera,
 } from './config';
-import type { RoomJourneyCue } from './journey';
+import { roomTransition, type RoomJourneyCue } from './journey';
 
 function CameraRig({
   template,
   reducedMotion,
   surfaceRef,
+  journey,
 }: {
   readonly template: RoomTemplate;
   readonly reducedMotion: boolean;
   readonly surfaceRef: RefObject<HTMLDivElement | null>;
+  readonly journey?: RoomJourneyCue;
 }) {
   const { camera, size } = useThree();
   const look = useRef({ yaw: 0, pitch: 0 });
@@ -35,18 +39,23 @@ function CameraRig({
   const lookOffset = useRef(new Quaternion());
   const drag = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   const lastInteraction = useRef(0);
-  const framing = selectFraming(
-    size.width,
-    size.height,
-    template.camera.landscape,
-    template.camera.portrait,
+  const previousJourney = useRef(journey);
+  const previousReducedMotion = useRef(reducedMotion);
+  const transition = useRef(
+    roomTransition(journey ?? 'waiting', journey ?? 'waiting', reducedMotion),
   );
+  const transitionRemainingSeconds = useRef(0);
+  const framing =
+    journey === 'outside'
+      ? template.camera.outside
+      : selectFraming(size.width, size.height, template.camera.landscape, template.camera.portrait);
 
   useEffect(() => {
     const element = surfaceRef.current;
     if (element === null) return;
 
     const pointerDown = (event: PointerEvent) => {
+      if (reducedMotion) return;
       if ((event.target as Element).closest('[data-room-scene-ignore-gesture]') !== null) return;
       drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
       element.setPointerCapture(event.pointerId);
@@ -78,15 +87,31 @@ function CameraRig({
       element.removeEventListener('pointerup', pointerUp);
       element.removeEventListener('pointercancel', pointerUp);
     };
-  }, [surfaceRef, template]);
+  }, [reducedMotion, surfaceRef, template]);
 
   useFrame((_, delta) => {
+    if (previousJourney.current !== journey || previousReducedMotion.current !== reducedMotion) {
+      transition.current = roomTransition(
+        previousJourney.current ?? 'waiting',
+        journey ?? 'waiting',
+        reducedMotion,
+      );
+      transitionRemainingSeconds.current = transition.current.durationMs / 1_000;
+      previousJourney.current = journey;
+      previousReducedMotion.current = reducedMotion;
+    }
+
     if (performance.now() - lastInteraction.current > template.camera.look.recenterAfterMs) {
       desiredLook.current = { yaw: 0, pitch: 0 };
     }
 
     const animate = shouldAnimateCamera(reducedMotion);
-    const alpha = animate ? 1 - Math.exp((-delta * 5) / template.camera.look.recenterSeconds) : 1;
+    const transitionSeconds =
+      transition.current.kind === 'enter' && transitionRemainingSeconds.current > 0
+        ? transition.current.durationMs / 1_000
+        : template.camera.look.recenterSeconds;
+    transitionRemainingSeconds.current = Math.max(0, transitionRemainingSeconds.current - delta);
+    const alpha = animate ? 1 - Math.exp((-delta * 5) / transitionSeconds) : 1;
     look.current.yaw = MathUtils.lerp(look.current.yaw, desiredLook.current.yaw, alpha);
     look.current.pitch = MathUtils.lerp(look.current.pitch, desiredLook.current.pitch, alpha);
 
@@ -100,6 +125,22 @@ function CameraRig({
       camera.fov = framing.fieldOfView;
       camera.updateProjectionMatrix();
     }
+  });
+
+  return null;
+}
+
+function FramePerformanceMonitor({ onSample }: { readonly onSample: (fps: number) => void }) {
+  const elapsed = useRef(0);
+  const frames = useRef(0);
+
+  useFrame((_, delta) => {
+    elapsed.current += delta;
+    frames.current += 1;
+    if (elapsed.current < 1) return;
+    onSample(frames.current / elapsed.current);
+    elapsed.current = 0;
+    frames.current = 0;
   });
 
   return null;
@@ -134,21 +175,29 @@ export function RoomScenePreview({
   template,
   remoteStream,
   journey,
+  admissionPending = false,
   mode = 'preview',
 }: {
   readonly template: RoomTemplate;
   readonly remoteStream?: MediaStream | null;
   readonly journey?: RoomJourneyCue;
+  readonly admissionPending?: boolean;
   readonly mode?: 'preview' | 'call';
 }) {
   const [qualityPreference, setQualityPreference] = useState(readQualityPreference);
+  const [adaptiveQuality, setAdaptiveQuality] = useState(() =>
+    initialAdaptiveQualityState(typeof devicePixelRatio === 'number' ? devicePixelRatio : 1),
+  );
   const [contextLost, setContextLost] = useState(false);
   const surfaceRef = useRef<HTMLDivElement>(null);
   const reducedMotion = useReducedMotionPreference();
-  const qualityTier = resolveQualityTier(
-    qualityPreference,
-    typeof devicePixelRatio === 'number' ? devicePixelRatio : 1,
-  );
+  const qualityTier =
+    qualityPreference === 'auto'
+      ? adaptiveQuality.tier
+      : resolveQualityTier(
+          qualityPreference,
+          typeof devicePixelRatio === 'number' ? devicePixelRatio : 1,
+        );
   const quality = QUALITY_CONFIGS[qualityTier];
   const Scene = template.scene;
 
@@ -176,18 +225,30 @@ export function RoomScenePreview({
     <div
       ref={surfaceRef}
       data-room-scene-gesture-surface
-      className={
-        mode === 'call'
-          ? 'bg-card absolute inset-0 touch-none overflow-hidden'
-          : 'bg-card relative aspect-video touch-none overflow-hidden border'
+      data-room-journey={journey}
+      data-room-quality-tier={qualityTier}
+      data-room-admission={admissionPending ? 'pending' : 'idle'}
+      data-room-remote-video={
+        remoteStream === null || remoteStream === undefined ? 'absent' : 'present'
       }
+      data-room-reduced-motion={reducedMotion}
+      className={cn(
+        'bg-card touch-none overflow-hidden',
+        mode === 'call' ? 'absolute inset-0' : 'relative aspect-video border',
+      )}
       aria-label={`${template.name} interactive preview`}
     >
       <Canvas
-        key={qualityTier}
         camera={{
-          position: [...template.camera.landscape.position],
-          fov: template.camera.landscape.fieldOfView,
+          position: [
+            ...(journey === 'outside'
+              ? template.camera.outside.position
+              : template.camera.landscape.position),
+          ],
+          fov:
+            journey === 'outside'
+              ? template.camera.outside.fieldOfView
+              : template.camera.landscape.fieldOfView,
         }}
         dpr={[...quality.dpr]}
         renderer={{
@@ -197,10 +258,21 @@ export function RoomScenePreview({
         }}
       >
         <color attach='background' args={['#090b13']} />
-        <CameraRig template={template} reducedMotion={reducedMotion} surfaceRef={surfaceRef} />
+        <CameraRig
+          template={template}
+          reducedMotion={reducedMotion}
+          surfaceRef={surfaceRef}
+          journey={journey}
+        />
+        {qualityPreference === 'auto' && (
+          <FramePerformanceMonitor
+            onSample={(fps) => setAdaptiveQuality((state) => sampleAdaptiveQuality(state, fps))}
+          />
+        )}
         <ContextLossGuard onLost={() => setContextLost(true)} />
         <Suspense fallback={null}>
           <Scene
+            admissionPending={admissionPending}
             quality={quality}
             qualityTier={qualityTier}
             remoteStream={remoteStream}
@@ -208,28 +280,30 @@ export function RoomScenePreview({
           />
         </Suspense>
       </Canvas>
-      <div
-        data-room-scene-ignore-gesture
-        className={cn(
-          'absolute right-3 z-10 flex items-center gap-2',
-          mode === 'call' ? 'top-14' : 'bottom-3',
-        )}
-      >
-        <label className='sr-only' htmlFor='room-quality'>
-          Room rendering quality
-        </label>
-        <select
-          id='room-quality'
-          value={qualityPreference}
-          onChange={(event) => updateQuality(event.target.value as QualityPreference)}
-          className='border-border bg-background/85 text-foreground h-8 border px-2 text-xs backdrop-blur'
+      {(mode === 'preview' || journey !== 'outside') && (
+        <div
+          data-room-scene-ignore-gesture
+          className={cn(
+            'absolute right-3 z-10 flex items-center gap-2',
+            mode === 'call' ? 'top-14' : 'bottom-3',
+          )}
         >
-          <option value='auto'>Auto quality</option>
-          <option value='high'>High quality</option>
-          <option value='medium'>Medium quality</option>
-          <option value='low'>Low quality</option>
-        </select>
-      </div>
+          <label className='sr-only' htmlFor='room-quality'>
+            Room rendering quality
+          </label>
+          <select
+            id='room-quality'
+            value={qualityPreference}
+            onChange={(event) => updateQuality(event.target.value as QualityPreference)}
+            className='border-border bg-background/85 text-foreground h-8 border px-2 text-xs backdrop-blur'
+          >
+            <option value='auto'>Auto quality</option>
+            <option value='high'>High quality</option>
+            <option value='medium'>Medium quality</option>
+            <option value='low'>Low quality</option>
+          </select>
+        </div>
+      )}
       {mode === 'preview' && (
         <p
           data-room-scene-ignore-gesture

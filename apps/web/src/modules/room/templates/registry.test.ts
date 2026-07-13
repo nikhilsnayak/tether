@@ -23,6 +23,15 @@ describe('room template registry', () => {
       'window',
     ]);
     assert.isTrue(Object.values(DUSK_SUITE_TEMPLATE.anchors).every(isFiniteTransform));
+    assert.isTrue(
+      [
+        DUSK_SUITE_TEMPLATE.camera.landscape,
+        DUSK_SUITE_TEMPLATE.camera.portrait,
+        DUSK_SUITE_TEMPLATE.camera.outside,
+      ].every((framing) =>
+        [...framing.position, ...framing.target, framing.fieldOfView].every(Number.isFinite),
+      ),
+    );
   });
 
   it('keeps template IDs unique', () => {

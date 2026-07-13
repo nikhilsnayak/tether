@@ -1,17 +1,14 @@
 import { Button } from '@tether/ui/components/button';
+import { cn } from '@tether/ui/lib/utils';
 import { Mic, MicOff, Video, VideoOff } from 'lucide-react';
-import { useEffect, useRef } from 'react';
 
 import { LogoMark } from '@/components/logo';
 
 import { CallControlButton } from '../components/call-controls';
+import { MediaStreamVideo } from '../components/media-stream-video';
 import type { RoomTemplate } from '../templates/registry';
 import type { InitialMediaSettings } from './media';
 import { useMediaPreflight } from './use-media-preflight';
-
-function attachPreview(video: HTMLVideoElement | null, stream: MediaStream | null) {
-  if (video !== null) video.srcObject = stream;
-}
 
 export function MediaSetupPanel({
   template,
@@ -25,9 +22,6 @@ export function MediaSetupPanel({
   readonly onComplete: (settings: InitialMediaSettings) => void;
 }) {
   const { status, stream, settings, error, acquire, release, updateSettings } = useMediaPreflight();
-  const videoRef = useRef<HTMLVideoElement>(null);
-
-  useEffect(() => attachPreview(videoRef.current, stream), [stream]);
 
   const finish = () => {
     release();
@@ -71,13 +65,16 @@ export function MediaSetupPanel({
         {status === 'ready' && (
           <>
             <div className='border-border bg-card aspect-video overflow-hidden rounded-md border'>
-              <video
-                ref={videoRef}
+              <MediaStreamVideo
+                stream={stream}
                 aria-label='Camera preview'
                 autoPlay
                 muted
                 playsInline
-                className={`size-full -scale-x-100 object-cover ${settings.camera ? '' : 'invisible'}`}
+                className={cn(
+                  'size-full -scale-x-100 object-cover',
+                  !settings.camera && 'invisible',
+                )}
               />
             </div>
             <div className='flex justify-center gap-3'>

@@ -35,6 +35,13 @@ export interface QualityConfig {
   readonly ambientDetail: boolean;
 }
 
+export interface AdaptiveQualityState {
+  readonly tier: ResolvedQualityTier;
+  readonly slowSamples: number;
+  readonly fastSamples: number;
+  readonly cooldownSamples: number;
+}
+
 export const QUALITY_CONFIGS: Readonly<Record<ResolvedQualityTier, QualityConfig>> = {
   high: {
     dpr: [1, 2],
@@ -70,6 +77,45 @@ export function resolveQualityTier(
 ): ResolvedQualityTier {
   if (preference !== 'auto') return preference;
   return devicePixelRatio > 1.5 ? 'medium' : 'high';
+}
+
+export function initialAdaptiveQualityState(devicePixelRatio: number): AdaptiveQualityState {
+  return {
+    tier: resolveQualityTier('auto', devicePixelRatio),
+    slowSamples: 0,
+    fastSamples: 0,
+    cooldownSamples: 0,
+  };
+}
+
+const cheaperTier = (tier: ResolvedQualityTier): ResolvedQualityTier =>
+  tier === 'high' ? 'medium' : 'low';
+
+const richerTier = (tier: ResolvedQualityTier): ResolvedQualityTier =>
+  tier === 'low' ? 'medium' : 'high';
+
+/** One sample represents roughly one second of rendered frames. */
+export function sampleAdaptiveQuality(
+  state: AdaptiveQualityState,
+  framesPerSecond: number,
+): AdaptiveQualityState {
+  const cooldownSamples = Math.max(0, state.cooldownSamples - 1);
+  const isSlow =
+    (state.tier === 'high' && framesPerSecond < 50) ||
+    (state.tier === 'medium' && framesPerSecond < 28);
+  const isFast =
+    (state.tier === 'low' && framesPerSecond > 42) ||
+    (state.tier === 'medium' && framesPerSecond > 57);
+  const slowSamples = isSlow ? state.slowSamples + 1 : 0;
+  const fastSamples = isFast ? state.fastSamples + 1 : 0;
+
+  if (cooldownSamples === 0 && slowSamples >= 3 && state.tier !== 'low') {
+    return { tier: cheaperTier(state.tier), slowSamples: 0, fastSamples: 0, cooldownSamples: 8 };
+  }
+  if (cooldownSamples === 0 && fastSamples >= 12 && state.tier !== 'high') {
+    return { tier: richerTier(state.tier), slowSamples: 0, fastSamples: 0, cooldownSamples: 8 };
+  }
+  return { ...state, slowSamples, fastSamples, cooldownSamples };
 }
 
 export function isQualityPreference(value: string | null): value is QualityPreference {

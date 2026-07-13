@@ -41,12 +41,16 @@ const localTrackEnabled = (page: Page, kind: 'audio' | 'video') =>
 
 const expectLocalAndRemoteMedia = async (page: Page) => {
   await expect(page.getByLabel('Local video preview')).toBeVisible();
-  await expect(page.getByLabel('Remote video')).toBeVisible();
+  await expect(page.getByLabel('Remote audio')).toBeAttached();
+  await expect(page.getByLabel('Dusk Suite interactive preview')).toHaveAttribute(
+    'data-room-remote-video',
+    'present',
+  );
   await expect
     .poll(() => trackKinds(page, 'video[aria-label="Local video preview"]'))
     .toEqual(['audio', 'video']);
   await expect
-    .poll(() => trackKinds(page, 'video[aria-label="Remote video"]'))
+    .poll(() => trackKinds(page, 'audio[aria-label="Remote audio"]'))
     .toEqual(['audio', 'video']);
 };
 
@@ -87,9 +91,27 @@ test('complete room flow', async ({ browser, page }, testInfo) => {
 
     await test.step('guest joins by room code and media connects', async () => {
       await joinRoom(guestPage, roomId);
+      await expect(guestPage.getByLabel('Dusk Suite interactive preview')).toHaveAttribute(
+        'data-room-journey',
+        /outside|screen-connecting/,
+      );
+      await expect(guestPage.getByRole('region', { name: 'Waiting for the host' })).toBeVisible();
+      await expect(guestPage.getByRole('button', { name: 'Leave room' })).toBeVisible();
+      await expect(guestPage.getByRole('toolbar', { name: 'Call controls' })).toBeHidden();
+      await expect(guestPage.getByLabel('Room rendering quality')).toBeHidden();
+      await expect(page.getByRole('region', { name: 'Join request' })).toBeVisible();
+      await expect(page.getByLabel('Dusk Suite interactive preview')).toHaveAttribute(
+        'data-room-admission',
+        'pending',
+      );
       await admitGuest(page);
       await Promise.all([expectConnected(page), expectConnected(guestPage)]);
       await Promise.all([expectLocalAndRemoteMedia(page), expectLocalAndRemoteMedia(guestPage)]);
+      await Promise.all([
+        page.getByRole('button', { name: 'We see the same code' }).click(),
+        guestPage.getByRole('button', { name: 'We see the same code' }).click(),
+      ]);
+      await expect(page.getByRole('toolbar', { name: 'Call controls' })).toBeVisible();
     });
 
     await test.step('local media controls toggle their tracks', async () => {
@@ -163,6 +185,10 @@ test('complete room flow', async ({ browser, page }, testInfo) => {
         expectLocalAndRemoteMedia(page),
         expectLocalAndRemoteMedia(replacementPage),
       ]);
+      await Promise.all([
+        page.getByRole('button', { name: 'We see the same code' }).click(),
+        replacementPage.getByRole('button', { name: 'We see the same code' }).click(),
+      ]);
     });
 
     await test.step('both remaining peers leave the room', async () => {
@@ -177,9 +203,11 @@ test('complete room flow', async ({ browser, page }, testInfo) => {
           ),
         )
         .toBe(true);
-      await expectWaitingForPeer(replacementPage);
-
-      await replacementPage.getByRole('button', { name: 'Leave call' }).click();
+      await expect(replacementPage.getByLabel('Dusk Suite interactive preview')).toHaveAttribute(
+        'data-room-journey',
+        'screen-departed',
+      );
+      await replacementPage.getByRole('button', { name: 'Return home' }).click();
       await expect(replacementPage).toHaveURL('/');
     });
   } finally {

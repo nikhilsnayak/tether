@@ -11,6 +11,7 @@ import type {
 import type { RoomJourneyCue } from '../scene/journey';
 
 export interface RoomSceneProps {
+  readonly admissionPending?: boolean;
   readonly quality: QualityConfig;
   readonly qualityTier: ResolvedQualityTier;
   readonly journey?: RoomJourneyCue;
@@ -25,6 +26,7 @@ export interface RoomTemplate {
   readonly camera: {
     readonly landscape: CameraFraming;
     readonly portrait: CameraFraming;
+    readonly outside: CameraFraming;
     readonly look: CameraLookConfig;
   };
   readonly anchors: SceneAnchors;
@@ -42,6 +44,7 @@ export const DUSK_SUITE_TEMPLATE: RoomTemplate = {
   camera: {
     landscape: { position: [0, 1.55, 6.8], target: [0, 1.7, -2.4], fieldOfView: 43 },
     portrait: { position: [0, 1.65, 8.8], target: [0, 1.65, -2.2], fieldOfView: 52 },
+    outside: { position: [9.4, 1.8, 1.65], target: [4.9, 1.5, 1.65], fieldOfView: 52 },
     look: {
       yaw: [-0.34, 0.34],
       pitch: [-0.18, 0.14],

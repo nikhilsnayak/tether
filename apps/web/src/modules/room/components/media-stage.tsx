@@ -1,27 +1,24 @@
 import { Avatar, AvatarFallback } from '@tether/ui/components/avatar';
 import { cn } from '@tether/ui/lib/utils';
 import { motion, animate, useMotionValue } from 'motion/react';
-import { type ReactNode, type RefObject, useEffect, useRef } from 'react';
+import { type ReactNode, type RefObject, useRef } from 'react';
+
+import { useViewportAspectRatio } from '@/hooks/use-viewport-aspect-ratio';
 
 import { usePinnedDraggableTile, type TileCorner } from '../hooks/use-pinned-draggable-tile';
-
-function attachMediaStreamVideo(video: HTMLVideoElement | null, stream: MediaStream | null) {
-  if (video === null) return;
-  video.srcObject = stream;
-}
+import { MediaStreamVideo } from './media-stream-video';
 
 const TILE_MARGIN = 16;
 const TILE_SNAP = { type: 'spring', stiffness: 500, damping: 40 } as const;
 
 export function DraggableSelfPreview({
   boundaryRef,
-  aspectRatio,
   children,
 }: {
   readonly boundaryRef: RefObject<HTMLDivElement | null>;
-  readonly aspectRatio: number;
   readonly children: ReactNode;
 }) {
+  const aspectRatio = useViewportAspectRatio();
   const tileRef = useRef<HTMLDivElement>(null);
   const x = useMotionValue(0);
   const y = useMotionValue(0);
@@ -76,15 +73,10 @@ export function SelfVideo({
   readonly cameraOn: boolean;
   readonly selfId: string;
 }) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  useEffect(() => {
-    attachMediaStreamVideo(videoRef.current, stream);
-  }, [stream]);
-
   return (
     <>
-      <video
-        ref={videoRef}
+      <MediaStreamVideo
+        stream={stream}
         aria-label='Local video preview'
         autoPlay
         muted

@@ -4,7 +4,10 @@ import { connectPeers, requireBaseURL } from './helpers';
 
 test('peers confirm a matching safety code', async ({ browser }, testInfo) => {
   const baseURL = requireBaseURL(testInfo.project.use.baseURL);
-  const { host, guest, cleanup } = await connectPeers(browser, baseURL, { probeWebRtc: true });
+  const { host, guest, cleanup } = await connectPeers(browser, baseURL, {
+    confirmSafety: false,
+    probeWebRtc: true,
+  });
 
   const safetyCode = (page: Page) => page.getByLabel('Safety code');
   const safetyCheck = (page: Page) => page.getByRole('region', { name: 'Safety check' });

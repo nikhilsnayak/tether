@@ -92,7 +92,13 @@ export const expectConnected = (page: Page) =>
   expect(page.getByText('Connected', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
 
 export const expectWaitingForPeer = (page: Page) =>
-  expect(page.getByText('Share this room to invite someone.')).toBeVisible();
+  Promise.all([
+    expect(page.getByText('Share this room to invite someone.')).toBeVisible(),
+    expect(page.getByLabel('Dusk Suite interactive preview')).toHaveAttribute(
+      'data-room-journey',
+      'waiting',
+    ),
+  ]);
 
 export const continueInBrowser = (page: Page) =>
   page.getByRole('button', { name: 'Join in this browser' }).click();
@@ -150,7 +156,7 @@ export const createRoom = async (page: Page) => {
 export const connectPeers = async (
   browser: Browser,
   baseURL: string,
-  options: { readonly probeWebRtc?: boolean } = {},
+  options: { readonly confirmSafety?: boolean; readonly probeWebRtc?: boolean } = {},
 ) => {
   const hostContext = await browser.newContext({ baseURL, storageState: seededStorageState });
   const guestContext = await browser.newContext({ baseURL, storageState: seededStorageState });
@@ -164,6 +170,12 @@ export const connectPeers = async (
   await joinRoom(guest, roomId);
   await admitGuest(host);
   await Promise.all([expectConnected(host), expectConnected(guest)]);
+  if (options.confirmSafety !== false) {
+    await Promise.all([
+      host.getByRole('button', { name: 'We see the same code' }).click(),
+      guest.getByRole('button', { name: 'We see the same code' }).click(),
+    ]);
+  }
 
   return {
     host,

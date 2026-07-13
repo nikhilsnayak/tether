@@ -2857,7 +2857,7 @@ describe('reducePeerSessionView', () => {
     });
   });
 
-  it('returns to waiting when the active peer departs', () => {
+  it('records when the active peer departs', () => {
     const view = reducePeerSessionView(
       {
         status: 'connected',
@@ -2872,7 +2872,7 @@ describe('reducePeerSessionView', () => {
     );
 
     assert.deepStrictEqual(view, {
-      status: 'waiting-for-peer',
+      status: 'peer-departed',
       messages: [{ id: 'message-1', sender: 'peer', text: 'hello' }],
       chatReady: false,
       sas: null,

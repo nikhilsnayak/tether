@@ -210,7 +210,8 @@ export interface PeerSessionView {
     | 'room-not-found'
     | 'join-denied'
     | 'awaiting-approval'
-    | 'waiting-for-peer';
+    | 'waiting-for-peer'
+    | 'peer-departed';
   readonly messages: ReadonlyArray<ChatMessage>;
   readonly chatReady: boolean;
   /** Safety code both peers compare aloud. */

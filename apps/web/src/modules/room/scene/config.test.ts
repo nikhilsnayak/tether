@@ -2,9 +2,12 @@ import { assert, describe, it } from 'vitest';
 
 import {
   clampLook,
+  type AdaptiveQualityState,
   isFiniteTransform,
   QUALITY_CONFIGS,
+  initialAdaptiveQualityState,
   resolveQualityTier,
+  sampleAdaptiveQuality,
   selectFraming,
   shouldAnimateCamera,
 } from './config';
@@ -41,6 +44,26 @@ describe('scene configuration', () => {
     assert.strictEqual(resolveQualityTier('auto', 2), 'medium');
     assert.strictEqual(resolveQualityTier('auto', 1), 'high');
     assert.strictEqual(resolveQualityTier('low', 2), 'low');
+  });
+
+  it('degrades only after sustained slow samples and then observes a cooldown', () => {
+    let state = initialAdaptiveQualityState(1);
+    state = sampleAdaptiveQuality(state, 40);
+    state = sampleAdaptiveQuality(state, 40);
+    assert.strictEqual(state.tier, 'high');
+    state = sampleAdaptiveQuality(state, 40);
+    assert.strictEqual(state.tier, 'medium');
+
+    for (let index = 0; index < 8; index += 1) state = sampleAdaptiveQuality(state, 60);
+    assert.strictEqual(state.tier, 'medium');
+  });
+
+  it('requires a much longer healthy run before restoring quality', () => {
+    let state: AdaptiveQualityState = { ...initialAdaptiveQualityState(2), tier: 'medium' };
+    for (let index = 0; index < 11; index += 1) state = sampleAdaptiveQuality(state, 60);
+    assert.strictEqual(state.tier, 'medium');
+    state = sampleAdaptiveQuality(state, 60);
+    assert.strictEqual(state.tier, 'high');
   });
 
   it('rejects non-finite transforms', () => {

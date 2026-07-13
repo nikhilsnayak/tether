@@ -9,7 +9,10 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: CI,
   retries: CI ? 2 : 0,
-  workers: CI ? 1 : undefined,
+  // Each active call owns a WebGPU renderer. Keep local concurrency bounded so
+  // Vulkan initialization and fake WebRTC devices do not starve one another.
+  workers: CI ? 1 : 2,
+  timeout: 60_000,
   reporter: 'html',
   // Media-heavy specs run concurrently on one machine; the default 5s expect
   // timeout flakes on navigation and status transitions under that load.

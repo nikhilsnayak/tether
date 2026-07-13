@@ -25,12 +25,14 @@ export function CallControlButton({
             aria-label={label}
             variant={tone === 'danger' ? 'destructive' : 'secondary'}
             onClick={onClick}
-            className='relative h-14 w-14 flex-col gap-1.5 rounded-sm sm:w-16'
+            className='relative h-11 w-11 flex-col gap-1 rounded-xl sm:h-14 sm:w-16 sm:gap-1.5'
           />
         }
       >
         {children}
-        <span className='font-mono text-[9px] tracking-[0.2em] uppercase'>{caption}</span>
+        <span className='font-mono text-[8px] tracking-[0.14em] uppercase sm:text-[9px] sm:tracking-[0.2em]'>
+          {caption}
+        </span>
         {indicator && (
           <span className='bg-primary ring-background absolute top-1.5 right-1.5 size-2.5 rounded-full ring-2' />
         )}
