@@ -1,7 +1,7 @@
 import { assert, describe, it } from '@effect/vitest';
 import { Schema } from 'effect';
 
-import { DisplayName, PeerId, RoomId } from './index';
+import { DisplayName, PeerId, RoomId, RoomTemplateId } from './index';
 import { succeeds } from './test-helpers';
 
 describe('room identity schemas', () => {
@@ -13,6 +13,23 @@ describe('room identity schemas', () => {
     assert.isFalse(succeeds(DisplayName, '   '));
     assert.isFalse(succeeds(DisplayName, 'n'.repeat(33)));
     assert.strictEqual(Schema.decodeUnknownSync(DisplayName)('  Ada  '), 'Ada');
+  });
+
+  it('accepts forward-compatible room template slugs', () => {
+    for (const value of ['dusk-suite', 'future2', 'a', 'a'.repeat(64)]) {
+      assert.isTrue(succeeds(RoomTemplateId, value));
+    }
+    for (const value of [
+      '',
+      '-dusk',
+      'dusk-',
+      'dusk--suite',
+      'Dusk-Suite',
+      'dusk_suite',
+      'a'.repeat(65),
+    ]) {
+      assert.isFalse(succeeds(RoomTemplateId, value));
+    }
   });
 
   it('accepts valid identifiers and rejects malformed values', () => {

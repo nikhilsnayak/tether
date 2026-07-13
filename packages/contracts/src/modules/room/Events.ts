@@ -1,6 +1,6 @@
 import { Schema } from 'effect';
 
-import { DisplayName, PeerId, RoomId, SessionToken } from './Identity';
+import { DisplayName, PeerId, RoomId, RoomTemplateId, SessionToken } from './Identity';
 import { Signal } from './Signals';
 
 export class RoomSessionOpenedEvent extends Schema.TaggedClass<RoomSessionOpenedEvent>()(
@@ -9,6 +9,7 @@ export class RoomSessionOpenedEvent extends Schema.TaggedClass<RoomSessionOpened
     peerId: Schema.NullOr(PeerId),
     sessionToken: SessionToken,
     roomId: RoomId,
+    roomTemplateId: RoomTemplateId,
   },
 ) {}
 

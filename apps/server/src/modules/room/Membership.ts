@@ -1,13 +1,17 @@
 import {
+  DUSK_SUITE_TEMPLATE_ID,
   JoinCancelledEvent,
   JoinDenied,
   PeerLeftEvent,
   RoomId,
+  RoomNotFound,
   RoomSessionOpenedEvent,
   ServerAtCapacity,
   SessionToken,
   type PeerId,
   type RoomEvent,
+  type RoomTemplateId,
+  UnsupportedRoomTemplate,
 } from '@tether/contracts/modules/room';
 import { Context, Crypto, Deferred, Effect, Layer, Queue, Stream } from 'effect';
 
@@ -98,7 +102,11 @@ export class RoomMembership extends Context.Service<RoomMembership>()(
         );
       });
 
-      const tryCreateRoom = Effect.fnUntraced(function* (roomId: RoomId, selfId: PeerId) {
+      const tryCreateRoom = Effect.fnUntraced(function* (
+        roomId: RoomId,
+        selfId: PeerId,
+        roomTemplateId: RoomTemplateId,
+      ) {
         return yield* registry.modify((state) => {
           if (state.has(roomId)) return Effect.succeed({ _tag: 'collision' } as CreateOutcome);
           if (state.size >= MAX_LIVE_ROOMS)
@@ -126,12 +134,14 @@ export class RoomMembership extends Context.Service<RoomMembership>()(
                       { peerId: selfId, sessionToken: brandedSessionToken, signalBucket, events },
                     ],
                     pending: [],
+                    roomTemplateId,
                   });
                   const eventStream = Stream.fromArray<RoomEvent>([
                     new RoomSessionOpenedEvent({
                       peerId: null,
                       sessionToken: brandedSessionToken,
                       roomId,
+                      roomTemplateId,
                     }),
                   ]).pipe(Stream.concat(Stream.fromQueue(events)));
                   return Effect.logInfo('Room session opened').pipe(
@@ -145,17 +155,31 @@ export class RoomMembership extends Context.Service<RoomMembership>()(
         });
       });
 
-      const openHost = Effect.fnUntraced(function* (selfId: PeerId) {
+      const openHost = Effect.fnUntraced(function* (
+        selfId: PeerId,
+        roomTemplateId: RoomTemplateId,
+      ) {
+        if (roomTemplateId !== DUSK_SUITE_TEMPLATE_ID) {
+          return yield* new UnsupportedRoomTemplate({ roomTemplateId });
+        }
         for (let attempt = 0; attempt < ROOM_ID_MINT_ATTEMPTS; attempt++) {
           const roomId = RoomId.make(yield* generateRoomId().pipe(Effect.orDie));
-          const result = yield* tryCreateRoom(roomId, selfId);
+          const result = yield* tryCreateRoom(roomId, selfId, roomTemplateId);
           if (result._tag === 'created') return { roomId, events: result.events };
           if (result._tag === 'rejected') return yield* new ServerAtCapacity();
         }
         return yield* new ServerAtCapacity();
       });
 
-      return { openHost, removeMember };
+      const getRoomMetadata = Effect.fnUntraced(function* (roomId: RoomId) {
+        const roomTemplateId = yield* registry.modify((state) =>
+          Effect.succeed(state.get(roomId)?.roomTemplateId),
+        );
+        if (roomTemplateId === undefined) return yield* new RoomNotFound({ roomId });
+        return { roomTemplateId };
+      });
+
+      return { openHost, getRoomMetadata, removeMember };
     }),
   },
 ) {

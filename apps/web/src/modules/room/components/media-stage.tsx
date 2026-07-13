@@ -1,61 +1,24 @@
 import { Avatar, AvatarFallback } from '@tether/ui/components/avatar';
 import { cn } from '@tether/ui/lib/utils';
 import { motion, animate, useMotionValue } from 'motion/react';
-import { type ReactNode, type RefObject, useEffect, useRef } from 'react';
+import { type ReactNode, type RefObject, useRef } from 'react';
+
+import { useViewportAspectRatio } from '@/hooks/use-viewport-aspect-ratio';
 
 import { usePinnedDraggableTile, type TileCorner } from '../hooks/use-pinned-draggable-tile';
-
-function attachMediaStreamVideo(
-  video: HTMLVideoElement | null,
-  stream: MediaStream | null,
-  sinkId = '',
-) {
-  if (video === null) return;
-  video.srcObject = stream;
-  if (sinkId !== '' && typeof video.setSinkId === 'function') {
-    void video.setSinkId(sinkId).catch(() => {});
-  }
-}
-
-export function RemoteVideo({
-  stream,
-  sinkId,
-  muted,
-}: {
-  readonly stream: MediaStream;
-  readonly sinkId: string;
-  readonly muted: boolean;
-}) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  useEffect(() => {
-    attachMediaStreamVideo(videoRef.current, stream, sinkId);
-  }, [stream, sinkId]);
-
-  return (
-    // oxlint-disable-next-line jsx-a11y/media-has-caption -- live call has no captions
-    <video
-      ref={videoRef}
-      aria-label='Remote video'
-      autoPlay
-      muted={muted}
-      playsInline
-      className='size-full max-w-5xl object-cover'
-    />
-  );
-}
+import { MediaStreamVideo } from './media-stream-video';
 
 const TILE_MARGIN = 16;
 const TILE_SNAP = { type: 'spring', stiffness: 500, damping: 40 } as const;
 
 export function DraggableSelfPreview({
   boundaryRef,
-  aspectRatio,
   children,
 }: {
   readonly boundaryRef: RefObject<HTMLDivElement | null>;
-  readonly aspectRatio: number;
   readonly children: ReactNode;
 }) {
+  const aspectRatio = useViewportAspectRatio();
   const tileRef = useRef<HTMLDivElement>(null);
   const x = useMotionValue(0);
   const y = useMotionValue(0);
@@ -85,7 +48,7 @@ export function DraggableSelfPreview({
       onDragEnd={snapToNearestCorner}
       whileDrag={{ scale: 1.04 }}
       style={{ x, y, aspectRatio }}
-      className='border-border bg-card absolute top-0 left-0 w-[clamp(7rem,30vw,9rem)] cursor-grab touch-none overflow-hidden rounded-md border shadow-lg active:cursor-grabbing landscape:w-[clamp(14rem,24vw,20rem)]'
+      className='border-border bg-card absolute top-0 left-0 w-[clamp(7rem,30vw,9rem)] cursor-grab touch-none overflow-hidden rounded-md border shadow-lg active:cursor-grabbing landscape:w-[clamp(11rem,18vw,15rem)]'
     >
       {children}
     </motion.div>
@@ -110,15 +73,10 @@ export function SelfVideo({
   readonly cameraOn: boolean;
   readonly selfId: string;
 }) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  useEffect(() => {
-    attachMediaStreamVideo(videoRef.current, stream);
-  }, [stream]);
-
   return (
     <>
-      <video
-        ref={videoRef}
+      <MediaStreamVideo
+        stream={stream}
         aria-label='Local video preview'
         autoPlay
         muted

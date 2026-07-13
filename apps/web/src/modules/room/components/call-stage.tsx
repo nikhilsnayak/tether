@@ -1,6 +1,7 @@
 import { useAtomValue } from '@effect/atom-react';
 import type { RoomSession } from '@tether/client-runtime/modules/peer-session';
 import {
+  isPeerSessionErrorStatus,
   peerLocalStreamAtom,
   peerRemoteStreamAtom,
   peerSessionStatusPresentation,
@@ -9,20 +10,25 @@ import {
 } from '@tether/client-runtime/modules/room';
 import type { PeerId } from '@tether/contracts/modules/room';
 import { Badge } from '@tether/ui/components/badge';
+import { Button } from '@tether/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@tether/ui/components/tooltip';
 import { cn } from '@tether/ui/lib/utils';
-import { ShieldCheck, User } from 'lucide-react';
-import { MessageSquare, Mic, MicOff, PhoneOff, Video, VideoOff } from 'lucide-react';
+import { ShieldCheck } from 'lucide-react';
 import { useRef, useState } from 'react';
 
 import { LogoMark, Wordmark } from '@/components/logo';
-import { useViewportAspectRatio } from '@/hooks/use-viewport-aspect-ratio';
 
+import { useRemoteVideoAvailability } from '../hooks/use-remote-video-availability';
 import { mediaStreamValue } from '../peer-session/platform';
-import { AudioOutputControl, SPEAKER_OFF } from './audio-output-control';
-import { CallControlButton } from './call-controls';
+import type { InitialMediaSettings } from '../preflight/media';
+import { roomJourneyCue, roomJourneyLabel } from '../scene/journey';
+import { RoomScenePreview } from '../scene/room-scene-preview';
+import type { RoomTemplate } from '../templates/registry';
+import { SPEAKER_OFF } from './audio-output-control';
+import { CallControlsToolbar } from './call-controls-toolbar';
 import { JoinRequestOverlay } from './join-request-overlay';
-import { DraggableSelfPreview, RemoteVideo, SelfVideo } from './media-stage';
+import { DraggableSelfPreview, SelfVideo } from './media-stage';
+import { RemoteAudio } from './remote-audio';
 import { SafetyCodeCard } from './safety-code-card';
 
 const INDICATOR_TONE_CLASS = {
@@ -37,34 +43,45 @@ const statusIndicatorClassName = (presentation: PeerSessionStatusPresentation) =
 
 export function CallStage({
   session,
+  template,
   respondToJoin,
   onLeave,
-  hasUnread,
-  onOpenChat,
+  onSendMessage,
+  initialMediaSettings,
 }: {
   readonly session: RoomSession;
+  readonly template: RoomTemplate;
   readonly respondToJoin: (peerId: PeerId, decision: 'allow' | 'deny') => Promise<void>;
   readonly onLeave: () => void;
-  readonly hasUnread: boolean;
-  readonly onOpenChat: () => void;
+  readonly onSendMessage: (message: string) => boolean;
+  readonly initialMediaSettings: InitialMediaSettings;
 }) {
   const view = useAtomValue(peerSessionViewAtom);
   const localStreamHandle = useAtomValue(peerLocalStreamAtom);
   const remoteStreamHandle = useAtomValue(peerRemoteStreamAtom);
   const localStream = localStreamHandle === null ? null : mediaStreamValue(localStreamHandle);
   const remoteStream = remoteStreamHandle === null ? null : mediaStreamValue(remoteStreamHandle);
-  const [micOn, setMicOn] = useState(true);
-  const [cameraOn, setCameraOn] = useState(true);
+  const remoteVideoAvailable = useRemoteVideoAvailability(remoteStream);
+  const [micOn, setMicOn] = useState(initialMediaSettings.microphone);
+  const [cameraOn, setCameraOn] = useState(initialMediaSettings.camera);
   const [sinkId, setSinkId] = useState('');
   const [speakerOn, setSpeakerOn] = useState(true);
   const [confirmedSas, setConfirmedSas] = useState<string | null>(null);
   const [handlingJoinPeerIds, setHandlingJoinPeerIds] = useState<ReadonlySet<PeerId>>(new Set());
-  const stageRef = useRef<HTMLDivElement>(null);
-  const aspectRatio = useViewportAspectRatio();
+  const selfPreviewBoundaryRef = useRef<HTMLDivElement>(null);
   const presentation = peerSessionStatusPresentation(view.status);
   const pendingJoin =
     view.pendingJoinRequests.find((request) => !handlingJoinPeerIds.has(request.peerId)) ?? null;
   const sasConfirmed = view.sas !== null && confirmedSas === view.sas;
+  const journey = roomJourneyCue(session.intent, view.status, remoteStream !== null);
+  const displayLabel =
+    journey === 'screen-live' && !remoteVideoAvailable
+      ? 'The other person is here'
+      : roomJourneyLabel(journey);
+  const displayHint =
+    journey === 'screen-live' && !remoteVideoAvailable
+      ? 'Their camera is unavailable.'
+      : presentation.hint;
 
   const handleLeave = () => onLeave();
   const handleMicToggle = () => {
@@ -98,21 +115,47 @@ export function CallStage({
   };
 
   return (
-    <div className='relative z-40 grid h-svh grid-rows-[minmax(0,1fr)_auto]'>
-      <div ref={stageRef} className='relative flex items-center justify-center overflow-hidden'>
-        {remoteStream ? (
-          <RemoteVideo stream={remoteStream} sinkId={sinkId} muted={!speakerOn} />
-        ) : (
-          <div className='grid justify-items-center gap-5 px-6 text-center'>
-            <div className='border-border grid size-20 place-items-center border'>
-              <User className='text-muted-foreground size-9' />
-            </div>
-            <div className='space-y-2'>
-              <p className='font-mono text-sm tracking-[0.2em] uppercase'>{presentation.label}</p>
-              <p className='text-muted-foreground text-sm'>{presentation.hint}</p>
-            </div>
+    <div className='relative z-40 h-svh overflow-hidden'>
+      <RoomScenePreview
+        template={template}
+        admissionPending={pendingJoin !== null}
+        remoteStream={
+          remoteStream !== null && (journey === 'screen-live' || journey === 'screen-reconnecting')
+            ? remoteStream
+            : null
+        }
+        journey={journey}
+        mode='call'
+      />
+      <RemoteAudio
+        stream={remoteStream}
+        sinkId={sinkId}
+        muted={!speakerOn}
+        pendingJoinPeerIds={view.pendingJoinRequests.map((request) => request.peerId)}
+      />
+      {journey === 'outside' ? (
+        <section
+          aria-label={displayLabel}
+          className='border-border bg-background/85 absolute bottom-6 left-6 z-10 w-[min(24rem,calc(100%-2rem))] space-y-3 rounded-xl border p-5 text-left shadow-2xl backdrop-blur-sm max-sm:left-1/2 max-sm:-translate-x-1/2'
+        >
+          <p className='font-mono text-xs tracking-[0.2em] uppercase'>{displayLabel}</p>
+          <p className='text-muted-foreground text-sm'>{displayHint}</p>
+          <Button variant='secondary' onClick={handleLeave}>
+            Leave room
+          </Button>
+        </section>
+      ) : (
+        (journey !== 'screen-live' || !remoteVideoAvailable) && (
+          <div
+            aria-label={displayLabel}
+            className='pointer-events-none absolute top-[32%] left-1/2 grid w-[min(48vw,32rem)] -translate-x-1/2 justify-items-center gap-2 px-4 text-center drop-shadow-lg max-sm:top-[30%] max-sm:w-[78vw]'
+          >
+            <p className='font-mono text-xs tracking-[0.2em] uppercase'>{displayLabel}</p>
+            <p className='text-muted-foreground text-xs'>{displayHint}</p>
           </div>
-        )}
+        )
+      )}
+      <div className='pointer-events-none absolute inset-0'>
         <div className='absolute inset-x-0 top-0 flex items-center justify-between gap-3 bg-linear-to-b from-black/60 to-transparent p-4 pb-10'>
           <div className='flex min-w-0 items-center gap-3'>
             <Wordmark className='drop-shadow-md max-sm:hidden' />
@@ -166,58 +209,71 @@ export function CallStage({
             )}
           </div>
         </div>
-        <DraggableSelfPreview boundaryRef={stageRef} aspectRatio={aspectRatio}>
-          <SelfVideo stream={localStream} cameraOn={cameraOn} selfId={session.selfId} />
-        </DraggableSelfPreview>
+        <div
+          ref={selfPreviewBoundaryRef}
+          className='pointer-events-none absolute inset-x-4 top-16 bottom-24'
+        >
+          <div className='pointer-events-auto'>
+            <DraggableSelfPreview boundaryRef={selfPreviewBoundaryRef}>
+              <SelfVideo stream={localStream} cameraOn={cameraOn} selfId={session.selfId} />
+            </DraggableSelfPreview>
+          </div>
+        </div>
         {view.sas !== null && !sasConfirmed && (
-          <SafetyCodeCard
-            code={view.sas}
-            onLeave={handleLeave}
-            onConfirm={() => setConfirmedSas(view.sas)}
-          />
+          <div className='pointer-events-auto'>
+            <SafetyCodeCard
+              code={view.sas}
+              onLeave={handleLeave}
+              onConfirm={() => setConfirmedSas(view.sas)}
+            />
+          </div>
         )}
         {pendingJoin !== null && (
-          <JoinRequestOverlay
-            displayName={pendingJoin.displayName}
-            onDecision={(decision) => handleJoinDecision(pendingJoin.peerId, decision)}
-          />
+          <div className='pointer-events-auto'>
+            <JoinRequestOverlay
+              displayName={pendingJoin.displayName}
+              onDecision={(decision) => handleJoinDecision(pendingJoin.peerId, decision)}
+            />
+          </div>
+        )}
+        {isPeerSessionErrorStatus(view.status) && (
+          <section
+            aria-label='Call failed'
+            className='border-border bg-background/90 pointer-events-auto absolute top-1/2 left-1/2 w-[min(24rem,calc(100%-2rem))] -translate-x-1/2 -translate-y-1/2 space-y-3 border p-5 text-center backdrop-blur-sm'
+          >
+            <h2 className='font-mono text-xs tracking-[0.2em] uppercase'>{presentation.label}</h2>
+            <p className='text-muted-foreground text-sm'>{presentation.hint}</p>
+            <Button variant='secondary' onClick={handleLeave}>
+              Back to room setup
+            </Button>
+          </section>
+        )}
+        {journey === 'screen-departed' && (
+          <section
+            aria-label='Call ended'
+            className='border-border bg-background/90 pointer-events-auto absolute top-1/2 left-1/2 w-[min(24rem,calc(100%-2rem))] -translate-x-1/2 -translate-y-1/2 space-y-3 border p-5 text-center backdrop-blur-sm'
+          >
+            <h2 className='font-mono text-xs tracking-[0.2em] uppercase'>The other person left</h2>
+            <p className='text-muted-foreground text-sm'>This call has ended.</p>
+            <Button variant='secondary' onClick={handleLeave}>
+              Return home
+            </Button>
+          </section>
         )}
       </div>
-      <div className='border-border flex items-center justify-center gap-2 border-t p-4 sm:gap-3'>
-        <CallControlButton
-          label={micOn ? 'Mute microphone' : 'Unmute microphone'}
-          caption='mic'
-          tone={micOn ? 'neutral' : 'danger'}
-          onClick={handleMicToggle}
-        >
-          {micOn ? <Mic /> : <MicOff />}
-        </CallControlButton>
-        <CallControlButton
-          label={cameraOn ? 'Turn camera off' : 'Turn camera on'}
-          caption='cam'
-          tone={cameraOn ? 'neutral' : 'danger'}
-          onClick={handleCameraToggle}
-        >
-          {cameraOn ? <Video /> : <VideoOff />}
-        </CallControlButton>
-        <AudioOutputControl
+      {journey !== 'outside' && (
+        <CallControlsToolbar
+          micOn={micOn}
+          cameraOn={cameraOn}
           sinkId={sinkId}
           speakerOn={speakerOn}
-          onChange={handleAudioOutputChange}
+          onMicToggle={handleMicToggle}
+          onCameraToggle={handleCameraToggle}
+          onAudioOutputChange={handleAudioOutputChange}
+          onSendMessage={onSendMessage}
+          onLeave={handleLeave}
         />
-        <CallControlButton label='Leave call' caption='end' tone='danger' onClick={handleLeave}>
-          <PhoneOff />
-        </CallControlButton>
-        <CallControlButton
-          label={hasUnread ? 'Open chat (unread messages)' : 'Open chat'}
-          caption='chat'
-          tone='neutral'
-          indicator={hasUnread}
-          onClick={onOpenChat}
-        >
-          <MessageSquare />
-        </CallControlButton>
-      </div>
+      )}
     </div>
   );
 }

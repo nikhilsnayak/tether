@@ -1,10 +1,13 @@
 import { expect, test, type Page } from '@playwright/test';
 
-import { connectPeers, requireBaseURL } from './helpers';
+import { connectPeers, expectPeerDeparted, requireBaseURL } from './helpers';
 
 test('peers confirm a matching safety code', async ({ browser }, testInfo) => {
   const baseURL = requireBaseURL(testInfo.project.use.baseURL);
-  const { host, guest, cleanup } = await connectPeers(browser, baseURL, { probeWebRtc: true });
+  const { host, guest, cleanup } = await connectPeers(browser, baseURL, {
+    confirmSafety: false,
+    probeWebRtc: true,
+  });
 
   const safetyCode = (page: Page) => page.getByLabel('Safety code');
   const safetyCheck = (page: Page) => page.getByRole('region', { name: 'Safety check' });
@@ -32,10 +35,11 @@ test('peers confirm a matching safety code', async ({ browser }, testInfo) => {
     await expect(safetyCode(host)).toHaveText(fromHost ?? '');
     await expect(safetyCheck(guest)).toBeVisible();
 
-    // The mismatch escape hatch ends the call.
+    // The mismatch escape hatch ends the call. The guest's departure returns the
+    // host to the peer-departed waiting state (distinct hint from a fresh room).
     await guest.getByRole('button', { name: "They don't match" }).click();
     await expect(guest).toHaveURL('/');
-    await expect(host.getByText('Share this room to invite someone.')).toBeVisible();
+    await expectPeerDeparted(host);
   } finally {
     await cleanup();
   }

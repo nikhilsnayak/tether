@@ -30,6 +30,7 @@
 ## Features
 
 - **Private rooms for two.** Create a short room code and share its invite link without creating an account. Guests enter a display name and knock; the host explicitly allows or denies each request before any WebRTC negotiation begins.
+- **A shared Dusk Suite.** Web and desktop callers enter a responsive procedural 3D room, wait outside until admitted, and see the other caller on the room's display. Rendering quality adapts locally and reduced-motion preferences remove camera travel.
 - **Web, Android, and desktop clients.** The same room works from a browser, the native Android app, or the Electron desktop app. Shared room links open directly in the installed app — Android App Links on mobile, and on desktop the web page hands off to the app through its `tether://` deep link.
 - **Peer-to-peer video and audio.** Camera and microphone media use WebRTC, with in-call mic, camera, speaker, and audio-output controls.
 - **Ephemeral chat.** Messages travel over the call's encrypted WebRTC data channel and disappear when the session ends.
@@ -96,12 +97,19 @@ Signaling is intentionally single-process and in-memory. Active calls end when t
 
 On the client, room events, WebRTC callbacks, timers, and UI commands enter one serialized peer-session actor. That actor owns negotiation state and scoped resources, preventing concurrent callbacks from racing connection state. The implementation is React-free and platform-neutral; the web and mobile apps each supply a thin WebRTC adapter and UI on top of the shared runtime.
 
+Each room also carries an ephemeral template ID. The server retains that ID only with the in-memory
+room record; it does not store scene assets. Web and desktop clients resolve the ID against their
+bundled template registry and render Dusk Suite locally with React Three Fiber's WebGPU renderer.
+The room is procedural and makes no runtime requests for third-party models, textures,
+environments, fonts, or audio. Android participates in the same room protocol and template
+metadata but keeps its existing native call interface.
+
 ## Quick start
 
 ### Requirements
 
 - [Bun](https://bun.sh/) 1.3.14
-- A modern browser with WebRTC and camera/microphone access
+- A secure modern browser with WebGL2, WebRTC, and camera/microphone access
 
 ```sh
 git clone https://github.com/nikhilsnayak/tether.git
@@ -111,7 +119,11 @@ cp apps/web/.env.example apps/web/.env
 bun run dev --filter=server --filter=web
 ```
 
-Open `http://localhost:5173` in two tabs. Create a room in the first tab, open its invite link in the second, enter a name, and knock. Allow the request in the host tab to start the call. Localhost is treated as a secure browser context, so camera and microphone APIs are available during development.
+Open `http://localhost:5173` in two tabs. Start a call and complete the media check in the first tab,
+then open its invite link in the second, enter a name, and knock. The guest waits outside
+the room until the host allows the request; admission starts the peer connection and brings both
+callers to the room display. Localhost is treated as a secure browser context, so camera,
+microphone, and graphics APIs are available during development.
 
 ## Configuration
 
@@ -135,6 +147,11 @@ configuration. Calls that cannot establish a direct peer-to-peer path will fail.
 | `VITE_WEB_URL`    | current web origin        | Base URL used for shareable room links           |
 
 Production browser deployments require HTTPS and a corresponding `wss://` signaling URL for camera and microphone access.
+
+The web room requires WebGL2. React Three Fiber prefers WebGPU when available and falls back to
+WebGL2 otherwise; browsers without WebGL2 stop at the compatibility screen before requesting media.
+Quality selection and automatic quality reduction are local to each caller; they do not change the
+other caller's room.
 
 ### Mobile
 
@@ -207,6 +224,7 @@ The main implementation boundaries are:
 - TypeScript 6
 - Bun and Turborepo
 - React 19 and Vite
+- React Three Fiber 10 and Three.js WebGPU rendering
 - TanStack Router
 - Expo and React Native
 - Tailwind CSS 4

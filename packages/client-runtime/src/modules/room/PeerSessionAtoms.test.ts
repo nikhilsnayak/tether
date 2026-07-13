@@ -39,7 +39,7 @@ it.effect('projects session events into the atom registry', () =>
       yield* sink.emit({ _tag: 'RemoteStreamReady', stream: remoteStream });
       yield* sink.emit({ _tag: 'PeerDeparted', peerId });
       assert.isNull(registry.get(peerRemoteStreamAtom));
-      assert.strictEqual(registry.get(peerSessionViewAtom).status, 'waiting-for-peer');
+      assert.strictEqual(registry.get(peerSessionViewAtom).status, 'peer-departed');
 
       const resetEvents: ReadonlyArray<PeerSessionEvent> = [
         { _tag: 'SessionFailed' },

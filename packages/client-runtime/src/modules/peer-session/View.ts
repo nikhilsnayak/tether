@@ -8,6 +8,7 @@ export const initialPeerSessionView: PeerSessionView = {
   chatReady: false,
   sas: null,
   roomId: null,
+  roomTemplateId: null,
   pendingJoinRequests: [],
 };
 
@@ -50,7 +51,11 @@ export const reducePeerSessionView = (
     case 'PeerRestored':
       return { ...view, status: 'connected' };
     case 'RoomOpened':
-      return { ...view, roomId: event.roomId };
+      return {
+        ...view,
+        roomId: event.roomId,
+        roomTemplateId: event.roomTemplateId,
+      };
     case 'RoomJoinRejected':
       return { ...view, status: event.reason };
     case 'JoinRequestReceived':
@@ -75,7 +80,7 @@ export const reducePeerSessionView = (
         : { ...view, pendingJoinRequests };
     }
     case 'PeerDeparted':
-      return { ...view, status: 'waiting-for-peer', chatReady: false, sas: null };
+      return { ...view, status: 'peer-departed', chatReady: false, sas: null };
   }
 };
 

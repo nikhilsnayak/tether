@@ -4,7 +4,7 @@ import {
   PlatformError,
   type PlatformEvent,
 } from '@tether/client-runtime/modules/peer-session';
-import { Crypto, Effect } from 'effect';
+import { Crypto, Effect, Exit, Scope } from 'effect';
 import { vi } from 'vitest';
 
 class FakeTrack {
@@ -92,7 +92,12 @@ vi.stubGlobal('RTCPeerConnection', FakePeerConnection);
 vi.stubGlobal('navigator', { mediaDevices: { getUserMedia } });
 vi.stubGlobal('crypto', { getRandomValues, subtle: { digest } });
 
-import { mediaStreamValue, webCryptoLayer, webPeerSessionPlatformLayer } from './platform';
+import {
+  mediaStreamValue,
+  prepareLocalMedia,
+  webCryptoLayer,
+  webPeerSessionPlatformLayer,
+} from './platform';
 
 const withPlatform = <A, E, R>(effect: Effect.Effect<A, E, R | PeerSessionPlatform>) =>
   effect.pipe(Effect.provide(webPeerSessionPlatformLayer));
@@ -132,6 +137,70 @@ describe('web peer-session platform', () => {
         }),
       ),
     ),
+  );
+
+  it.effect('cancels prepared local media exactly once before transfer', () =>
+    Effect.gen(function* () {
+      mediaStream.track.stop.mockClear();
+      const prepared = yield* prepareLocalMedia();
+
+      yield* Effect.promise(prepared.cancel);
+      yield* Effect.promise(prepared.cancel);
+
+      assert.strictEqual(mediaStream.track.stop.mock.calls.length, 1);
+    }),
+  );
+
+  it.effect('transfers the exact prepared stream into a session scope', () =>
+    Effect.gen(function* () {
+      mediaStream.track.stop.mockClear();
+      const prepared = yield* prepareLocalMedia();
+      const transferred = prepared.transfer();
+      assert.throws(() => prepared.transfer(), 'Prepared local media can only be transferred once');
+
+      const scope = yield* Scope.make();
+      const handle = yield* transferred.claim.pipe(Scope.provide(scope));
+      assert.strictEqual(mediaStreamValue(handle), mediaStream as unknown as MediaStream);
+
+      const secondClaimError = yield* transferred.claim.pipe(Scope.provide(scope), Effect.flip);
+      assert.instanceOf(secondClaimError, PlatformError);
+
+      // Once claimed, the session scope owns teardown; cancel is a no-op.
+      yield* Effect.promise(prepared.cancel);
+      assert.strictEqual(mediaStream.track.stop.mock.calls.length, 0);
+
+      yield* Scope.close(scope, Exit.void);
+      yield* Scope.close(scope, Exit.void);
+      assert.strictEqual(mediaStream.track.stop.mock.calls.length, 1);
+    }),
+  );
+
+  it.effect('releases transferred media that is abandoned without claim', () =>
+    Effect.gen(function* () {
+      mediaStream.track.stop.mockClear();
+      const prepared = yield* prepareLocalMedia();
+      prepared.transfer();
+
+      // No claim. The only cleanup entry point left on PreparedLocalMedia is cancel.
+      yield* Effect.promise(prepared.cancel);
+
+      assert.strictEqual(
+        mediaStream.track.stop.mock.calls.length,
+        1,
+        'transferred-but-unclaimed media must still be releasable (leak if 0)',
+      );
+    }),
+  );
+
+  it.effect('closes its empty scope when prepared acquisition fails', () =>
+    Effect.gen(function* () {
+      getUserMedia.mockRejectedValueOnce(new Error('permission denied'));
+
+      const error = yield* prepareLocalMedia().pipe(Effect.flip);
+
+      assert.instanceOf(error, PlatformError);
+      assert.strictEqual(error.operation, 'acquire-local-media');
+    }),
   );
 
   it.effect('performs peer-connection and data-channel operations', () =>

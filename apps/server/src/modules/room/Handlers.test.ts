@@ -1,5 +1,6 @@
 import { assert, describe, it } from '@effect/vitest';
 import {
+  DUSK_SUITE_TEMPLATE_ID,
   DisplayName,
   JoinDenied,
   PeerAlreadyJoined,
@@ -66,7 +67,11 @@ const connect = (
     const knockDeferred = yield* Deferred.make<void>();
     const bobTokenDeferred = yield* Deferred.make<SessionToken>();
 
-    const hostStream = client.OpenRoomSession({ selfId: alice, intent: 'host' });
+    const hostStream = client.OpenRoomSession({
+      selfId: alice,
+      intent: 'host',
+      roomTemplateId: DUSK_SUITE_TEMPLATE_ID,
+    });
     const aliceFiber = yield* (
       options.hostTake === undefined
         ? hostStream.pipe(Stream.tap(hostTap), Stream.runDrain)
@@ -75,6 +80,9 @@ const connect = (
 
     const roomId = yield* Deferred.await(roomIdDeferred);
     const aliceToken = yield* Deferred.await(aliceTokenDeferred);
+    assert.deepStrictEqual(yield* client.GetRoomMetadata({ roomId }), {
+      roomTemplateId: DUSK_SUITE_TEMPLATE_ID,
+    });
 
     const joinStream = client.OpenRoomSession({
       selfId: bob,
@@ -229,6 +237,16 @@ describe('RoomHandlers', () => {
     }),
   );
 
+  it.effect('returns RoomNotFound for metadata lookup on an unknown room', () =>
+    Effect.gen(function* () {
+      const client = yield* makeClient;
+      const error = yield* client
+        .GetRoomMetadata({ roomId: RoomId.make('abc-defg-hij') })
+        .pipe(Effect.flip);
+      assert.instanceOf(error, RoomNotFound);
+    }),
+  );
+
   it.effect('returns ServerAtCapacity when the creation bucket is drained', () =>
     Effect.gen(function* () {
       const client = yield* makeClient;
@@ -237,13 +255,21 @@ describe('RoomHandlers', () => {
         Array.from({ length: ROOM_CREATE_BUCKET_CAPACITY }, (_, index) => index),
         (index) =>
           client
-            .OpenRoomSession({ selfId: randomPeerId(index), intent: 'host' })
+            .OpenRoomSession({
+              selfId: randomPeerId(index),
+              intent: 'host',
+              roomTemplateId: DUSK_SUITE_TEMPLATE_ID,
+            })
             .pipe(Stream.runDrain, Effect.forkChild({ startImmediately: true })),
         { discard: true },
       );
 
       const error = yield* client
-        .OpenRoomSession({ selfId: randomPeerId(999), intent: 'host' })
+        .OpenRoomSession({
+          selfId: randomPeerId(999),
+          intent: 'host',
+          roomTemplateId: DUSK_SUITE_TEMPLATE_ID,
+        })
         .pipe(Stream.runDrain, Effect.flip);
 
       assert.instanceOf(error, ServerAtCapacity);
@@ -271,22 +297,24 @@ describe('RoomHandlers', () => {
       const aliceTokenDeferred = yield* Deferred.make<SessionToken>();
       const knockDeferred = yield* Deferred.make<void>();
 
-      yield* client.OpenRoomSession({ selfId: alice, intent: 'host' }).pipe(
-        Stream.tap((entry) => {
-          if (isTag(entry, '@tether/RoomSessionOpenedEvent')) {
-            const opened = entry.event as RoomSessionOpenedEvent;
-            return Effect.all([
-              Deferred.succeed(roomIdDeferred, opened.roomId),
-              Deferred.succeed(aliceTokenDeferred, opened.sessionToken),
-            ]);
-          }
-          return isTag(entry, '@tether/JoinRequestedEvent')
-            ? Deferred.succeed(knockDeferred, undefined)
-            : Effect.void;
-        }),
-        Stream.runDrain,
-        Effect.forkChild({ startImmediately: true }),
-      );
+      yield* client
+        .OpenRoomSession({ selfId: alice, intent: 'host', roomTemplateId: DUSK_SUITE_TEMPLATE_ID })
+        .pipe(
+          Stream.tap((entry) => {
+            if (isTag(entry, '@tether/RoomSessionOpenedEvent')) {
+              const opened = entry.event as RoomSessionOpenedEvent;
+              return Effect.all([
+                Deferred.succeed(roomIdDeferred, opened.roomId),
+                Deferred.succeed(aliceTokenDeferred, opened.sessionToken),
+              ]);
+            }
+            return isTag(entry, '@tether/JoinRequestedEvent')
+              ? Deferred.succeed(knockDeferred, undefined)
+              : Effect.void;
+          }),
+          Stream.runDrain,
+          Effect.forkChild({ startImmediately: true }),
+        );
       const roomId = yield* Deferred.await(roomIdDeferred);
       const aliceToken = yield* Deferred.await(aliceTokenDeferred);
 

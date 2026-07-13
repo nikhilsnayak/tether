@@ -1,3 +1,5 @@
+import { useAtomValue } from '@effect/atom-react';
+import { peerLocalStreamAtom } from '@tether/client-runtime/modules/room';
 import { Button } from '@tether/ui/components/button';
 import {
   DropdownMenu,
@@ -39,14 +41,16 @@ export function AudioOutputControl({
                 <Button
                   aria-label='Audio output'
                   variant={speakerOn ? 'secondary' : 'destructive'}
-                  className='h-14 w-14 flex-col gap-1.5 rounded-sm sm:w-16'
+                  className='h-11 w-11 flex-col gap-1 rounded-xl sm:h-14 sm:w-16 sm:gap-1.5'
                 />
               }
             />
           }
         >
           {speakerOn ? <Volume2 /> : <VolumeX />}
-          <span className='font-mono text-[9px] tracking-[0.2em] uppercase'>out</span>
+          <span className='font-mono text-[8px] tracking-[0.14em] uppercase sm:text-[9px] sm:tracking-[0.2em]'>
+            out
+          </span>
         </TooltipTrigger>
         <TooltipContent>Audio output</TooltipContent>
       </Tooltip>
@@ -72,5 +76,3 @@ export function AudioOutputControl({
     </DropdownMenu>
   );
 }
-import { useAtomValue } from '@effect/atom-react';
-import { peerLocalStreamAtom } from '@tether/client-runtime/modules/room';

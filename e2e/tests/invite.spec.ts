@@ -1,11 +1,14 @@
 import { expect, test } from '@playwright/test';
 
+import { startHostingRoom } from './helpers';
+
 test('creating a room offers a copyable invite link', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
 
   await page.goto('/');
   await page.getByRole('button', { name: 'Call' }).click();
   await expect(page).toHaveURL(/\/host$/);
+  await startHostingRoom(page);
 
   await expect(page.getByText('Room ready')).toBeVisible({ timeout: 20_000 });
   const inviteLink = await page.getByRole('textbox', { name: 'Room invite link' }).inputValue();

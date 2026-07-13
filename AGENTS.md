@@ -16,3 +16,7 @@ Read-only reference for the libraries they mirror. Don't edit them unless asked,
 ## Effect
 
 Read `repos/effect/LLMS.md` before writing Effect code, and treat `repos/effect/` as the source of truth for idiomatic patterns over web search or guesses.
+
+## React
+
+- React Compiler is enabled. Do not use `useMemo`, `useCallback`, or `memo`; write direct values and functions and let the compiler optimize them.

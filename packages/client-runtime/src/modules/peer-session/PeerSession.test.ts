@@ -1,5 +1,6 @@
 import { assert, describe, it } from '@effect/vitest';
 import {
+  DUSK_SUITE_TEMPLATE_ID,
   DisplayName,
   IceCandidateSignal,
   JoinCancelledEvent,
@@ -27,7 +28,7 @@ import { Crypto, Deferred, Effect, Exit, Layer, Queue, Scope, Stream } from 'eff
 import { TestClock } from 'effect/testing';
 
 import { AppClient } from '../../AppClient';
-import { startPeerSession } from '../room/PeerSessionHost';
+import { startPeerSession, type PreparedMedia } from '../room/PeerSessionHost';
 import {
   type DataChannelHandle,
   type IceServer,
@@ -88,10 +89,15 @@ const openedEvent = (peerId: PeerId | null) =>
     peerId,
     sessionToken: testSessionToken,
     roomId: session.roomId,
+    roomTemplateId: DUSK_SUITE_TEMPLATE_ID,
   });
 
 // Every RoomSessionOpenedEvent makes the actor surface the minted roomId first.
-const roomOpened: PeerSessionEvent = { _tag: 'RoomOpened', roomId: session.roomId };
+const roomOpened: PeerSessionEvent = {
+  _tag: 'RoomOpened',
+  roomId: session.roomId,
+  roomTemplateId: DUSK_SUITE_TEMPLATE_ID,
+};
 
 const makeFixture = Effect.fn('makeFixture')(function* (
   openRoomSession: AppClient['Service']['OpenRoomSession'] = (() =>
@@ -253,6 +259,10 @@ const makeFixture = Effect.fn('makeFixture')(function* (
     Layer.succeed(
       AppClient,
       AppClient.of({
+        GetRoomMetadata: (() =>
+          Effect.succeed({
+            roomTemplateId: DUSK_SUITE_TEMPLATE_ID,
+          })) as AppClient['Service']['GetRoomMetadata'],
         LeaveRoom: () =>
           Effect.sync(() => {
             operations.push('leaveRoom');
@@ -306,8 +316,13 @@ const makeFixture = Effect.fn('makeFixture')(function* (
       switch (event._tag) {
         case '@tether/RoomSessionOpenedEvent':
           return Effect.gen(function* () {
-            events.push({ _tag: 'RoomOpened', roomId: event.roomId });
-            yield* Queue.offer(eventQueue, { _tag: 'RoomOpened', roomId: event.roomId });
+            const opened: PeerSessionEvent = {
+              _tag: 'RoomOpened',
+              roomId: event.roomId,
+              roomTemplateId: event.roomTemplateId,
+            };
+            events.push(opened);
+            yield* Queue.offer(eventQueue, opened);
             yield* peerActor.handleInput({ _tag: 'RoomSessionOpened', peerId: event.peerId });
           });
         case '@tether/PeerJoinedEvent':
@@ -450,6 +465,94 @@ describe('startPeerSession', () => {
         ]);
       }),
     ),
+  );
+
+  it.effect('uses a prepared media handle and adopts its finalizer', () =>
+    Effect.gen(function* () {
+      const scope = yield* Scope.make();
+      const fixture = yield* makeFixture(
+        (() => Stream.never) as AppClient['Service']['OpenRoomSession'],
+      ).pipe(Scope.provide(scope));
+      const preparedStream: MediaStreamHandle = { value: { id: 'prepared-media' } };
+      const preparedMedia: PreparedMedia = {
+        claim: Effect.acquireRelease(
+          Effect.sync(() => {
+            fixture.operations.push('claimPreparedMedia');
+            return preparedStream;
+          }),
+          () => Effect.sync(() => fixture.operations.push('releasePreparedMedia')),
+        ),
+      };
+
+      yield* startPeerSession(session, preparedMedia).pipe(
+        Effect.provide(fixture.dependencies),
+        Scope.provide(scope),
+      );
+      yield* Queue.take(fixture.eventQueue);
+      const localStreamReady = yield* Queue.take(fixture.eventQueue);
+
+      assert.deepStrictEqual(localStreamReady, {
+        _tag: 'LocalStreamReady',
+        stream: preparedStream,
+      });
+      assert.notInclude(fixture.operations, 'acquireLocalMedia');
+      assert.include(fixture.operations, 'claimPreparedMedia');
+
+      yield* Scope.close(scope, Exit.void);
+      assert.lengthOf(
+        fixture.operations.filter((operation) => operation === 'releasePreparedMedia'),
+        1,
+      );
+    }),
+  );
+
+  it.effect('claims prepared media before subscribing to the room session stream', () =>
+    Effect.gen(function* () {
+      const scope = yield* Scope.make();
+      const roomStreamSubscribed = yield* Deferred.make<void>();
+      const fixture = yield* makeFixture((() =>
+        Stream.unwrap(
+          Effect.gen(function* () {
+            fixture.operations.push('openRoomSessionSubscribed');
+            yield* Deferred.succeed(roomStreamSubscribed, undefined);
+            return Stream.never;
+          }),
+        )) as AppClient['Service']['OpenRoomSession']).pipe(Scope.provide(scope));
+      const preparedStream: MediaStreamHandle = { value: { id: 'prepared-media' } };
+      const preparedMedia: PreparedMedia = {
+        claim: Effect.acquireRelease(
+          Effect.sync(() => {
+            fixture.operations.push('claimPreparedMedia');
+            return preparedStream;
+          }),
+          () => Effect.sync(() => fixture.operations.push('releasePreparedMedia')),
+        ),
+      };
+
+      yield* startPeerSession(session, preparedMedia).pipe(
+        Effect.provide(fixture.dependencies),
+        Scope.provide(scope),
+      );
+      // Wait until the forked actor loop actually subscribes to the room stream.
+      yield* Deferred.await(roomStreamSubscribed);
+
+      // The prepared preview stream is already live on the platform side, so its
+      // release finalizer must be adopted before any suspending work: the claim
+      // has to precede the room session stream subscription. If it ran after,
+      // a teardown in between would leak the camera and microphone.
+      const claimIndex = fixture.operations.indexOf('claimPreparedMedia');
+      const subscribeIndex = fixture.operations.indexOf('openRoomSessionSubscribed');
+      assert.isAtLeast(claimIndex, 0);
+      assert.isAtLeast(subscribeIndex, 0);
+      assert.isBelow(claimIndex, subscribeIndex);
+
+      // Tearing down without ever connecting still releases the prepared media.
+      yield* Scope.close(scope, Exit.void);
+      assert.lengthOf(
+        fixture.operations.filter((operation) => operation === 'releasePreparedMedia'),
+        1,
+      );
+    }),
   );
 
   it.effect('explicitly leaves the room at most once', () =>
@@ -2680,6 +2783,7 @@ describe('reducePeerSessionView', () => {
         sas: '11111 22222 33333 44444 55555',
         pendingJoinRequests: [],
         roomId: null,
+        roomTemplateId: null,
       },
       { _tag: 'SessionStarted' },
     );
@@ -2712,6 +2816,7 @@ describe('reducePeerSessionView', () => {
       sas: '11111 22222 33333 44444 55555',
       pendingJoinRequests: [],
       roomId: null,
+      roomTemplateId: null,
     });
   });
 
@@ -2724,6 +2829,7 @@ describe('reducePeerSessionView', () => {
         sas: '11111 22222 33333 44444 55555',
         pendingJoinRequests: [],
         roomId: null,
+        roomTemplateId: null,
       },
       { _tag: 'SignalingDisconnected' },
     );
@@ -2735,6 +2841,7 @@ describe('reducePeerSessionView', () => {
       sas: '11111 22222 33333 44444 55555',
       pendingJoinRequests: [],
       roomId: null,
+      roomTemplateId: null,
     });
   });
 
@@ -2747,6 +2854,7 @@ describe('reducePeerSessionView', () => {
         sas: '11111 22222 33333 44444 55555',
         pendingJoinRequests: [],
         roomId: null,
+        roomTemplateId: null,
       },
       { _tag: 'ChatUnavailable' },
     );
@@ -2758,6 +2866,7 @@ describe('reducePeerSessionView', () => {
       sas: '11111 22222 33333 44444 55555',
       pendingJoinRequests: [],
       roomId: null,
+      roomTemplateId: null,
     });
   });
 
@@ -2770,6 +2879,7 @@ describe('reducePeerSessionView', () => {
         sas: null,
         pendingJoinRequests: [],
         roomId: null,
+        roomTemplateId: null,
       },
       { _tag: 'SessionFailed' },
     );
@@ -2781,6 +2891,7 @@ describe('reducePeerSessionView', () => {
       sas: null,
       pendingJoinRequests: [],
       roomId: null,
+      roomTemplateId: null,
     });
   });
 
@@ -2793,6 +2904,7 @@ describe('reducePeerSessionView', () => {
         sas: null,
         pendingJoinRequests: [],
         roomId: null,
+        roomTemplateId: null,
       },
       { _tag: 'RoomJoinRejected', reason: 'room-full' },
     );
@@ -2804,6 +2916,7 @@ describe('reducePeerSessionView', () => {
       sas: null,
       pendingJoinRequests: [],
       roomId: null,
+      roomTemplateId: null,
     });
   });
 
@@ -2816,6 +2929,7 @@ describe('reducePeerSessionView', () => {
         sas: null,
         pendingJoinRequests: [],
         roomId: null,
+        roomTemplateId: null,
       },
       { _tag: 'RoomJoinRejected', reason: 'peer-already-joined' },
     );
@@ -2827,10 +2941,11 @@ describe('reducePeerSessionView', () => {
       sas: null,
       pendingJoinRequests: [],
       roomId: null,
+      roomTemplateId: null,
     });
   });
 
-  it('returns to waiting when the active peer departs', () => {
+  it('records when the active peer departs', () => {
     const view = reducePeerSessionView(
       {
         status: 'connected',
@@ -2839,17 +2954,19 @@ describe('reducePeerSessionView', () => {
         sas: '11111 22222 33333 44444 55555',
         pendingJoinRequests: [],
         roomId: null,
+        roomTemplateId: null,
       },
       { _tag: 'PeerDeparted', peerId: bob },
     );
 
     assert.deepStrictEqual(view, {
-      status: 'waiting-for-peer',
+      status: 'peer-departed',
       messages: [{ id: 'message-1', sender: 'peer', text: 'hello' }],
       chatReady: false,
       sas: null,
       pendingJoinRequests: [],
       roomId: null,
+      roomTemplateId: null,
     });
   });
 });

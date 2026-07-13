@@ -38,6 +38,8 @@
     "@effect/platform-bun": "4.0.0-beta.97",
     "@effect/atom-react": "4.0.0-beta.97",
     "@effect/vitest": "4.0.0-beta.97",
+    "@react-three/drei": "11.0.0-alpha.5",
+    "@react-three/fiber": "10.0.0-alpha.2",
     "@vitest/coverage-v8": "^4.1.10",
     "@tailwindcss/vite": "^4.3.2",
     "@tanstack/devtools-vite": "^0.8.1",
@@ -54,6 +56,7 @@
     "@vitejs/plugin-react": "^6.0.3",
     "babel-plugin-react-compiler": "^1.0.0",
     "typescript": "^6.0.3",
+    "three": "0.185.1",
     "vite": "^8.1.4",
     "vitest": "^4.1.10"
   },

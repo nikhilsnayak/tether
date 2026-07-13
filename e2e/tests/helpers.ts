@@ -6,6 +6,7 @@ type WebRtcProbe = {
   readonly configurations: RTCConfiguration[];
   readonly dataChannels: RTCDataChannel[];
   readonly localStreams: MediaStream[];
+  preflightPreviewStream: MediaStream | null;
   readonly peerConnections: RTCPeerConnection[];
   addIceCandidateCalls: number;
   failNextIceCandidate: boolean;
@@ -21,10 +22,12 @@ declare global {
 
 export const installWebRtcProbe = (context: BrowserContext) =>
   context.addInitScript(() => {
+    if (navigator.mediaDevices === undefined) return;
     const probe: WebRtcProbe = {
       configurations: [],
       dataChannels: [],
       localStreams: [],
+      preflightPreviewStream: null,
       peerConnections: [],
       addIceCandidateCalls: 0,
       failNextIceCandidate: false,
@@ -92,10 +95,71 @@ export const expectConnected = (page: Page) =>
   expect(page.getByText('Connected', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
 
 export const expectWaitingForPeer = (page: Page) =>
-  expect(page.getByText('Share this room to invite someone.')).toBeVisible();
+  Promise.all([
+    expect(page.getByText('Share this room to invite someone.')).toBeVisible(),
+    expect(page.getByLabel('Dusk Suite interactive preview')).toHaveAttribute(
+      'data-room-journey',
+      'waiting',
+    ),
+  ]);
+
+// After a peer that had joined leaves, the host stays in the waiting journey but
+// shows the peer-departed hint instead of the fresh-room invite prompt.
+export const expectPeerDeparted = (page: Page) =>
+  Promise.all([
+    expect(
+      page.getByText('They left the call. You can wait here in case they rejoin.'),
+    ).toBeVisible(),
+    expect(page.getByLabel('Dusk Suite interactive preview')).toHaveAttribute(
+      'data-room-journey',
+      'waiting',
+    ),
+  ]);
+
+export const expectPreparedMediaTransferred = (page: Page) =>
+  expect
+    .poll(() =>
+      page.evaluate(() => ({
+        acquiredStreams: window.__tetherE2E.localStreams.length,
+        actorUsesPreview:
+          window.__tetherE2E.preflightPreviewStream !== null &&
+          window.__tetherE2E.preflightPreviewStream ===
+            document.querySelector<HTMLVideoElement>('video[aria-label="Local video preview"]')
+              ?.srcObject,
+        previewWasAcquired:
+          window.__tetherE2E.preflightPreviewStream === window.__tetherE2E.localStreams[0],
+        streamIsLive:
+          window.__tetherE2E.localStreams[0]
+            ?.getTracks()
+            .some((track) => track.readyState === 'live') ?? false,
+      })),
+    )
+    .toEqual({
+      acquiredStreams: 1,
+      actorUsesPreview: true,
+      previewWasAcquired: true,
+      streamIsLive: true,
+    });
 
 export const continueInBrowser = (page: Page) =>
   page.getByRole('button', { name: 'Join in this browser' }).click();
+
+export const completeMediaSetup = async (page: Page, actionLabel: string) => {
+  await expect(page.getByRole('heading', { name: 'Look and sound ready?' })).toBeVisible();
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  const preview = page.getByLabel('Camera preview');
+  await expect(preview).toBeVisible();
+  await preview.evaluate((video: HTMLVideoElement) => {
+    if (window.__tetherE2E !== undefined) {
+      window.__tetherE2E.preflightPreviewStream = video.srcObject as MediaStream | null;
+    }
+  });
+  await page.getByRole('button', { name: actionLabel, exact: true }).click();
+};
+
+export const startHostingRoom = async (page: Page) => {
+  await completeMediaSetup(page, 'Create room');
+};
 
 // Joins as a guest: enter the code, continue in-browser, then present a name
 // and knock. The host must still admit before the call connects.
@@ -106,7 +170,8 @@ export const joinRoom = async (page: Page, roomId: string, displayName = 'Guest'
   await expect(page).toHaveURL(new RegExp(`/room/${roomId}$`));
   await continueInBrowser(page);
   await page.getByRole('textbox', { name: 'Your name' }).fill(displayName);
-  await page.getByRole('button', { name: 'Knock to join' }).click();
+  await page.getByRole('button', { name: 'Continue to media check' }).click();
+  await completeMediaSetup(page, 'Knock to join');
 };
 
 export const admitGuest = (host: Page) =>
@@ -121,6 +186,7 @@ export const createRoom = async (page: Page) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Call' }).click();
   await expect(page).toHaveURL(/\/host$/);
+  await startHostingRoom(page);
   const inviteLink = page.getByRole('textbox', { name: 'Room invite link' });
   await expect(inviteLink).toBeVisible({ timeout: 20_000 });
   const url = await inviteLink.inputValue();
@@ -136,7 +202,7 @@ export const createRoom = async (page: Page) => {
 export const connectPeers = async (
   browser: Browser,
   baseURL: string,
-  options: { readonly probeWebRtc?: boolean } = {},
+  options: { readonly confirmSafety?: boolean; readonly probeWebRtc?: boolean } = {},
 ) => {
   const hostContext = await browser.newContext({ baseURL, storageState: seededStorageState });
   const guestContext = await browser.newContext({ baseURL, storageState: seededStorageState });
@@ -150,6 +216,12 @@ export const connectPeers = async (
   await joinRoom(guest, roomId);
   await admitGuest(host);
   await Promise.all([expectConnected(host), expectConnected(guest)]);
+  if (options.confirmSafety !== false) {
+    await Promise.all([
+      host.getByRole('button', { name: 'We see the same code' }).click(),
+      guest.getByRole('button', { name: 'We see the same code' }).click(),
+    ]);
+  }
 
   return {
     host,

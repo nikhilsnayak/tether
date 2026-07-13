@@ -41,7 +41,7 @@ export function JoinNamePanel({ onSubmit }: { readonly onSubmit: (name: DisplayN
             className='border-input placeholder:text-muted-foreground/70 focus:border-primary w-full border-b bg-transparent py-2 font-mono text-xl tracking-[0.15em] uppercase outline-none'
           />
           <Button type='submit' disabled={!canContinue} className='w-full'>
-            Knock to join
+            Continue to media check
           </Button>
         </form>
       </div>

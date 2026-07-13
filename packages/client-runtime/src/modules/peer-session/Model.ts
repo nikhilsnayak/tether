@@ -1,4 +1,4 @@
-import type { DisplayName, PeerId, RoomId } from '@tether/contracts/modules/room';
+import type { DisplayName, PeerId, RoomId, RoomTemplateId } from '@tether/contracts/modules/room';
 
 export interface IceServer {
   readonly urls: ReadonlyArray<string>;
@@ -8,7 +8,11 @@ export interface IceServer {
 // no roomId; a joiner names the room and itself. The minted id arrives in
 // RoomSessionOpenedEvent, so downstream RPCs read roomId from that, not here.
 export type RoomSession =
-  | { readonly intent: 'host'; readonly selfId: PeerId }
+  | {
+      readonly intent: 'host';
+      readonly selfId: PeerId;
+      readonly roomTemplateId: RoomTemplateId;
+    }
   | {
       readonly intent: 'join';
       readonly selfId: PeerId;
@@ -149,6 +153,7 @@ export type PeerSessionEvent =
   | {
       readonly _tag: 'RoomOpened';
       readonly roomId: RoomId;
+      readonly roomTemplateId: RoomTemplateId;
     }
   | {
       readonly _tag: 'RoomJoinRejected';
@@ -205,13 +210,16 @@ export interface PeerSessionView {
     | 'room-not-found'
     | 'join-denied'
     | 'awaiting-approval'
-    | 'waiting-for-peer';
+    | 'waiting-for-peer'
+    | 'peer-departed';
   readonly messages: ReadonlyArray<ChatMessage>;
   readonly chatReady: boolean;
   /** Safety code both peers compare aloud. */
   readonly sas: string | null;
   /** The server-minted room, known once the session opens. */
   readonly roomId: RoomId | null;
+  /** The client-side scene selected by the host. */
+  readonly roomTemplateId: RoomTemplateId | null;
   /** Host side: ordered knocks that have not yet been handled or withdrawn. */
   readonly pendingJoinRequests: ReadonlyArray<JoinRequestClaim>;
 }

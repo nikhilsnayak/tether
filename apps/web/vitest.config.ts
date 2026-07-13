@@ -13,6 +13,7 @@ export default defineConfig({
       // and composition roots (DI wiring) are excluded.
       include: ['src/**/*.ts'],
       exclude: [
+        'src/**/*.tsx',
         'src/**/hooks/**',
         'src/routeTree.gen.ts',
         'src/vite-env.d.ts',
@@ -20,6 +21,7 @@ export default defineConfig({
         'src/lib/constants.ts',
         'src/lib/runtime.ts',
         'src/modules/room/peer-session/runtime.ts',
+        'src/modules/room/preflight/use-media-preflight.ts',
       ],
       thresholds: {
         statements: 100,

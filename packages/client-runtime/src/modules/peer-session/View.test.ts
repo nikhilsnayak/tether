@@ -1,4 +1,9 @@
-import { DisplayName, PeerId, RoomId } from '@tether/contracts/modules/room';
+import {
+  DisplayName,
+  DUSK_SUITE_TEMPLATE_ID,
+  PeerId,
+  RoomId,
+} from '@tether/contracts/modules/room';
 import { assert, describe, it } from 'vitest';
 
 import { type MediaStreamHandle, type PeerSessionEvent, type PeerSessionView } from './Model';
@@ -11,6 +16,7 @@ const connectedView: PeerSessionView = {
   sas: '11111 22222 33333 44444 55555',
   pendingJoinRequests: [],
   roomId: null,
+  roomTemplateId: null,
 };
 const peerId = PeerId.make('pppppppppppp');
 
@@ -82,13 +88,16 @@ describe('reducePeerSessionView', () => {
     );
   });
 
-  it('records the minted room id when the room opens', () => {
+  it('records the room id and template when the room opens', () => {
     const roomId = RoomId.make('abc-defg-hij');
 
-    assert.strictEqual(
-      reducePeerSessionView(initialPeerSessionView, { _tag: 'RoomOpened', roomId }).roomId,
+    const view = reducePeerSessionView(initialPeerSessionView, {
+      _tag: 'RoomOpened',
       roomId,
-    );
+      roomTemplateId: DUSK_SUITE_TEMPLATE_ID,
+    });
+    assert.strictEqual(view.roomId, roomId);
+    assert.strictEqual(view.roomTemplateId, DUSK_SUITE_TEMPLATE_ID);
   });
 
   it('marks the joiner as awaiting host approval', () => {

@@ -60,6 +60,7 @@ export class RoomAdmission extends Context.Service<RoomAdmission>()(
             peerId: result.hostPeerId,
             sessionToken: result.sessionToken,
             roomId,
+            roomTemplateId: result.roomTemplateId,
           }),
         ]).pipe(Stream.concat(Stream.fromQueue(result.events)));
 
@@ -166,7 +167,12 @@ export class RoomAdmission extends Context.Service<RoomAdmission>()(
             return {
               _tag: 'allow',
               deferred: pendingEntry.deferred,
-              result: { sessionToken: newToken, hostPeerId: selfId, events: pendingEntry.events },
+              result: {
+                sessionToken: newToken,
+                hostPeerId: selfId,
+                events: pendingEntry.events,
+                roomTemplateId: context.roomTemplateId,
+              },
             } as RespondAction;
           }),
         );
