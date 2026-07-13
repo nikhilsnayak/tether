@@ -28,7 +28,6 @@ export type ResolvedQualityTier = Exclude<QualityPreference, 'auto'>;
 
 export interface QualityConfig {
   readonly dpr: readonly [minimum: number, maximum: number];
-  readonly antialias: boolean;
   readonly shadows: boolean;
   readonly shadowMapSize: number;
   readonly lightCount: number;
@@ -38,13 +37,15 @@ export interface QualityConfig {
 export interface RenderingQualitySettings {
   readonly canvas: {
     readonly dpr: [minimum: number, maximum: number];
-  };
-  readonly renderer: {
-    readonly antialias: boolean;
-    readonly forceWebGL: false;
-    readonly powerPreference: 'high-performance';
+    readonly shadows: boolean;
   };
 }
+
+export const ROOM_RENDERER_SETTINGS = {
+  antialias: true,
+  forceWebGL: false,
+  powerPreference: 'high-performance',
+} as const;
 
 export interface AdaptiveQualityState {
   readonly tier: ResolvedQualityTier;
@@ -56,7 +57,6 @@ export interface AdaptiveQualityState {
 export const QUALITY_CONFIGS: Readonly<Record<ResolvedQualityTier, QualityConfig>> = {
   high: {
     dpr: [1, 2],
-    antialias: true,
     shadows: true,
     shadowMapSize: 2048,
     lightCount: 3,
@@ -64,7 +64,6 @@ export const QUALITY_CONFIGS: Readonly<Record<ResolvedQualityTier, QualityConfig
   },
   medium: {
     dpr: [1, 1.5],
-    antialias: true,
     shadows: true,
     shadowMapSize: 1024,
     lightCount: 2,
@@ -72,7 +71,6 @@ export const QUALITY_CONFIGS: Readonly<Record<ResolvedQualityTier, QualityConfig
   },
   low: {
     dpr: [1, 1],
-    antialias: false,
     shadows: false,
     shadowMapSize: 0,
     lightCount: 1,
@@ -84,12 +82,7 @@ export const QUALITY_STORAGE_KEY = 'tether.room.quality';
 
 export function renderingQualitySettings(quality: QualityConfig): RenderingQualitySettings {
   return {
-    canvas: { dpr: [...quality.dpr] },
-    renderer: {
-      antialias: quality.antialias,
-      forceWebGL: false,
-      powerPreference: 'high-performance',
-    },
+    canvas: { dpr: [...quality.dpr], shadows: quality.shadows },
   };
 }
 

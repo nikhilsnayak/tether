@@ -12,6 +12,7 @@ import {
   isQualityPreference,
   QUALITY_CONFIGS,
   QUALITY_STORAGE_KEY,
+  ROOM_RENDERER_SETTINGS,
   renderingQualitySettings,
   sampleAdaptiveQuality,
   type QualityPreference,
@@ -253,7 +254,8 @@ export function RoomScenePreview({
               : template.camera.landscape.fieldOfView,
         }}
         dpr={rendering.canvas.dpr}
-        renderer={rendering.renderer}
+        shadows={rendering.canvas.shadows}
+        renderer={ROOM_RENDERER_SETTINGS}
       >
         <color attach='background' args={['#090b13']} />
         <CameraRig

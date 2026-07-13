@@ -21,13 +21,22 @@ test('room waiting screen fits the viewport', async ({ page }) => {
   await expect(page.getByText('Share this room to invite someone.')).toBeVisible();
   const scene = page.getByLabel('Dusk Suite interactive preview');
   await expect(scene.locator('canvas')).toBeVisible();
-  await page.getByLabel('Room rendering quality').selectOption('medium');
-  await expect(scene).toHaveAttribute('data-room-quality-tier', 'medium');
-  expect(await page.evaluate(() => localStorage.getItem('tether.room.quality'))).toBe('medium');
+  const quality = page.getByLabel('Room rendering quality');
+  await quality.selectOption('low');
+  await expect(quality).toHaveValue('low');
+  await expect(scene).toHaveAttribute('data-room-quality-tier', 'low');
+  expect(await page.evaluate(() => localStorage.getItem('tether.room.quality'))).toBe('low');
   const controls = page.getByRole('toolbar', { name: 'Call controls' });
   await expect(controls.getByRole('button')).toHaveCount(5);
   await expect(controls.getByRole('button', { name: 'Leave call' })).toBeVisible();
   expect(await fitsViewport(page)).toBe(true);
+
+  await page.reload();
+  await expect(page.getByLabel('Room rendering quality')).toHaveValue('low');
+  await expect(page.getByLabel('Dusk Suite interactive preview')).toHaveAttribute(
+    'data-room-quality-tier',
+    'low',
+  );
 });
 
 test('reduced motion keeps the full 3D room without camera travel', async ({ page }) => {
