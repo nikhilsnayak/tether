@@ -510,16 +510,14 @@ describe('startPeerSession', () => {
     Effect.gen(function* () {
       const scope = yield* Scope.make();
       const roomStreamSubscribed = yield* Deferred.make<void>();
-      const fixture = yield* makeFixture(
-        (() =>
-          Stream.unwrap(
-            Effect.gen(function* () {
-              fixture.operations.push('openRoomSessionSubscribed');
-              yield* Deferred.succeed(roomStreamSubscribed, undefined);
-              return Stream.never;
-            }),
-          )) as AppClient['Service']['OpenRoomSession'],
-      ).pipe(Scope.provide(scope));
+      const fixture = yield* makeFixture((() =>
+        Stream.unwrap(
+          Effect.gen(function* () {
+            fixture.operations.push('openRoomSessionSubscribed');
+            yield* Deferred.succeed(roomStreamSubscribed, undefined);
+            return Stream.never;
+          }),
+        )) as AppClient['Service']['OpenRoomSession']).pipe(Scope.provide(scope));
       const preparedStream: MediaStreamHandle = { value: { id: 'prepared-media' } };
       const preparedMedia: PreparedMedia = {
         claim: Effect.acquireRelease(
