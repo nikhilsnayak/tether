@@ -1,20 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import {
-  createRoomAudioEngine,
-  disposeRoomAudioResources,
-  selectRemoteAudioRoute,
-} from './room-audio';
+import { createRoomAudioEngine, disposeRoomAudioResources } from './room-audio';
 
 const audioNode = () => ({
   connect: vi.fn((target: unknown) => target),
   disconnect: vi.fn(),
 });
 
-const audioContext = (stereo: boolean, rejectLifecycle: boolean) => {
-  const source = audioNode();
-  const voiceOutput = { ...audioNode(), gain: { setTargetAtTime: vi.fn() } };
-  const panner = { ...audioNode(), pan: { value: 0 } };
+const audioContext = (rejectLifecycle: boolean) => {
+  const roomOutput = { ...audioNode(), gain: { setTargetAtTime: vi.fn() } };
   const oscillator = {
     ...audioNode(),
     frequency: { value: 0 },
@@ -29,18 +23,14 @@ const audioContext = (stereo: boolean, rejectLifecycle: boolean) => {
     close: vi.fn(() =>
       rejectLifecycle ? Promise.reject(new Error('close failed')) : Promise.resolve(),
     ),
-    createGain: vi.fn().mockReturnValueOnce(voiceOutput).mockReturnValueOnce(knockGain),
-    createMediaElementSource: vi.fn(() => source),
+    createGain: vi.fn().mockReturnValueOnce(roomOutput).mockReturnValueOnce(knockGain),
     createOscillator: vi.fn(() => oscillator),
-    createStereoPanner: stereo ? vi.fn(() => panner) : undefined,
     currentTime: 4,
     destination: {},
     resume: vi.fn(() =>
       rejectLifecycle ? Promise.reject(new Error('resume failed')) : Promise.resolve(),
     ),
-    source,
-    voiceOutput,
-    panner,
+    roomOutput,
     oscillator,
     knockGain,
   };
@@ -48,27 +38,6 @@ const audioContext = (stereo: boolean, rejectLifecycle: boolean) => {
 
 describe('room audio routing', () => {
   afterEach(() => vi.unstubAllGlobals());
-
-  it('processes one voice path only after activation on the default output', () => {
-    expect(selectRemoteAudioRoute({ activated: true, sinkId: '', webAudioSupported: true })).toBe(
-      'processed',
-    );
-    expect(
-      selectRemoteAudioRoute({ activated: true, sinkId: 'default', webAudioSupported: true }),
-    ).toBe('processed');
-    expect(selectRemoteAudioRoute({ activated: false, sinkId: '', webAudioSupported: true })).toBe(
-      'direct',
-    );
-  });
-
-  it('keeps the clean element path for selected sinks and unsupported Web Audio', () => {
-    expect(
-      selectRemoteAudioRoute({ activated: true, sinkId: 'speaker-2', webAudioSupported: true }),
-    ).toBe('direct');
-    expect(selectRemoteAudioRoute({ activated: true, sinkId: '', webAudioSupported: false })).toBe(
-      'direct',
-    );
-  });
 
   it('disconnects every node and closes the audio context', () => {
     const disconnect = vi.fn();
@@ -83,11 +52,8 @@ describe('room audio routing', () => {
     expect(close).toHaveBeenCalledOnce();
   });
 
-  it.each([
-    [true, false],
-    [false, true],
-  ])('creates and controls the Web Audio graph (stereo: %s)', async (stereo, rejectLifecycle) => {
-    const context = audioContext(stereo, rejectLifecycle);
+  it.each([false, true])('creates and controls the room cue graph', async (rejectLifecycle) => {
+    const context = audioContext(rejectLifecycle);
     vi.stubGlobal(
       'AudioContext',
       vi.fn(function AudioContextMock() {
@@ -95,7 +61,7 @@ describe('room audio routing', () => {
       }),
     );
 
-    const engine = createRoomAudioEngine({} as HTMLAudioElement);
+    const engine = createRoomAudioEngine();
     engine.setMuted(true);
     engine.setMuted(false);
     engine.playKnock();
@@ -103,17 +69,18 @@ describe('room audio routing', () => {
     await Promise.resolve();
 
     expect(context.resume).toHaveBeenCalledOnce();
-    expect(context.voiceOutput.gain.setTargetAtTime).toHaveBeenNthCalledWith(1, 0, 4, 0.02);
-    expect(context.voiceOutput.gain.setTargetAtTime).toHaveBeenNthCalledWith(2, 1, 4, 0.02);
-    expect(context.knockGain.connect).toHaveBeenCalledWith(context.destination);
+    expect(context.roomOutput.connect).toHaveBeenCalledWith(context.destination);
+    expect(context.roomOutput.gain.setTargetAtTime).toHaveBeenNthCalledWith(1, 0, 4, 0.02);
+    expect(context.roomOutput.gain.setTargetAtTime).toHaveBeenNthCalledWith(2, 1, 4, 0.02);
+    expect(context.knockGain.connect).toHaveBeenCalledWith(context.roomOutput);
     expect(context.oscillator.start).toHaveBeenCalledOnce();
     expect(context.oscillator.stop).toHaveBeenCalledWith(4.13);
     expect(context.close).toHaveBeenCalledOnce();
-    expect(context.panner.disconnect).toHaveBeenCalledTimes(stereo ? 1 : 0);
+    expect(context.roomOutput.disconnect).toHaveBeenCalledOnce();
   });
 
-  it.fails('silences the knock path when room audio is muted', () => {
-    const context = audioContext(true, false);
+  it('routes knocks through the room output mute boundary', () => {
+    const context = audioContext(false);
     vi.stubGlobal(
       'AudioContext',
       vi.fn(function AudioContextMock() {
@@ -121,10 +88,11 @@ describe('room audio routing', () => {
       }),
     );
 
-    const engine = createRoomAudioEngine({} as HTMLAudioElement);
+    const engine = createRoomAudioEngine();
     engine.setMuted(true);
     engine.playKnock();
 
-    expect(context.knockGain.connect).toHaveBeenCalledWith(context.voiceOutput);
+    expect(context.roomOutput.gain.setTargetAtTime).toHaveBeenCalledWith(0, 4, 0.02);
+    expect(context.knockGain.connect).toHaveBeenCalledWith(context.roomOutput);
   });
 });

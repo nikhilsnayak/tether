@@ -1,10 +1,6 @@
-import { useEffect, useEffectEvent, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
-import {
-  createRoomAudioEngine,
-  selectRemoteAudioRoute,
-  type RoomAudioEngine,
-} from '../scene/room-audio';
+import { createRoomAudioEngine, type RoomAudioEngine } from '../scene/room-audio';
 
 interface KnockPlaybackQueue {
   readonly enqueue: (peerIds: ReadonlyArray<string>) => void;
@@ -72,17 +68,9 @@ export function RemoteAudio({
   readonly pendingJoinPeerIds: ReadonlyArray<string>;
 }) {
   const [activated, setActivated] = useState(false);
-  const [processingFailed, setProcessingFailed] = useState(false);
   const [knockQueue] = useState(createKnockPlaybackQueue);
   const audioRef = useRef<HTMLAudioElement>(null);
   const engineRef = useRef<RoomAudioEngine | null>(null);
-  const webAudioSupported = typeof AudioContext !== 'undefined' && !processingFailed;
-  const route = selectRemoteAudioRoute({ activated, sinkId, webAudioSupported });
-  const createEngine = useEffectEvent((element: HTMLAudioElement) => {
-    const engine = createRoomAudioEngine(element);
-    engine.setMuted(muted);
-    return engine;
-  });
 
   useEffect(() => {
     if (activated) return;
@@ -99,18 +87,17 @@ export function RemoteAudio({
     const element = audioRef.current;
     if (element === null || stream === null) return;
     return attachRemoteAudio(element, stream);
-  }, [route, stream]);
+  }, [stream]);
 
   useEffect(() => {
     const element = audioRef.current;
-    if (route === 'direct' && element !== null) setRemoteAudioSink(element, sinkId);
-  }, [route, sinkId]);
+    if (element !== null) setRemoteAudioSink(element, sinkId);
+  }, [sinkId]);
 
   useEffect(() => {
-    const element = audioRef.current;
-    if (route !== 'processed' || element === null) return;
+    if (!activated || typeof AudioContext === 'undefined') return;
     try {
-      const engine = createEngine(element);
+      const engine = createRoomAudioEngine();
       engineRef.current = engine;
       return () => {
         knockQueue.pause();
@@ -118,9 +105,9 @@ export function RemoteAudio({
         engine.dispose();
       };
     } catch {
-      setProcessingFailed(true);
+      return;
     }
-  }, [route, knockQueue]);
+  }, [activated, knockQueue]);
 
   useEffect(() => {
     engineRef.current?.setMuted(muted);
@@ -131,17 +118,10 @@ export function RemoteAudio({
     const engine = engineRef.current;
     if (engine === null) return;
     knockQueue.flush(() => engine.playKnock());
-  }, [activated, knockQueue, pendingJoinPeerIds, route]);
+  }, [activated, knockQueue, pendingJoinPeerIds]);
 
   return (
     // oxlint-disable-next-line jsx-a11y/media-has-caption -- live call audio has no captions
-    <audio
-      key={route}
-      ref={audioRef}
-      aria-label='Remote audio'
-      autoPlay
-      muted={muted}
-      data-audio-route={route}
-    />
+    <audio ref={audioRef} aria-label='Remote audio' autoPlay muted={muted} />
   );
 }
