@@ -103,6 +103,19 @@ export const expectWaitingForPeer = (page: Page) =>
     ),
   ]);
 
+// After a peer that had joined leaves, the host stays in the waiting journey but
+// shows the peer-departed hint instead of the fresh-room invite prompt.
+export const expectPeerDeparted = (page: Page) =>
+  Promise.all([
+    expect(
+      page.getByText('They left the call. You can wait here in case they rejoin.'),
+    ).toBeVisible(),
+    expect(page.getByLabel('Dusk Suite interactive preview')).toHaveAttribute(
+      'data-room-journey',
+      'waiting',
+    ),
+  ]);
+
 export const expectPreparedMediaTransferred = (page: Page) =>
   expect
     .poll(() =>

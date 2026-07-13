@@ -3,6 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 import {
   admitGuest,
   expectConnected,
+  expectPeerDeparted,
   expectPreparedMediaTransferred,
   expectWaitingForPeer,
   installWebRtcProbe,
@@ -179,7 +180,7 @@ test('complete room flow', async ({ browser, page }, testInfo) => {
     await test.step('the guest leaves and a replacement peer joins', async () => {
       await guestPage.getByRole('button', { name: 'Leave call' }).click();
       await expect(guestPage).toHaveURL('/');
-      await expectWaitingForPeer(page);
+      await expectPeerDeparted(page);
 
       await joinRoom(replacementPage, roomId);
       await admitGuest(page);
