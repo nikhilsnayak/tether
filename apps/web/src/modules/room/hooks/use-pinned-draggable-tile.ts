@@ -34,9 +34,17 @@ export function usePinnedDraggableTile(
 
   useLayoutEffect(() => {
     pinToCurrentCorner();
+    const tile = tileRef.current;
+    const boundary = tile?.offsetParent;
+    const resizeObserver = new ResizeObserver(pinToCurrentCorner);
+    if (tile !== null) resizeObserver.observe(tile);
+    if (boundary !== null && boundary !== undefined) resizeObserver.observe(boundary);
     window.addEventListener('resize', pinToCurrentCorner);
-    return () => window.removeEventListener('resize', pinToCurrentCorner);
-  }, []);
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', pinToCurrentCorner);
+    };
+  }, [tileRef]);
 
   return { cornerRef, cornerOffset };
 }
