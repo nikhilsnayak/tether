@@ -8,14 +8,21 @@ export function useAudioOutputDevices(localStream: MediaStream | null) {
   // Labels are only populated once mic permission is granted, so re-enumerate
   // when the local stream arrives and on any device hot-plug.
   useEffect(() => {
+    const mediaDevices = navigator.mediaDevices;
+    if (mediaDevices === undefined) return;
+
     const refresh = async () => {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      setAudioOutputs(devices.filter(isAudioOutput));
+      try {
+        const devices = await mediaDevices.enumerateDevices();
+        setAudioOutputs(devices.filter(isAudioOutput));
+      } catch {
+        // Device enumeration is optional; retain the current output list when unavailable.
+      }
     };
 
     void refresh();
-    navigator.mediaDevices.addEventListener('devicechange', refresh);
-    return () => navigator.mediaDevices.removeEventListener('devicechange', refresh);
+    mediaDevices.addEventListener('devicechange', refresh);
+    return () => mediaDevices.removeEventListener('devicechange', refresh);
   }, [localStream]);
 
   return audioOutputs;
