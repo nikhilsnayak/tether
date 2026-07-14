@@ -1,7 +1,14 @@
 import type { PeerSessionView } from '@tether/client-runtime/modules/peer-session';
 import { describe, expect, it } from 'vitest';
 
-import { roomJourneyCue, roomJourneyLabel, roomTransition } from './journey';
+import {
+  doorTransition,
+  doorTransitionOpenness,
+  resolveDoorTransition,
+  roomJourneyCue,
+  roomJourneyLabel,
+  roomTransition,
+} from './journey';
 
 const statuses: ReadonlyArray<PeerSessionView['status']> = [
   'connecting',
@@ -23,46 +30,116 @@ const statuses: ReadonlyArray<PeerSessionView['status']> = [
 
 describe('roomJourneyCue', () => {
   it.each([
-    ['host', 'waiting-for-peer', false, 'waiting'],
-    ['join', 'awaiting-approval', false, 'outside'],
-    ['host', 'connecting', false, 'screen-connecting'],
-    ['host', 'connected', false, 'screen-connecting'],
-    ['host', 'connected', true, 'screen-live'],
-    ['join', 'reconnecting', true, 'screen-reconnecting'],
-    ['join', 'transport-lost', true, 'screen-reconnecting'],
-    ['host', 'negotiation-stalled', false, 'screen-stalled'],
-    ['host', 'failed', false, 'screen-ended'],
-    ['join', 'join-denied', false, 'screen-ended'],
-  ] as const)('%s / %s maps to %s', (intent, status, hasRemoteStream, expected) => {
-    expect(roomJourneyCue(intent, status, hasRemoteStream)).toBe(expected);
+    ['host', 'waiting-for-peer', 'waiting'],
+    ['join', 'awaiting-approval', 'outside'],
+    ['host', 'connecting', 'connecting'],
+    ['host', 'connected', 'together'],
+    ['join', 'reconnecting', 'reconnecting'],
+    ['join', 'transport-lost', 'reconnecting'],
+    ['host', 'negotiation-stalled', 'stalled'],
+    ['host', 'failed', 'ended'],
+    ['join', 'join-denied', 'ended'],
+  ] as const)('%s / %s maps to %s', (intent, status, expected) => {
+    expect(roomJourneyCue(intent, status)).toBe(expected);
   });
 
   it('distinguishes a guest peer departure from the initial waiting state', () => {
-    expect(roomJourneyCue('join', 'peer-departed', false)).toBe('screen-departed');
-    expect(roomJourneyCue('host', 'peer-departed', false)).toBe('waiting');
-    expect(roomJourneyCue('join', 'waiting-for-peer', false)).toBe('waiting');
+    expect(roomJourneyCue('join', 'peer-departed')).toBe('departed');
+    expect(roomJourneyCue('host', 'peer-departed')).toBe('waiting');
+    expect(roomJourneyCue('join', 'waiting-for-peer')).toBe('waiting');
   });
 
-  it('uses immediate placement instead of camera travel for reduced motion', () => {
-    expect(roomTransition('outside', 'screen-connecting', false)).toEqual({
-      kind: 'enter',
-      durationMs: 900,
-    });
-    expect(roomTransition('outside', 'screen-connecting', true)).toEqual({
-      kind: 'none',
-      durationMs: 0,
-    });
-    expect(roomTransition('waiting', 'waiting', false)).toEqual({ kind: 'none', durationMs: 0 });
-    expect(roomTransition('waiting', 'screen-live', false)).toEqual({
-      kind: 'none',
-      durationMs: 0,
-    });
+  it('does not use remote media availability to choose the spatial state', () => {
+    expect(roomJourneyCue('host', 'connected')).toBe('together');
   });
 
   it('maps every runtime status to readable display content', () => {
     for (const status of statuses) {
-      const cue = roomJourneyCue('join', status, status === 'connected');
-      expect(roomJourneyLabel(cue)).not.toBe('');
+      expect(roomJourneyLabel(roomJourneyCue('join', status))).not.toBe('');
     }
+  });
+});
+
+describe('roomTransition', () => {
+  it('moves an admitted guest inside, including a coalesced connection', () => {
+    expect(roomTransition('outside', 'connecting', false)).toEqual({
+      kind: 'enter',
+      durationMs: 900,
+    });
+    expect(roomTransition('outside', 'together', false)).toEqual({
+      kind: 'enter',
+      durationMs: 900,
+    });
+  });
+
+  it('uses immediate placement for reduced motion', () => {
+    expect(roomTransition('outside', 'connecting', true)).toEqual({ kind: 'none', durationMs: 0 });
+    expect(roomTransition('waiting', 'waiting', false)).toEqual({ kind: 'none', durationMs: 0 });
+  });
+});
+
+describe('doorTransition', () => {
+  it.each([
+    ['waiting', 'connecting'],
+    ['waiting', 'together'],
+    ['outside', 'connecting'],
+    ['outside', 'together'],
+  ] as const)('admits for %s → %s', (previous, next) => {
+    expect(doorTransition(previous, next, false)).toEqual({ kind: 'admit', durationMs: 1_800 });
+  });
+
+  it.each([
+    ['outside', 'ended'],
+    ['outside', 'reconnecting'],
+    ['reconnecting', 'together'],
+    ['together', 'reconnecting'],
+    ['connecting', 'stalled'],
+    ['connecting', 'connecting'],
+    ['together', 'waiting'],
+  ] as const)('stays closed for %s → %s', (previous, next) => {
+    expect(doorTransition(previous, next, false)).toEqual({ kind: 'none', durationMs: 0 });
+  });
+
+  it('does not animate admission with reduced motion', () => {
+    expect(doorTransition('outside', 'connecting', true)).toEqual({ kind: 'none', durationMs: 0 });
+  });
+
+  it('preserves an active admission when connecting becomes together', () => {
+    const active = doorTransition('outside', 'connecting', false);
+
+    expect(
+      resolveDoorTransition({ kind: 'none', durationMs: 0 }, 'outside', 'connecting', false),
+    ).toEqual(active);
+    expect(resolveDoorTransition(active, 'connecting', 'together', false)).toBe(active);
+    expect(doorTransitionOpenness(active, 900)).toBe(1);
+  });
+
+  it('aborts an active admission when connection stalls or reduced motion is enabled', () => {
+    const active = doorTransition('outside', 'connecting', false);
+
+    expect(resolveDoorTransition(active, 'connecting', 'stalled', false)).toEqual({
+      kind: 'none',
+      durationMs: 0,
+    });
+    expect(resolveDoorTransition(active, 'connecting', 'together', true)).toEqual({
+      kind: 'none',
+      durationMs: 0,
+    });
+  });
+
+  it('opens, holds, and closes exactly at the end of admission', () => {
+    const transition = doorTransition('outside', 'connecting', false);
+    expect(doorTransitionOpenness(transition, 0)).toBe(0);
+    expect(doorTransitionOpenness(transition, 315)).toBeGreaterThan(0);
+    expect(doorTransitionOpenness(transition, 315)).toBeLessThan(1);
+    expect(doorTransitionOpenness(transition, 630)).toBe(1);
+    expect(doorTransitionOpenness(transition, 900)).toBe(1);
+    expect(doorTransitionOpenness(transition, 1_440)).toBeGreaterThan(0);
+    expect(doorTransitionOpenness(transition, 1_800)).toBe(0);
+    expect(doorTransitionOpenness(transition, 2_000)).toBe(0);
+  });
+
+  it('keeps every non-admission transition closed', () => {
+    expect(doorTransitionOpenness({ kind: 'none', durationMs: 0 }, 900)).toBe(0);
   });
 });

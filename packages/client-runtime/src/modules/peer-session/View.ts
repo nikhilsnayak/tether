@@ -5,7 +5,9 @@ import type { ChatMessage, PeerSessionEvent, PeerSessionView } from './Model';
 export const initialPeerSessionView: PeerSessionView = {
   status: 'connecting',
   messages: [],
-  chatReady: false,
+  roomEventsReady: false,
+  remoteAvatarPose: null,
+  remoteMediaState: null,
   sas: null,
   roomId: null,
   roomTemplateId: null,
@@ -28,26 +30,56 @@ export const reducePeerSessionView = (
       return { ...view, status: 'waiting-for-peer' };
     case 'Connected':
       return { ...view, status: 'connected' };
-    case 'ChatReady':
-      return { ...view, chatReady: true };
-    case 'ChatUnavailable':
-      return { ...view, chatReady: false };
+    case 'RoomEventsReady':
+      return { ...view, roomEventsReady: true };
+    case 'RoomEventsUnavailable':
+      return { ...view, roomEventsReady: false, remoteMediaState: null };
+    case 'RemoteAvatarPoseChanged':
+      return { ...view, remoteAvatarPose: event.pose };
+    case 'RemoteMediaStateChanged':
+      return { ...view, remoteMediaState: event.mediaState };
     case 'ChatMessageAdded':
       return { ...view, messages: [...view.messages, event.message] };
     case 'SasReady':
       return { ...view, sas: event.code };
     case 'SignalingDisconnected':
-      return { ...view, status: 'disconnected' };
+      return {
+        ...view,
+        status: 'disconnected',
+        roomEventsReady: false,
+        remoteAvatarPose: null,
+        remoteMediaState: null,
+        sas: null,
+      };
     case 'SessionFailed':
-      return { ...view, status: 'failed' };
+      return {
+        ...view,
+        status: 'failed',
+        roomEventsReady: false,
+        remoteAvatarPose: null,
+        remoteMediaState: null,
+        sas: null,
+      };
     case 'TransportLost':
-      return { ...view, status: 'transport-lost', chatReady: false, sas: null };
+      return {
+        ...view,
+        status: 'transport-lost',
+        roomEventsReady: false,
+        remoteAvatarPose: null,
+        remoteMediaState: null,
+        sas: null,
+      };
     case 'NegotiationStalled':
       return { ...view, status: 'negotiation-stalled' };
     // Hide verification while transport is interrupted. A replacement
     // connection mints fresh certificates; a transient recovery re-emits it.
     case 'PeerInterrupted':
-      return { ...view, status: 'reconnecting', chatReady: false, sas: null };
+      return {
+        ...view,
+        status: 'reconnecting',
+        roomEventsReady: false,
+        sas: null,
+      };
     case 'PeerRestored':
       return { ...view, status: 'connected' };
     case 'RoomOpened':
@@ -57,7 +89,13 @@ export const reducePeerSessionView = (
         roomTemplateId: event.roomTemplateId,
       };
     case 'RoomJoinRejected':
-      return { ...view, status: event.reason };
+      return {
+        ...view,
+        status: event.reason,
+        roomEventsReady: false,
+        remoteAvatarPose: null,
+        remoteMediaState: null,
+      };
     case 'JoinRequestReceived':
       return view.pendingJoinRequests.some((request) => request.peerId === event.peerId)
         ? view
@@ -80,7 +118,14 @@ export const reducePeerSessionView = (
         : { ...view, pendingJoinRequests };
     }
     case 'PeerDeparted':
-      return { ...view, status: 'peer-departed', chatReady: false, sas: null };
+      return {
+        ...view,
+        status: 'peer-departed',
+        roomEventsReady: false,
+        remoteAvatarPose: null,
+        remoteMediaState: null,
+        sas: null,
+      };
   }
 };
 

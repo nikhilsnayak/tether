@@ -57,9 +57,18 @@ export function useMediaPreflight() {
   const transfer = (): PreparedMediaSelection => {
     const preparedMedia = preparedMediaRef.current;
     if (preparedMedia === null) throw new Error('Local media is not ready');
-    const media = preparedMedia.transfer();
+    const claimedMedia = preparedMedia.transfer();
     preparedMediaRef.current = null;
-    return { media, settings };
+    return {
+      media: {
+        ...claimedMedia,
+        initialState: {
+          cameraOn: settings.camera,
+          microphoneOn: settings.microphone,
+        },
+      },
+      settings,
+    };
   };
 
   useEffect(

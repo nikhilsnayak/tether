@@ -6,17 +6,20 @@ import { LogoMark } from '@/components/logo';
 
 import { CallControlButton } from '../components/call-controls';
 import { MediaStreamVideo } from '../components/media-stream-video';
+import { RoomScene } from '../scene/room-scene';
 import type { RoomTemplate } from '../templates/registry';
 import type { PreparedMediaSelection } from './media';
 import { useMediaPreflight } from './use-media-preflight';
 
 export function MediaSetupPanel({
   template,
+  entryContext = 'host',
   actionLabel,
   onBack,
   onComplete,
 }: {
   readonly template: RoomTemplate;
+  readonly entryContext?: 'host' | 'guest';
   readonly actionLabel: string;
   readonly onBack: () => void;
   readonly onComplete: (selection: PreparedMediaSelection) => void;
@@ -27,10 +30,20 @@ export function MediaSetupPanel({
   const finish = () => {
     onComplete(transfer());
   };
+  const guestEntry = entryContext === 'guest';
 
   return (
-    <div className='grid min-h-svh place-items-center px-6 py-10'>
-      <div className='w-full max-w-xl space-y-6'>
+    <div className='relative isolate grid min-h-svh place-items-center overflow-hidden px-6 py-10'>
+      {guestEntry && (
+        <RoomScene template={template} journey='outside' mode='call' sessionIntent='join' />
+      )}
+      <div
+        className={cn(
+          'relative z-10 w-full max-w-xl space-y-6',
+          guestEntry &&
+            'border-border bg-background/95 rounded-xl border p-6 shadow-2xl backdrop-blur-sm sm:p-8',
+        )}
+      >
         <span className='flex items-center gap-2.5'>
           <LogoMark className='size-5' />
           <span className='font-medium tracking-tight'>tether</span>
@@ -41,7 +54,9 @@ export function MediaSetupPanel({
           </p>
           <h1 className='text-2xl tracking-tight'>Look and sound ready?</h1>
           <p className='text-muted-foreground text-sm leading-6'>
-            Check your default camera and microphone before entering. This preview is never sent.
+            {guestEntry
+              ? 'You are outside the private room. Check your camera and microphone before knocking; this preview is never sent.'
+              : 'Check your default camera and microphone before entering. This preview is never sent.'}
           </p>
         </div>
 

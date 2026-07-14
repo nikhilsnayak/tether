@@ -3,11 +3,11 @@ import {
   PeerSessionPlatform,
   PlatformError,
   type DataChannelHandle,
+  type IceServer,
   type MediaStreamHandle,
   type PeerConnectionHandle,
   type PlatformEventDispatch,
 } from '@tether/client-runtime/modules/peer-session';
-import type { IceServer } from '@tether/client-runtime/modules/peer-session';
 import type { PreparedMedia } from '@tether/client-runtime/modules/room';
 import { Crypto, Effect, Exit, Layer, Scope } from 'effect';
 
@@ -216,9 +216,9 @@ const observePeerConnection = Effect.fnUntraced(function* (
 });
 
 /**
- * Bridges open and text-message events from an owned chat channel into the
- * actor queue. The immediate state checks cover a remotely-created channel that
- * opened before the actor installed its listeners.
+ * Bridges lifecycle and message events from an owned room-events channel into
+ * the actor queue. The immediate state checks cover a remotely-created channel
+ * that opened before the actor installed its listeners.
  */
 const observeDataChannel = Effect.fnUntraced(function* (
   dataChannelHandle: DataChannelHandle,
@@ -291,6 +291,12 @@ const webPeerSessionPlatform = PeerSessionPlatform.of({
     }),
   observeDataChannel,
   dataChannelLabel: (dataChannel) => dataChannelValue(dataChannel).label,
+  dataChannelBufferedAmount: (dataChannel) => dataChannelValue(dataChannel).bufferedAmount,
+  closeDataChannel: (dataChannel) =>
+    Effect.try({
+      try: () => dataChannelValue(dataChannel).close(),
+      catch: (cause) => new PlatformError({ operation: 'close-data-channel', cause }),
+    }),
   createOffer: (peerConnection) =>
     Effect.tryPromise({
       try: () => peerConnectionValue(peerConnection).createOffer(),

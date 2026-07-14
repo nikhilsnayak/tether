@@ -93,10 +93,7 @@ test('leaving a call and joining a new room starts with clean media', async ({
     await expect(guest.getByText('Share this room to invite someone.')).toBeVisible();
 
     // No stale remote frame from the previous call may survive the rejoin.
-    await expect(guest.getByLabel('Dusk Suite interactive preview')).toHaveAttribute(
-      'data-room-remote-video',
-      'absent',
-    );
+    await expect(guest.locator('[data-room-media-tile="remote"]')).toHaveCount(0);
     await expect(guest.getByLabel('Local video preview')).toBeVisible();
     const streamStates = await guest.evaluate(() =>
       window.__tetherE2E.localStreams.map((stream) =>
@@ -111,9 +108,10 @@ test('leaving a call and joining a new room starts with clean media', async ({
   }
 });
 
-test('a closed data channel disables chat without interrupting the call', async ({
+test('a closed room-events channel disables room events without interrupting media', async ({
   browser,
 }, testInfo) => {
+  test.setTimeout(90_000);
   const baseURL = requireBaseURL(testInfo.project.use.baseURL);
   const { host, guest, cleanup } = await connectPeers(browser, baseURL, { probeWebRtc: true });
   try {
@@ -134,7 +132,7 @@ test('a closed data channel disables chat without interrupting the call', async 
     ]);
     expect(hostCode).toBe(guestCode);
 
-    await sendMessage(host, guest, 'message before chat closes');
+    await sendMessage(host, guest, 'message before room events close');
     const hostInput = host.getByRole('textbox', { name: 'Message' });
     const guestInput = guest.getByRole('textbox', { name: 'Message' });
 
@@ -147,16 +145,30 @@ test('a closed data channel disables chat without interrupting the call', async 
     });
 
     await Promise.all([expect(hostInput).toBeDisabled(), expect(guestInput).toBeDisabled()]);
+    await Promise.all([
+      expect(host.locator('[data-room-avatar-sync]')).toHaveAttribute(
+        'data-room-avatar-sync',
+        'unavailable',
+      ),
+      expect(guest.locator('[data-room-avatar-sync]')).toHaveAttribute(
+        'data-room-avatar-sync',
+        'unavailable',
+      ),
+    ]);
     await Promise.all([expectConnected(host), expectConnected(guest)]);
     await Promise.all([
-      expect(host.getByLabel('Dusk Suite interactive preview')).toHaveAttribute(
-        'data-room-remote-video',
+      expect(host.getByLabel('Dusk Suite room scene')).toHaveAttribute(
+        'data-room-remote-avatar',
         'present',
       ),
-      expect(guest.getByLabel('Dusk Suite interactive preview')).toHaveAttribute(
-        'data-room-remote-video',
-        'present',
+      expect(guest.getByLabel('Dusk Suite room scene')).toHaveAttribute(
+        'data-room-display',
+        'idle',
       ),
+    ]);
+    await Promise.all([
+      expect(host.locator('[data-room-media-tile="remote"]')).toBeVisible(),
+      expect(guest.locator('[data-room-media-tile="remote"]')).toBeVisible(),
     ]);
     expect(await host.evaluate(() => window.__tetherE2E.peerConnections.length)).toBe(
       initialHostConnections,

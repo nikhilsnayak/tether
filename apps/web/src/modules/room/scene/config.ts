@@ -6,6 +6,12 @@ export interface CameraFraming {
   readonly fieldOfView: number;
 }
 
+export interface CameraFramings {
+  readonly landscape: CameraFraming;
+  readonly portrait: CameraFraming;
+  readonly outside: CameraFraming;
+}
+
 export interface CameraLookConfig {
   readonly yaw: readonly [minimum: number, maximum: number];
   readonly pitch: readonly [minimum: number, maximum: number];
@@ -138,13 +144,14 @@ export function clampLook(
   };
 }
 
-export function selectFraming(
+export function selectCameraFraming(
   width: number,
   height: number,
-  landscape: CameraFraming,
-  portrait: CameraFraming,
+  outside: boolean,
+  framings: CameraFramings,
 ): CameraFraming {
-  return width >= height ? landscape : portrait;
+  if (outside) return framings.outside;
+  return width >= height ? framings.landscape : framings.portrait;
 }
 
 export function shouldAnimateCamera(prefersReducedMotion: boolean): boolean {

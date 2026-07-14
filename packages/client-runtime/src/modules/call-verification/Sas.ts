@@ -11,11 +11,12 @@ const fingerprintLines = (sdp: string): ReadonlyArray<string> =>
     .map((line) => line.trim().toLowerCase())
     .filter((line) => line.startsWith('a=fingerprint:'));
 
-// SDP is ASCII; TextEncoder isn't in the platform-neutral lib.
+// The protocol label and normalized fingerprint lines are ASCII; TextEncoder
+// is not available in the platform-neutral TypeScript lib.
 const asciiBytes = (input: string): Uint8Array =>
   Uint8Array.from(input, (char) => char.charCodeAt(0));
 
-/** Hashes both fingerprints as received over signaling, offer first so both roles agree. */
+/** Hashes normalized DTLS fingerprint lines, offer first so both roles agree. */
 export const deriveSas = Effect.fnUntraced(function* ({
   answerSdp,
   offerSdp,

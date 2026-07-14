@@ -1,6 +1,7 @@
 import { DUSK_SUITE_TEMPLATE_ID, type RoomTemplateId } from '@tether/contracts/modules/room';
 import { lazy, type ComponentType, type LazyExoticComponent } from 'react';
 
+import type { RoomGameplayConfig } from '../scene/avatar-motion';
 import type {
   CameraFraming,
   CameraLookConfig,
@@ -14,7 +15,7 @@ export interface RoomSceneProps {
   readonly quality: QualityConfig;
   readonly qualityTier: ResolvedQualityTier;
   readonly journey?: RoomJourneyCue;
-  readonly remoteStream?: MediaStream | null;
+  readonly reducedMotion: boolean;
 }
 
 export interface RoomTemplate {
@@ -22,6 +23,7 @@ export interface RoomTemplate {
   readonly name: string;
   readonly description: string;
   readonly scene: LazyExoticComponent<ComponentType<RoomSceneProps>>;
+  readonly gameplay: RoomGameplayConfig;
   readonly camera: {
     readonly landscape: CameraFraming;
     readonly portrait: CameraFraming;
@@ -41,6 +43,24 @@ export const DUSK_SUITE_TEMPLATE: RoomTemplate = {
   name: 'Dusk Suite',
   description: 'A quiet private suite balanced between warm interior light and the evening sky.',
   scene: lazy(loadDuskSuiteScene),
+  gameplay: {
+    walkableBounds: { minX: -4.35, maxX: 4.35, minZ: -3.35, maxZ: 4.35 },
+    // Dusk Suite's display console and doorway sit beyond the walkable center bounds.
+    obstacles: [],
+    spawns: {
+      host: { x: -1.25, z: 0.8, yaw: Math.PI / 2 },
+      guest: { x: 1.25, z: 0.8, yaw: -Math.PI / 2 },
+      outsideGuest: { x: 6.8, z: 1.65, yaw: -Math.PI / 2 },
+    },
+    camera: {
+      distance: 5,
+      minimumDistance: 3,
+      maximumDistance: 7,
+      height: 2.55,
+      targetHeight: 1.05,
+      followSeconds: 0.18,
+    },
+  },
   camera: {
     landscape: { position: [0, 1.55, 6.8], target: [0, 1.7, -2.4], fieldOfView: 43 },
     portrait: { position: [0, 1.65, 8.8], target: [0, 1.65, -2.2], fieldOfView: 52 },

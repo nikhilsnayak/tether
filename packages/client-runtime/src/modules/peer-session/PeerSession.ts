@@ -1,5 +1,5 @@
 import type { PeerId } from '@tether/contracts/modules/room';
-import { Crypto, Duration, Effect, Exit, Scope } from 'effect';
+import { Crypto, Duration, Effect, Exit, Result, Scope } from 'effect';
 
 import { deriveSasCode } from '../call-verification';
 import type {
@@ -9,7 +9,6 @@ import type {
   PeerSessionLocalInputDispatch,
 } from './ActorModel';
 import {
-  type ChatMessage,
   type DataChannelHandle,
   type IceCandidate,
   type IceServer,
@@ -18,7 +17,16 @@ import {
   type PeerSessionSignal,
   type SessionDescription,
 } from './Model';
-import { CHAT_CHANNEL_LABEL } from './Platform';
+import { makePeerSessionMemory } from './PeerSessionMemory';
+import { isPlatformError } from './Platform';
+import {
+  type AvatarPose,
+  type MediaState,
+  ROOM_EVENTS_CHANNEL_LABEL,
+  ROOM_EVENT_VERSION,
+  decodeRoomEvent,
+  encodeRoomEvent,
+} from './RoomEvents';
 import { PeerSessionEventSink, PeerSessionPlatform, PeerSessionSignaling } from './Services';
 
 /**
@@ -29,6 +37,9 @@ import { PeerSessionEventSink, PeerSessionPlatform, PeerSessionSignaling } from 
  */
 const NEGOTIATION_DEADLINE = Duration.seconds(20);
 const MAX_RECONNECT_ATTEMPTS = 2;
+const POSE_BUFFER_HIGH_WATER_BYTES = 64 * 1024;
+const POSE_BUFFER_LOW_WATER_BYTES = 16 * 1024;
+const POSE_RETRY_DELAY = Duration.millis(100);
 
 const requireDescription = (description: SessionDescription, type: 'offer' | 'answer') =>
   description.sdp === undefined
@@ -46,7 +57,7 @@ const requireDescription = (description: SessionDescription, type: 'offer' | 'an
  * INPUTS                              SERIALIZED PROCESSOR
  * room session open -> remote input --------+
  * platform callback -> PlatformEvent -------+--> merged stream --> actor
- * sendMessage -> SendMessage ---------------+
+ * room UI commands -------------------------+
  *
  * ACTOR OUTPUTS
  * actor --> PeerSessionSignaling --> offer / answer / ICE
@@ -65,10 +76,11 @@ const requireDescription = (description: SessionDescription, type: 'offer' | 'an
  *          +-- RoomSessionOpened(peerId = existing peer) -> offerer
  *
  * Both roles converge on [PeerKnown]. Session descriptions and ICE are
- * exchanged through signaling. Data-channel messages become chat events,
- * while connection failures replace the current generation and retry within
- * the reconnect budget. Exhausted retries emit TransportLost; a later
- * PeerLeft creates a fresh generation and returns to [WaitingForPeer].
+ * exchanged through signaling. The single room-events channel carries typed
+ * chat, avatar-pose, and media-state envelopes, while connection failures
+ * replace the current generation and retry within the reconnect budget.
+ * Exhausted retries emit TransportLost; a later PeerLeft creates a fresh
+ * generation and returns to [WaitingForPeer].
  *
  * ICE candidates are accepted only for the active negotiation epoch, and
  * callbacks carrying handles from closed generations are ignored.
@@ -79,23 +91,34 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
   localStream: MediaStreamHandle,
   iceServers: ReadonlyArray<IceServer>,
   dispatchLocalInput: PeerSessionLocalInputDispatch,
+  initialMediaState: MediaState | null = null,
 ) {
   const platform = yield* PeerSessionPlatform;
   const eventSink = yield* PeerSessionEventSink;
   const signaling = yield* PeerSessionSignaling;
   const crypto = yield* Crypto.Crypto;
   const actorScope = yield* Scope.Scope;
-  let nextMessageSequence = 0;
-  let nextOfferEpoch = 0;
-  let latestRemoteOfferEpoch: number | null = null;
+  const memory = makePeerSessionMemory(selfId, initialMediaState);
   let state: PeerSessionActorState = {
     _tag: 'AwaitingRoomSession',
   };
 
-  const makeMessageId = (sender: ChatMessage['sender']) =>
-    `${selfId}:${sender}:${nextMessageSequence++}`;
-
   const sendSignal = (signal: PeerSessionSignal) => signaling.sendSignal(signal);
+
+  const transmitRoomEvent = Effect.fnUntraced(function* (
+    dataChannel: DataChannelHandle,
+    event: Parameters<typeof encodeRoomEvent>[0],
+  ) {
+    const encoded = encodeRoomEvent(event);
+    if (Result.isFailure(encoded)) {
+      yield* Effect.logWarning('Dropped invalid local room event').pipe(
+        Effect.annotateLogs('reason', encoded.failure),
+      );
+      return false;
+    }
+    yield* platform.sendDataChannelMessage(dataChannel, encoded.success);
+    return true;
+  });
 
   // Hashes the SDPs as they crossed signaling; failure downgrades to unverified.
   const emitSas = (offerSdp: string, answerSdp: string) =>
@@ -188,7 +211,8 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       return;
     }
 
-    const { peerId, role, reconnectAttempts } = state;
+    const { peerId, reconnectAttempts } = state;
+    const role = state.negotiation.role;
     yield* Scope.close(state.generation.scope, Exit.void);
 
     if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
@@ -198,6 +222,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     }
 
     const generation = yield* acquirePeerConnectionGeneration();
+    memory.roomEvents.resetGeneration();
     yield* eventSink.emit({ _tag: 'PeerInterrupted', peerId });
 
     if (role === 'answerer') {
@@ -205,13 +230,10 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
         _tag: 'PeerKnown',
         generation,
         peerId,
-        role,
+        negotiation: { role: 'answerer', phase: 'awaiting-offer' },
         peerConnectionState: 'connecting',
         dataChannelState: { _tag: 'AwaitingRemoteDataChannel' },
-        negotiationEpoch: null,
         reconnectAttempts: reconnectAttempts + 1,
-        offerSdp: null,
-        answerSdp: null,
       };
       yield* armNegotiationDeadline(generation);
       return;
@@ -219,25 +241,27 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
 
     const dataChannel = yield* platform.createDataChannel(
       generation.peerConnection,
-      CHAT_CHANNEL_LABEL,
+      ROOM_EVENTS_CHANNEL_LABEL,
     );
     yield* platform
       .observeDataChannel(dataChannel, dispatchLocalInput)
       .pipe(Scope.provide(generation.scope));
     yield* armNegotiationDeadline(generation);
-    const negotiationEpoch = nextOfferEpoch++;
+    const negotiationEpoch = memory.negotiation.takeLocalOfferEpoch();
     const offerSdp = yield* createAndSendOffer(generation.peerConnection, negotiationEpoch);
     state = {
       _tag: 'PeerKnown',
       generation,
       peerId,
-      role,
+      negotiation: {
+        role: 'offerer',
+        phase: 'awaiting-answer',
+        epoch: negotiationEpoch,
+        offerSdp,
+      },
       peerConnectionState: 'connecting',
       dataChannelState: { _tag: 'DataChannelConnecting', dataChannel },
-      negotiationEpoch,
       reconnectAttempts: reconnectAttempts + 1,
-      offerSdp,
-      answerSdp: null,
     };
   });
 
@@ -256,7 +280,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
 
     const dataChannel = yield* platform.createDataChannel(
       generation.peerConnection,
-      CHAT_CHANNEL_LABEL,
+      ROOM_EVENTS_CHANNEL_LABEL,
     );
 
     yield* platform
@@ -264,20 +288,22 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       .pipe(Scope.provide(generation.scope));
 
     yield* armNegotiationDeadline(generation);
-    const negotiationEpoch = nextOfferEpoch++;
+    const negotiationEpoch = memory.negotiation.takeLocalOfferEpoch();
     const offerSdp = yield* createAndSendOffer(generation.peerConnection, negotiationEpoch);
 
     state = {
       _tag: 'PeerKnown',
       generation,
       peerId,
-      role: 'offerer',
+      negotiation: {
+        role: 'offerer',
+        phase: 'awaiting-answer',
+        epoch: negotiationEpoch,
+        offerSdp,
+      },
       peerConnectionState: 'connecting',
       dataChannelState: { _tag: 'DataChannelConnecting', dataChannel },
-      negotiationEpoch,
       reconnectAttempts: 0,
-      offerSdp,
-      answerSdp: null,
     };
   });
 
@@ -292,13 +318,10 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       _tag: 'PeerKnown',
       generation,
       peerId,
-      role: 'answerer',
+      negotiation: { role: 'answerer', phase: 'awaiting-offer' },
       peerConnectionState: 'connecting',
       dataChannelState: { _tag: 'AwaitingRemoteDataChannel' },
-      negotiationEpoch: null,
       reconnectAttempts: 0,
-      offerSdp: null,
-      answerSdp: null,
     };
     yield* armNegotiationDeadline(generation);
   });
@@ -311,16 +334,14 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     switch (signal._tag) {
       case 'SessionDescription': {
         if (signal.type === 'offer') {
-          if (state.role !== 'answerer') {
+          if (state.negotiation.role !== 'answerer') {
             return yield* Effect.logWarning('Ignored offer received in invalid role');
           }
-          if (
-            latestRemoteOfferEpoch !== null &&
-            signal.negotiationEpoch <= latestRemoteOfferEpoch
-          ) {
+          const offerDecision = memory.negotiation.acceptRemoteOffer(signal.negotiationEpoch);
+          if (offerDecision._tag === 'Stale') {
             return yield* Effect.logWarning('Ignored stale offer negotiation epoch').pipe(
               Effect.annotateLogs({
-                activeEpoch: latestRemoteOfferEpoch,
+                activeEpoch: offerDecision.latest,
                 receivedEpoch: signal.negotiationEpoch,
               }),
             );
@@ -329,44 +350,56 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
             state.generation.peerConnection,
             signal,
           );
-          latestRemoteOfferEpoch = signal.negotiationEpoch;
           state = {
             ...state,
-            negotiationEpoch: signal.negotiationEpoch,
-            offerSdp: signal.sdp,
-            answerSdp,
+            negotiation: {
+              role: 'answerer',
+              phase: 'answered',
+              epoch: signal.negotiationEpoch,
+              offerSdp: signal.sdp,
+              answerSdp,
+            },
           };
           return;
         }
 
-        if (state.role !== 'offerer') {
+        if (state.negotiation.role !== 'offerer') {
           return yield* Effect.logWarning('Ignored answer received in invalid role');
         }
-        if (signal.negotiationEpoch !== state.negotiationEpoch) {
+        if (signal.negotiationEpoch !== state.negotiation.epoch) {
           return yield* Effect.logWarning('Ignored answer for inactive negotiation epoch').pipe(
             Effect.annotateLogs({
-              activeEpoch: state.negotiationEpoch,
+              activeEpoch: state.negotiation.epoch,
               receivedEpoch: signal.negotiationEpoch,
             }),
           );
         }
-        if (state.answerSdp !== null) {
+        if (state.negotiation.phase === 'answered') {
           return yield* Effect.logWarning('Ignored duplicate answer');
         }
         yield* platform.setRemoteDescription(state.generation.peerConnection, {
           type: 'answer',
           sdp: signal.sdp,
         });
-        state = { ...state, answerSdp: signal.sdp };
+        state = {
+          ...state,
+          negotiation: {
+            ...state.negotiation,
+            phase: 'answered',
+            answerSdp: signal.sdp,
+          },
+        };
         return;
       }
       case 'IceCandidate': {
-        if (signal.negotiationEpoch !== state.negotiationEpoch) {
+        const activeEpoch =
+          state.negotiation.phase === 'awaiting-offer' ? null : state.negotiation.epoch;
+        if (signal.negotiationEpoch !== activeEpoch) {
           return yield* Effect.logWarning(
             'Ignored ICE candidate for inactive negotiation epoch',
           ).pipe(
             Effect.annotateLogs({
-              activeEpoch: state.negotiationEpoch,
+              activeEpoch,
               receivedEpoch: signal.negotiationEpoch,
             }),
           );
@@ -387,7 +420,8 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
   const handlePeerLeft = Effect.fnUntraced(function* (peerId: PeerId) {
     if (state._tag === 'TransportLost' && peerId === state.peerId) {
       const newGeneration = yield* acquirePeerConnectionGeneration();
-      latestRemoteOfferEpoch = null;
+      memory.negotiation.resetRemoteOffer();
+      memory.roomEvents.resetGeneration();
 
       state = {
         _tag: 'WaitingForPeer',
@@ -405,7 +439,8 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     yield* Scope.close(state.generation.scope, Exit.void);
 
     const newGeneration = yield* acquirePeerConnectionGeneration();
-    latestRemoteOfferEpoch = null;
+    memory.negotiation.resetRemoteOffer();
+    memory.roomEvents.resetGeneration();
 
     state = {
       _tag: 'WaitingForPeer',
@@ -423,10 +458,21 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     if (
       state._tag !== 'PeerKnown' ||
       state.generation.peerConnection !== peerConnection ||
-      state.role !== 'answerer' ||
+      state.negotiation.role !== 'answerer' ||
       state.dataChannelState._tag !== 'AwaitingRemoteDataChannel' ||
-      platform.dataChannelLabel(dataChannel) !== CHAT_CHANNEL_LABEL
+      platform.dataChannelLabel(dataChannel) !== ROOM_EVENTS_CHANNEL_LABEL
     ) {
+      if (platform.closeDataChannel !== undefined) {
+        yield* platform
+          .closeDataChannel(dataChannel)
+          .pipe(
+            Effect.catchTag('PlatformError', (error) =>
+              Effect.logWarning('Failed to close unexpected data channel').pipe(
+                Effect.annotateLogs('operation', error.operation),
+              ),
+            ),
+          );
+      }
       return;
     }
 
@@ -453,13 +499,13 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     if (state._tag !== 'PeerKnown' || state.generation.peerConnection !== peerConnection) {
       return;
     }
-    if (state.negotiationEpoch === null) {
+    if (state.negotiation.phase === 'awaiting-offer') {
       return yield* Effect.logWarning('Ignored local ICE candidate without an active epoch');
     }
     yield* sendSignal({
       _tag: 'IceCandidate',
       ...candidate,
-      negotiationEpoch: state.negotiationEpoch,
+      negotiationEpoch: state.negotiation.epoch,
     });
   });
 
@@ -501,8 +547,8 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     state = { ...state, peerConnectionState: 'connected', reconnectAttempts: 0 };
     yield* Effect.logInfo('Peer connection established');
     yield* eventSink.emit({ _tag: 'Connected', peerId: state.peerId });
-    if (state.offerSdp !== null && state.answerSdp !== null) {
-      yield* emitSas(state.offerSdp, state.answerSdp);
+    if (state.negotiation.phase === 'answered') {
+      yield* emitSas(state.negotiation.offerSdp, state.negotiation.answerSdp);
     }
   });
 
@@ -517,8 +563,132 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     }
 
     state = { ...state, dataChannelState: { _tag: 'DataChannelClosed', dataChannel } };
-    yield* Effect.logWarning('Data channel closed; chat is unavailable');
-    yield* eventSink.emit({ _tag: 'ChatUnavailable' });
+    memory.roomEvents.disarmAvatarRetry();
+    yield* Effect.logWarning('Room events channel closed');
+    yield* eventSink.emit({ _tag: 'RoomEventsUnavailable' });
+  });
+
+  const markRoomEventsUnavailable = Effect.fnUntraced(function* (dataChannel: DataChannelHandle) {
+    // Called synchronously from a failed send on the actor-owned open channel.
+    // The guard documents that ownership invariant for future call sites.
+    /* v8 ignore next 6 */
+    if (
+      state._tag !== 'PeerKnown' ||
+      state.dataChannelState._tag !== 'DataChannelOpen' ||
+      state.dataChannelState.dataChannel !== dataChannel
+    ) {
+      return;
+    }
+    if (platform.closeDataChannel !== undefined) {
+      yield* platform
+        .closeDataChannel(dataChannel)
+        .pipe(
+          Effect.catchTag('PlatformError', (error) =>
+            Effect.logWarning('Failed to close unusable room events channel').pipe(
+              Effect.annotateLogs('operation', error.operation),
+            ),
+          ),
+        );
+    }
+    state = { ...state, dataChannelState: { _tag: 'DataChannelClosed', dataChannel } };
+    memory.roomEvents.disarmAvatarRetry();
+    yield* eventSink.emit({ _tag: 'RoomEventsUnavailable' });
+  });
+
+  const sendLatestMediaState = Effect.fnUntraced(function* (dataChannel: DataChannelHandle) {
+    const transmission = memory.roomEvents.nextMediaTransmission();
+    if (transmission._tag === 'NothingToSend') return;
+    // See PeerSessionMemory.takeCounter: this needs 2^31 sends in one generation.
+    /* v8 ignore next 3 */
+    if (transmission._tag === 'CounterExhausted') {
+      return yield* Effect.logWarning('Local media-state revision exhausted');
+    }
+    yield* transmitRoomEvent(dataChannel, {
+      version: ROOM_EVENT_VERSION,
+      type: 'media-state',
+      revision: transmission.counter,
+      ...transmission.value,
+    }).pipe(
+      Effect.catchIf(isPlatformError, (error) =>
+        Effect.logWarning('Failed to send local media state').pipe(
+          Effect.annotateLogs('operation', error.operation),
+          Effect.andThen(markRoomEventsUnavailable(dataChannel)),
+        ),
+      ),
+    );
+  });
+
+  const sendLatestAvatarPose = Effect.fnUntraced(function* (dataChannel: DataChannelHandle) {
+    const transmission = memory.roomEvents.nextAvatarTransmission();
+    if (transmission._tag === 'NothingToSend') return;
+    // See PeerSessionMemory.takeCounter: this needs 2^31 sends in one generation.
+    /* v8 ignore next 3 */
+    if (transmission._tag === 'CounterExhausted') {
+      return yield* Effect.logWarning('Local avatar-pose sequence exhausted');
+    }
+    const sent = yield* transmitRoomEvent(dataChannel, {
+      version: ROOM_EVENT_VERSION,
+      type: 'avatar-pose',
+      sequence: transmission.counter,
+      ...transmission.value,
+    }).pipe(
+      Effect.catchIf(isPlatformError, (error) =>
+        Effect.logWarning('Failed to send local avatar pose').pipe(
+          Effect.annotateLogs('operation', error.operation),
+          Effect.andThen(markRoomEventsUnavailable(dataChannel)),
+          Effect.as(false),
+        ),
+      ),
+    );
+    if (sent) memory.roomEvents.markAvatarPoseSent();
+  });
+
+  const armAvatarPoseRetry = (
+    peerConnection: PeerConnectionHandle,
+    dataChannel: DataChannelHandle,
+  ) => {
+    if (memory.roomEvents.isAvatarRetryArmed() || state._tag !== 'PeerKnown') {
+      return Effect.void;
+    }
+    memory.roomEvents.armAvatarRetry();
+    return Effect.sleep(POSE_RETRY_DELAY).pipe(
+      Effect.andThen(
+        Effect.sync(() =>
+          dispatchLocalInput({
+            _tag: 'RetryPendingAvatarPose',
+            peerConnection,
+            dataChannel,
+          }),
+        ),
+      ),
+      Effect.forkScoped({ startImmediately: true }),
+      Scope.provide(state.generation.scope),
+    );
+  };
+
+  const flushOrRetryAvatarPose = Effect.fnUntraced(function* (
+    peerConnection: PeerConnectionHandle,
+    dataChannel: DataChannelHandle,
+  ) {
+    if (!memory.roomEvents.hasPendingAvatarPose()) return;
+    const bufferedAmount = platform.dataChannelBufferedAmount?.(dataChannel);
+    if (bufferedAmount !== undefined && bufferedAmount > POSE_BUFFER_LOW_WATER_BYTES) {
+      yield* armAvatarPoseRetry(peerConnection, dataChannel);
+      return;
+    }
+    yield* sendLatestAvatarPose(dataChannel);
+  });
+
+  const queueOrSendAvatarPose = Effect.fnUntraced(function* (
+    peerConnection: PeerConnectionHandle,
+    dataChannel: DataChannelHandle,
+  ) {
+    const bufferedAmount = platform.dataChannelBufferedAmount?.(dataChannel);
+    if (bufferedAmount !== undefined && bufferedAmount >= POSE_BUFFER_HIGH_WATER_BYTES) {
+      yield* armAvatarPoseRetry(peerConnection, dataChannel);
+      return;
+    }
+    yield* sendLatestAvatarPose(dataChannel);
   });
 
   const handlePeerConnectionInterrupted = Effect.fnUntraced(function* (
@@ -552,10 +722,10 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     yield* Effect.logInfo('Peer connection restored');
     yield* eventSink.emit({ _tag: 'PeerRestored', peerId: state.peerId });
     if (state.dataChannelState._tag === 'DataChannelOpen') {
-      yield* eventSink.emit({ _tag: 'ChatReady' });
+      yield* eventSink.emit({ _tag: 'RoomEventsReady' });
     }
-    if (state.offerSdp !== null && state.answerSdp !== null) {
-      yield* emitSas(state.offerSdp, state.answerSdp);
+    if (state.negotiation.phase === 'answered') {
+      yield* emitSas(state.negotiation.offerSdp, state.negotiation.answerSdp);
     }
   });
 
@@ -581,7 +751,15 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       dataChannelState: { _tag: 'DataChannelOpen', dataChannel },
     };
     yield* Effect.logInfo('Data channel opened');
-    yield* eventSink.emit({ _tag: 'ChatReady' });
+    yield* eventSink.emit({ _tag: 'RoomEventsReady' });
+    yield* sendLatestMediaState(dataChannel);
+    if (
+      state._tag === 'PeerKnown' &&
+      state.dataChannelState._tag === 'DataChannelOpen' &&
+      state.dataChannelState.dataChannel === dataChannel
+    ) {
+      yield* queueOrSendAvatarPose(state.generation.peerConnection, dataChannel);
+    }
   });
 
   const handleDataChannelMessage = Effect.fnUntraced(function* (
@@ -595,14 +773,46 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     ) {
       return;
     }
-    if (typeof data !== 'string') {
-      return yield* Effect.logWarning('Ignored non-text chat payload');
+    const decoded = decodeRoomEvent(data);
+    if (Result.isFailure(decoded)) {
+      return yield* Effect.logWarning('Dropped invalid room event').pipe(
+        Effect.annotateLogs('reason', decoded.failure),
+      );
     }
 
-    yield* eventSink.emit({
-      _tag: 'ChatMessageAdded',
-      message: { id: makeMessageId('peer'), sender: 'peer', text: data },
-    });
+    switch (decoded.success.type) {
+      case 'chat-message':
+        return yield* eventSink.emit({
+          _tag: 'ChatMessageAdded',
+          message: {
+            id: memory.chat.nextMessageId('peer'),
+            sender: 'peer',
+            text: decoded.success.text,
+          },
+        });
+      case 'avatar-pose':
+        if (!memory.roomEvents.acceptRemoteAvatarSequence(decoded.success.sequence)) return;
+        return yield* eventSink.emit({
+          _tag: 'RemoteAvatarPoseChanged',
+          pose: {
+            sequence: decoded.success.sequence,
+            x: decoded.success.x,
+            z: decoded.success.z,
+            yaw: decoded.success.yaw,
+            action: decoded.success.action,
+          },
+        });
+      case 'media-state':
+        if (!memory.roomEvents.acceptRemoteMediaRevision(decoded.success.revision)) return;
+        return yield* eventSink.emit({
+          _tag: 'RemoteMediaStateChanged',
+          mediaState: {
+            revision: decoded.success.revision,
+            cameraOn: decoded.success.cameraOn,
+            microphoneOn: decoded.success.microphoneOn,
+          },
+        });
+    }
   });
 
   const handleNegotiationDeadlineElapsed = Effect.fnUntraced(function* (
@@ -629,11 +839,60 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       return;
     }
 
-    yield* platform.sendDataChannelMessage(state.dataChannelState.dataChannel, text);
+    const dataChannel = state.dataChannelState.dataChannel;
+    const sent = yield* transmitRoomEvent(dataChannel, {
+      version: ROOM_EVENT_VERSION,
+      type: 'chat-message',
+      text,
+    }).pipe(
+      Effect.catchIf(isPlatformError, (error) =>
+        Effect.logWarning('Failed to send chat message').pipe(
+          Effect.annotateLogs('operation', error.operation),
+          Effect.andThen(markRoomEventsUnavailable(dataChannel)),
+          Effect.as(false),
+        ),
+      ),
+    );
+    if (!sent) return;
     yield* eventSink.emit({
       _tag: 'ChatMessageAdded',
-      message: { id: makeMessageId('self'), sender: 'self', text },
+      message: { id: memory.chat.nextMessageId('self'), sender: 'self', text },
     });
+  });
+
+  const handleUiSendAvatarPose = Effect.fnUntraced(function* (pose: AvatarPose) {
+    memory.roomEvents.rememberAvatarPose(pose);
+    if (state._tag !== 'PeerKnown' || state.dataChannelState._tag !== 'DataChannelOpen') {
+      return;
+    }
+    yield* queueOrSendAvatarPose(
+      state.generation.peerConnection,
+      state.dataChannelState.dataChannel,
+    );
+  });
+
+  const handleUiSendMediaState = Effect.fnUntraced(function* (mediaState: MediaState) {
+    memory.roomEvents.rememberMediaState(mediaState);
+    if (state._tag !== 'PeerKnown' || state.dataChannelState._tag !== 'DataChannelOpen') {
+      return;
+    }
+    yield* sendLatestMediaState(state.dataChannelState.dataChannel);
+  });
+
+  const handleRetryPendingAvatarPose = Effect.fnUntraced(function* (
+    peerConnection: PeerConnectionHandle,
+    dataChannel: DataChannelHandle,
+  ) {
+    if (
+      state._tag !== 'PeerKnown' ||
+      state.generation.peerConnection !== peerConnection ||
+      state.dataChannelState._tag !== 'DataChannelOpen' ||
+      state.dataChannelState.dataChannel !== dataChannel
+    ) {
+      return;
+    }
+    memory.roomEvents.disarmAvatarRetry();
+    yield* flushOrRetryAvatarPose(peerConnection, dataChannel);
   });
 
   const handleInput = Effect.fnUntraced(function* (input: PeerSessionInput) {
@@ -668,8 +927,14 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
         return yield* handlePeerConnectionRestored(input.peerConnection);
       case 'NegotiationDeadlineElapsed':
         return yield* handleNegotiationDeadlineElapsed(input.peerConnection);
+      case 'RetryPendingAvatarPose':
+        return yield* handleRetryPendingAvatarPose(input.peerConnection, input.dataChannel);
       case 'SendMessage':
         return yield* handleUiSendMessage(input.message);
+      case 'SendAvatarPose':
+        return yield* handleUiSendAvatarPose(input.pose);
+      case 'SendMediaState':
+        return yield* handleUiSendMediaState(input.mediaState);
     }
   });
 

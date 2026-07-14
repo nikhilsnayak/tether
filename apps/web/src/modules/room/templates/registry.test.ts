@@ -1,6 +1,7 @@
 import { RoomTemplateId } from '@tether/contracts/modules/room';
 import { assert, describe, it, vi } from 'vitest';
 
+import { roomGameplayConfigIsWithinWireBounds } from '../scene/avatar-motion';
 import { DUSK_SUITE_TEMPLATE, loadDuskSuiteScene, resolveRoomTemplate } from './registry';
 
 vi.mock('../scene/dusk-suite-scene', () => ({ default: () => null }));
@@ -24,6 +25,7 @@ describe('room template registry', () => {
         [...framing.position, ...framing.target, framing.fieldOfView].every(Number.isFinite),
       ),
     );
+    assert.isTrue(roomGameplayConfigIsWithinWireBounds(DUSK_SUITE_TEMPLATE.gameplay));
   });
 
   it('loads the bundled Dusk Suite scene', async () => {

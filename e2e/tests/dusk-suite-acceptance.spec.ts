@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 
-import { createRoom, installWebRtcProbe } from './helpers';
+import { createRoom, installWebRtcProbe, prepareGuestAtThreshold } from './helpers';
+import { seededStorageState } from './storage-seed';
 
 test('missing WebGL2 stops entry before media is requested', async ({ page }) => {
   await page.addInitScript(() => {
@@ -44,8 +45,29 @@ test('Dusk Suite loads without third-party room assets', async ({ page }, testIn
   });
 
   await createRoom(page);
-  await expect(page.getByLabel('Dusk Suite interactive preview').locator('canvas')).toBeVisible();
+  await expect(page.getByLabel('Dusk Suite room scene').locator('canvas')).toBeVisible();
   expect(externalAssets).toEqual([]);
+});
+
+test('a guest waits at the exterior before knocking', async ({ browser, page }, testInfo) => {
+  const baseURL = testInfo.project.use.baseURL;
+  if (typeof baseURL !== 'string') throw new Error('Expected a configured baseURL');
+  const guestContext = await browser.newContext({ baseURL, storageState: seededStorageState });
+  const guest = await guestContext.newPage();
+
+  try {
+    const roomId = await createRoom(page);
+    await prepareGuestAtThreshold(guest, roomId);
+
+    const scene = guest.getByLabel('Dusk Suite room scene');
+    await expect(scene.locator('canvas')).toBeVisible();
+    await expect(scene).toHaveAttribute('data-room-journey', 'outside');
+    await expect(scene).toHaveAttribute('data-room-location', 'outside');
+    await expect(guest.getByRole('button', { name: 'Knock on door' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Join request' })).toBeHidden();
+  } finally {
+    await guestContext.close();
+  }
 });
 
 test('backing out of media setup stops the preview stream', async ({ page }) => {

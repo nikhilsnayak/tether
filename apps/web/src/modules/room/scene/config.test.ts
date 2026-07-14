@@ -10,7 +10,7 @@ import {
   renderingQualitySettings,
   resolveQualityTier,
   sampleAdaptiveQuality,
-  selectFraming,
+  selectCameraFraming,
   shouldAnimateCamera,
 } from './config';
 
@@ -30,8 +30,13 @@ describe('scene configuration', () => {
   it('selects framing from viewport orientation', () => {
     const landscape = { position: [0, 1, 5], target: [0, 1, 0], fieldOfView: 42 } as const;
     const portrait = { position: [0, 1, 6], target: [0, 1, 0], fieldOfView: 52 } as const;
-    assert.strictEqual(selectFraming(900, 600, landscape, portrait), landscape);
-    assert.strictEqual(selectFraming(390, 844, landscape, portrait), portrait);
+    const outside = { position: [8, 1, 0], target: [4, 1, 0], fieldOfView: 56 } as const;
+    const framings = { landscape, portrait, outside };
+
+    assert.strictEqual(selectCameraFraming(900, 600, false, framings), landscape);
+    assert.strictEqual(selectCameraFraming(390, 844, false, framings), portrait);
+    assert.strictEqual(selectCameraFraming(900, 600, true, framings), outside);
+    assert.strictEqual(selectCameraFraming(390, 844, true, framings), outside);
   });
 
   it('disables camera travel for reduced motion', () => {

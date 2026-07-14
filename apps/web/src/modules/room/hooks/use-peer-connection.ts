@@ -15,6 +15,8 @@ export function usePeerConnection({
 
   return {
     leave: peerSession.value.leave,
+    sendAvatarPose: peerSession.value.sendAvatarPose,
+    sendMediaState: peerSession.value.sendMediaState,
     sendMessage: peerSession.value.sendMessage,
     respondToJoin: peerSession.value.respondToJoin,
   };

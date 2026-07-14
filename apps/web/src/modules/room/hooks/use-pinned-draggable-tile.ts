@@ -3,13 +3,32 @@ import { useEffectEvent, useLayoutEffect, useRef, type RefObject } from 'react';
 
 export type TileCorner = 'tl' | 'tr' | 'bl' | 'br';
 
+export const pinnedTileOffset = (
+  boundary: { readonly width: number; readonly height: number },
+  tile: { readonly width: number; readonly height: number },
+  margin: number,
+  corner: TileCorner,
+) => ({
+  x: corner === 'tl' || corner === 'bl' ? margin : boundary.width - tile.width - margin,
+  y: corner === 'tl' || corner === 'tr' ? margin : boundary.height - tile.height - margin,
+});
+
+export const nearestTileCorner = (
+  stage: { readonly width: number; readonly height: number },
+  tileCenter: { readonly x: number; readonly y: number },
+): TileCorner =>
+  `${tileCenter.y < stage.height / 2 ? 't' : 'b'}${
+    tileCenter.x < stage.width / 2 ? 'l' : 'r'
+  }` as TileCorner;
+
 export function usePinnedDraggableTile(
   tileRef: RefObject<HTMLDivElement | null>,
   x: MotionValue<number>,
   y: MotionValue<number>,
   margin: number,
+  initialCorner: TileCorner,
 ) {
-  const cornerRef = useRef<TileCorner>('br');
+  const cornerRef = useRef<TileCorner>(initialCorner);
 
   const cornerOffset = (corner: TileCorner) => {
     const tile = tileRef.current;
@@ -18,12 +37,12 @@ export function usePinnedDraggableTile(
       return { x: 0, y: 0 };
     }
 
-    const maxX = boundary.clientWidth - tile.offsetWidth - margin;
-    const maxY = boundary.clientHeight - tile.offsetHeight - margin;
-    return {
-      x: corner === 'tl' || corner === 'bl' ? margin : maxX,
-      y: corner === 'tl' || corner === 'tr' ? margin : maxY,
-    };
+    return pinnedTileOffset(
+      { width: boundary.clientWidth, height: boundary.clientHeight },
+      { width: tile.offsetWidth, height: tile.offsetHeight },
+      margin,
+      corner,
+    );
   };
 
   const pinToCurrentCorner = useEffectEvent(() => {

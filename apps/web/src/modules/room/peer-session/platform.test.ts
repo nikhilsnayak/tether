@@ -2,6 +2,7 @@ import { assert, describe, it } from '@effect/vitest';
 import {
   PeerSessionPlatform,
   PlatformError,
+  ROOM_EVENTS_CHANNEL_LABEL,
   type PlatformEvent,
 } from '@tether/client-runtime/modules/peer-session';
 import { Crypto, Effect, Exit, Scope } from 'effect';
@@ -19,8 +20,12 @@ class FakeMediaStream {
 class FakeDataChannel {
   readonly listeners = new Map<string, Set<(event: never) => void>>();
   readonly send = vi.fn();
+  readonly close = vi.fn(() => {
+    this.readyState = 'closed';
+  });
   readonly label: string;
   readyState = 'connecting';
+  bufferedAmount = 0;
 
   constructor(label: string) {
     this.label = label;
@@ -215,8 +220,14 @@ describe('web peer-session platform', () => {
           const stream = { value: mediaStream };
 
           yield* platform.addLocalTracks(peerConnection, stream);
-          const dataChannel = yield* platform.createDataChannel(peerConnection, 'chat');
-          assert.strictEqual(platform.dataChannelLabel(dataChannel), 'chat');
+          const dataChannel = yield* platform.createDataChannel(
+            peerConnection,
+            ROOM_EVENTS_CHANNEL_LABEL,
+          );
+          const nativeChannel = dataChannel.value as FakeDataChannel;
+          nativeChannel.bufferedAmount = 65_536;
+          assert.strictEqual(platform.dataChannelLabel(dataChannel), ROOM_EVENTS_CHANNEL_LABEL);
+          assert.strictEqual(platform.dataChannelBufferedAmount?.(dataChannel), 65_536);
           assert.deepStrictEqual(yield* platform.createOffer(peerConnection), {
             type: 'offer',
             sdp: 'offer-sdp',
@@ -237,6 +248,9 @@ describe('web peer-session platform', () => {
             usernameFragment: 'ufrag',
           });
           yield* platform.sendDataChannelMessage(dataChannel, 'hello');
+          assert.isDefined(platform.closeDataChannel);
+          if (platform.closeDataChannel === undefined) return;
+          yield* platform.closeDataChannel(dataChannel);
 
           assert.deepStrictEqual(nativePeer.configuration, {
             iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }],
@@ -251,6 +265,7 @@ describe('web peer-session platform', () => {
           assert.deepStrictEqual((dataChannel.value as FakeDataChannel).send.mock.calls[0], [
             'hello',
           ]);
+          assert.isTrue(nativeChannel.close.mock.calls.length === 1);
         }),
       ),
     ),
@@ -383,6 +398,7 @@ describe('web peer-session platform', () => {
             },
           ),
           platform.sendDataChannelMessage({ value: {} }, 'hello'),
+          platform.closeDataChannel!({ value: {} }),
         ];
         const expectedOperations = [
           'add-local-tracks',
@@ -393,6 +409,7 @@ describe('web peer-session platform', () => {
           'set-remote-description',
           'add-ice-candidate',
           'send-message',
+          'close-data-channel',
         ];
 
         for (const [index, failure] of failures.entries()) {

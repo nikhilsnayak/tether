@@ -9,7 +9,7 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: CI,
   retries: CI ? 2 : 0,
-  // Each active call owns a WebGPU renderer. Keep local concurrency bounded so
+  // Each active call owns a Three.js renderer. Keep local concurrency bounded so
   // Vulkan initialization and fake WebRTC devices do not starve one another.
   workers: CI ? 1 : 2,
   timeout: 60_000,

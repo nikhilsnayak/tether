@@ -7,8 +7,7 @@ import type {
   PeerSessionSignal,
   PlatformEvent,
 } from './Model';
-
-export type PeerRole = 'offerer' | 'answerer';
+import type { AvatarPose, MediaState } from './RoomEvents';
 
 export type DataChannelState =
   | { readonly _tag: 'AwaitingRemoteDataChannel' }
@@ -21,6 +20,29 @@ export type PeerConnectionGeneration = {
   readonly peerConnection: PeerConnectionHandle;
 };
 
+export type PeerNegotiationState =
+  | {
+      readonly role: 'offerer';
+      readonly phase: 'awaiting-answer';
+      readonly epoch: number;
+      readonly offerSdp: string;
+    }
+  | {
+      readonly role: 'offerer';
+      readonly phase: 'answered';
+      readonly epoch: number;
+      readonly offerSdp: string;
+      readonly answerSdp: string;
+    }
+  | { readonly role: 'answerer'; readonly phase: 'awaiting-offer' }
+  | {
+      readonly role: 'answerer';
+      readonly phase: 'answered';
+      readonly epoch: number;
+      readonly offerSdp: string;
+      readonly answerSdp: string;
+    };
+
 export type PeerSessionActorState =
   | { readonly _tag: 'AwaitingRoomSession' }
   | { readonly _tag: 'WaitingForPeer'; readonly generation: PeerConnectionGeneration }
@@ -28,27 +50,32 @@ export type PeerSessionActorState =
       readonly _tag: 'PeerKnown';
       readonly generation: PeerConnectionGeneration;
       readonly peerId: PeerId;
-      readonly role: PeerRole;
+      readonly negotiation: PeerNegotiationState;
       readonly peerConnectionState: 'connecting' | 'connected' | 'interrupted';
       readonly dataChannelState: DataChannelState;
-      readonly negotiationEpoch: number | null;
       readonly reconnectAttempts: number;
-      /** Handshake descriptions retained until the peer connection succeeds. */
-      readonly offerSdp: string | null;
-      readonly answerSdp: string | null;
     }
   | { readonly _tag: 'TransportLost'; readonly peerId: PeerId };
 
-export type PeerSessionUiCommand = {
-  readonly _tag: 'SendMessage';
-  readonly message: string;
-};
+export type PeerSessionUiCommand =
+  | {
+      readonly _tag: 'SendMessage';
+      readonly message: string;
+    }
+  | { readonly _tag: 'SendAvatarPose'; readonly pose: AvatarPose }
+  | { readonly _tag: 'SendMediaState'; readonly mediaState: MediaState };
 
 /** Identifies the connection generation guarded by a negotiation deadline. */
-export type PeerSessionTimerInput = {
-  readonly _tag: 'NegotiationDeadlineElapsed';
-  readonly peerConnection: PeerConnectionHandle;
-};
+export type PeerSessionTimerInput =
+  | {
+      readonly _tag: 'NegotiationDeadlineElapsed';
+      readonly peerConnection: PeerConnectionHandle;
+    }
+  | {
+      readonly _tag: 'RetryPendingAvatarPose';
+      readonly peerConnection: PeerConnectionHandle;
+      readonly dataChannel: DataChannelHandle;
+    };
 
 export type PeerSessionLocalInput = PlatformEvent | PeerSessionUiCommand | PeerSessionTimerInput;
 

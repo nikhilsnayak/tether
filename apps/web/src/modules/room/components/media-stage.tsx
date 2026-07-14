@@ -5,24 +5,38 @@ import { type ReactNode, type RefObject, useRef } from 'react';
 
 import { useViewportAspectRatio } from '@/hooks/use-viewport-aspect-ratio';
 
-import { usePinnedDraggableTile, type TileCorner } from '../hooks/use-pinned-draggable-tile';
+import {
+  nearestTileCorner,
+  usePinnedDraggableTile,
+  type TileCorner,
+} from '../hooks/use-pinned-draggable-tile';
 import { MediaStreamVideo } from './media-stream-video';
 
 const TILE_MARGIN = 16;
 const TILE_SNAP = { type: 'spring', stiffness: 500, damping: 40 } as const;
 
-export function DraggableSelfPreview({
+export function DraggableMediaTile({
   boundaryRef,
   children,
+  initialCorner,
+  tileId,
 }: {
   readonly boundaryRef: RefObject<HTMLDivElement | null>;
   readonly children: ReactNode;
+  readonly initialCorner: TileCorner;
+  readonly tileId: string;
 }) {
   const aspectRatio = useViewportAspectRatio();
   const tileRef = useRef<HTMLDivElement>(null);
   const x = useMotionValue(0);
   const y = useMotionValue(0);
-  const { cornerRef, cornerOffset } = usePinnedDraggableTile(tileRef, x, y, TILE_MARGIN);
+  const { cornerRef, cornerOffset } = usePinnedDraggableTile(
+    tileRef,
+    x,
+    y,
+    TILE_MARGIN,
+    initialCorner,
+  );
   const snapToNearestCorner = () => {
     const tile = tileRef.current;
     const boundary = tile?.offsetParent as HTMLElement | null;
@@ -31,8 +45,7 @@ export function DraggableSelfPreview({
     const rect = tile.getBoundingClientRect();
     const centerX = rect.left - stage.left + rect.width / 2;
     const centerY = rect.top - stage.top + rect.height / 2;
-    const corner =
-      `${centerY < stage.height / 2 ? 't' : 'b'}${centerX < stage.width / 2 ? 'l' : 'r'}` as TileCorner;
+    const corner = nearestTileCorner(stage, { x: centerX, y: centerY });
     cornerRef.current = corner;
     const offset = cornerOffset(corner);
     void animate(x, offset.x, TILE_SNAP);
@@ -41,6 +54,7 @@ export function DraggableSelfPreview({
   return (
     <motion.div
       ref={tileRef}
+      data-room-media-tile={tileId}
       drag
       dragConstraints={boundaryRef}
       dragElastic={0.08}
@@ -92,6 +106,40 @@ export function SelfVideo({
       )}
       <span className='bg-background/50 absolute bottom-1 left-2 rounded px-1.5 py-0.5 font-mono text-[10px] tracking-[0.15em] uppercase'>
         You
+      </span>
+    </>
+  );
+}
+
+export function RemoteVideo({
+  stream,
+  cameraAvailable,
+}: {
+  readonly stream: MediaStream | null;
+  readonly cameraAvailable: boolean;
+}) {
+  return (
+    <>
+      <MediaStreamVideo
+        stream={stream}
+        aria-label='Other person video'
+        autoPlay
+        muted
+        playsInline
+        className={cn('size-full object-cover', !cameraAvailable && 'invisible')}
+      />
+      {!cameraAvailable && (
+        <div
+          aria-label='Other person camera unavailable'
+          className='bg-card absolute inset-0 flex items-center justify-center'
+        >
+          <Avatar>
+            <AvatarFallback>··</AvatarFallback>
+          </Avatar>
+        </div>
+      )}
+      <span className='bg-background/50 absolute bottom-1 left-2 rounded px-1.5 py-0.5 font-mono text-[10px] tracking-[0.15em] uppercase'>
+        Other person
       </span>
     </>
   );

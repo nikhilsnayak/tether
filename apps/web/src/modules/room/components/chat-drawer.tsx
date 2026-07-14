@@ -31,7 +31,7 @@ export function ChatDrawer({
   const messageListEndRef = useRef<HTMLDivElement>(null);
   const aspectRatio = useViewportAspectRatio();
   const messageCount = view.messages.length;
-  const canChat = view.status === 'connected' && view.chatReady;
+  const canChat = view.status === 'connected' && view.roomEventsReady;
   useChatAutoScroll(messageListEndRef, open, messageCount);
   const handleSubmit = (event: React.SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();

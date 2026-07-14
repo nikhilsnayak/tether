@@ -19,7 +19,7 @@ test('home page fits the viewport', async ({ page }) => {
 test('room waiting screen fits the viewport', async ({ page }) => {
   await createRoom(page);
   await expect(page.getByText('Share this room to invite someone.')).toBeVisible();
-  const scene = page.getByLabel('Dusk Suite interactive preview');
+  const scene = page.getByLabel('Dusk Suite room scene');
   await expect(scene.locator('canvas')).toBeVisible();
   const quality = page.getByLabel('Room rendering quality');
   await quality.selectOption('low');
@@ -29,12 +29,19 @@ test('room waiting screen fits the viewport', async ({ page }) => {
   const controls = page.getByRole('toolbar', { name: 'Call controls' });
   await expect(controls.getByRole('button')).toHaveCount(5);
   await expect(controls.getByRole('button', { name: 'Leave call' })).toBeVisible();
+  const headerBox = await page.locator('[data-room-call-header]').boundingBox();
+  const qualityBox = await page.locator('[data-room-quality-control]').boundingBox();
+  expect(headerBox).not.toBeNull();
+  expect(qualityBox).not.toBeNull();
+  if (headerBox !== null && qualityBox !== null) {
+    expect(qualityBox.y).toBeGreaterThanOrEqual(headerBox.y + headerBox.height);
+  }
   expect(await fitsViewport(page)).toBe(true);
 
   await page.reload();
   await completeMediaSetup(page, 'Create room');
   await expect(page.getByLabel('Room rendering quality')).toHaveValue('low');
-  await expect(page.getByLabel('Dusk Suite interactive preview')).toHaveAttribute(
+  await expect(page.getByLabel('Dusk Suite room scene')).toHaveAttribute(
     'data-room-quality-tier',
     'low',
   );
@@ -43,7 +50,7 @@ test('room waiting screen fits the viewport', async ({ page }) => {
 test('reduced motion keeps the full 3D room without camera travel', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await createRoom(page);
-  const scene = page.getByLabel('Dusk Suite interactive preview');
+  const scene = page.getByLabel('Dusk Suite room scene');
   await expect(scene).toHaveAttribute('data-room-reduced-motion', 'true');
   await expect(scene.locator('canvas')).toBeVisible();
 });
@@ -55,11 +62,13 @@ test('the WebGPU call room fits phone viewports without covering controls', asyn
   const { host, cleanup } = await connectPeers(browser, baseURL);
   try {
     await host.setViewportSize({ width: 390, height: 844 });
-    const scene = host.getByLabel('Dusk Suite interactive preview');
-    await expect(scene).toHaveAttribute('data-room-remote-video', 'present');
+    const scene = host.getByLabel('Dusk Suite room scene');
+    await expect(scene).toHaveAttribute('data-room-remote-avatar', 'present');
+    await expect(host.getByLabel('Other person video')).toBeVisible();
     await expect(scene.locator('canvas')).toBeVisible();
     await expect(host.getByRole('button', { name: 'Leave call' })).toBeVisible();
     await expect(host.getByLabel('Local video preview')).toBeVisible();
+    await expect(host.getByLabel('Room rendering quality')).toBeHidden();
     expect(await fitsViewport(host)).toBe(true);
 
     const controls = await host.getByRole('button', { name: 'Leave call' }).boundingBox();

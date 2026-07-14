@@ -2,8 +2,6 @@ import { Data, Predicate } from 'effect';
 
 import type { IceServer } from './Model';
 
-export const CHAT_CHANNEL_LABEL = 'chat';
-
 export const GOOGLE_STUN_SERVERS: ReadonlyArray<IceServer> = [
   { urls: ['stun:stun.l.google.com:19302'] },
 ];
@@ -18,7 +16,8 @@ export type PlatformOperation =
   | 'set-local-description'
   | 'set-remote-description'
   | 'add-ice-candidate'
-  | 'send-message';
+  | 'send-message'
+  | 'close-data-channel';
 
 /** Identifies the failed WebRTC step without inspecting its untyped cause. */
 export class PlatformError extends Data.TaggedError('PlatformError')<{

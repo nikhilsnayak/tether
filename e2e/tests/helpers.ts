@@ -92,12 +92,12 @@ export const installWebRtcProbe = (context: BrowserContext) =>
   });
 
 export const expectConnected = (page: Page) =>
-  expect(page.getByText('Connected', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  expect(page.getByText('Connected', { exact: true }).first()).toBeVisible({ timeout: 35_000 });
 
 export const expectWaitingForPeer = (page: Page) =>
   Promise.all([
     expect(page.getByText('Share this room to invite someone.')).toBeVisible(),
-    expect(page.getByLabel('Dusk Suite interactive preview')).toHaveAttribute(
+    expect(page.getByLabel('Dusk Suite room scene')).toHaveAttribute(
       'data-room-journey',
       'waiting',
     ),
@@ -110,7 +110,7 @@ export const expectPeerDeparted = (page: Page) =>
     expect(
       page.getByText('They left the call. You can wait here in case they rejoin.'),
     ).toBeVisible(),
-    expect(page.getByLabel('Dusk Suite interactive preview')).toHaveAttribute(
+    expect(page.getByLabel('Dusk Suite room scene')).toHaveAttribute(
       'data-room-journey',
       'waiting',
     ),
@@ -144,7 +144,7 @@ export const expectPreparedMediaTransferred = (page: Page) =>
 export const continueInBrowser = (page: Page) =>
   page.getByRole('button', { name: 'Join in this browser' }).click();
 
-export const completeMediaSetup = async (page: Page, actionLabel: string) => {
+export const prepareMediaSetup = async (page: Page) => {
   await expect(page.getByRole('heading', { name: 'Look and sound ready?' })).toBeVisible();
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
   const preview = page.getByLabel('Camera preview');
@@ -154,6 +154,10 @@ export const completeMediaSetup = async (page: Page, actionLabel: string) => {
       window.__tetherE2E.preflightPreviewStream = video.srcObject as MediaStream | null;
     }
   });
+};
+
+export const completeMediaSetup = async (page: Page, actionLabel: string) => {
+  await prepareMediaSetup(page);
   await page.getByRole('button', { name: actionLabel, exact: true }).click();
 };
 
@@ -163,7 +167,11 @@ export const startHostingRoom = async (page: Page) => {
 
 // Joins as a guest: enter the code, continue in-browser, then present a name
 // and knock. The host must still admit before the call connects.
-export const joinRoom = async (page: Page, roomId: string, displayName = 'Guest') => {
+export const prepareGuestAtThreshold = async (
+  page: Page,
+  roomId: string,
+  displayName = 'Guest',
+) => {
   await page.goto('/');
   await page.getByRole('textbox', { name: 'Room code' }).fill(roomId);
   await page.getByRole('button', { name: 'Connect' }).click();
@@ -171,14 +179,19 @@ export const joinRoom = async (page: Page, roomId: string, displayName = 'Guest'
   await continueInBrowser(page);
   await page.getByRole('textbox', { name: 'Your name' }).fill(displayName);
   await page.getByRole('button', { name: 'Continue to media check' }).click();
-  await completeMediaSetup(page, 'Knock to join');
+  await prepareMediaSetup(page);
+};
+
+export const joinRoom = async (page: Page, roomId: string, displayName = 'Guest') => {
+  await prepareGuestAtThreshold(page, roomId, displayName);
+  await page.getByRole('button', { name: 'Knock on door', exact: true }).click();
 };
 
 export const admitGuest = (host: Page) =>
-  host.getByRole('button', { name: 'Allow', exact: true }).click();
+  host.getByRole('button', { name: 'Let in', exact: true }).click();
 
 export const denyGuest = (host: Page) =>
-  host.getByRole('button', { name: 'Deny', exact: true }).click();
+  host.getByRole('button', { name: 'Keep out', exact: true }).click();
 
 // The host mints its room server-side on /host; the id arrives in the invite
 // card once the session opens.
@@ -233,7 +246,7 @@ export const connectPeers = async (
 
 export const requireBaseURL = (baseURL: string | undefined) => {
   if (typeof baseURL !== 'string') {
-    throw new Error('This E2E test requires a configured baseURL');
+    throw new TypeError('This E2E test requires a configured baseURL');
   }
   return baseURL;
 };

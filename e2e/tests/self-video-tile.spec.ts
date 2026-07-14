@@ -45,7 +45,7 @@ test('self-video tile snaps to whichever corner it is dragged to', async ({ page
   await expect(page.getByLabel('Local video preview')).toBeVisible();
 
   await expect.poll(async () => (await tileInset(page)).right).toBeLessThanOrEqual(NEAR);
-  await expect.poll(async () => (await tileInset(page)).bottom).toBeLessThanOrEqual(NEAR);
+  await expect.poll(async () => (await tileInset(page)).top).toBeLessThanOrEqual(NEAR);
 
   const stage = await stageBox(page);
 
