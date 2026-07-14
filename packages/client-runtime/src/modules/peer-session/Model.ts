@@ -1,5 +1,7 @@
 import type { DisplayName, PeerId, RoomId, RoomTemplateId } from '@tether/contracts/modules/room';
 
+import type { RevisionedMediaState, SequencedAvatarPose } from './RoomEvents';
+
 export interface IceServer {
   readonly urls: ReadonlyArray<string>;
 }
@@ -116,8 +118,16 @@ export type PeerSessionEvent =
       readonly _tag: 'Connected';
       readonly peerId: PeerId;
     }
-  | { readonly _tag: 'ChatReady' }
-  | { readonly _tag: 'ChatUnavailable' }
+  | { readonly _tag: 'RoomEventsReady' }
+  | { readonly _tag: 'RoomEventsUnavailable' }
+  | {
+      readonly _tag: 'RemoteAvatarPoseChanged';
+      readonly pose: SequencedAvatarPose;
+    }
+  | {
+      readonly _tag: 'RemoteMediaStateChanged';
+      readonly mediaState: RevisionedMediaState;
+    }
   | {
       readonly _tag: 'ChatMessageAdded';
       readonly message: ChatMessage;
@@ -213,7 +223,9 @@ export interface PeerSessionView {
     | 'waiting-for-peer'
     | 'peer-departed';
   readonly messages: ReadonlyArray<ChatMessage>;
-  readonly chatReady: boolean;
+  readonly roomEventsReady: boolean;
+  readonly remoteAvatarPose: SequencedAvatarPose | null;
+  readonly remoteMediaState: RevisionedMediaState | null;
   /** Safety code both peers compare aloud. */
   readonly sas: string | null;
   /** The server-minted room, known once the session opens. */

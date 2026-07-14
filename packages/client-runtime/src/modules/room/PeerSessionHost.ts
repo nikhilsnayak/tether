@@ -24,6 +24,7 @@ import type {
 import type { MediaStreamHandle, RoomSession } from '../peer-session/Model';
 import { makePeerSessionActor } from '../peer-session/PeerSession';
 import { GOOGLE_STUN_SERVERS, isPlatformError, type PlatformError } from '../peer-session/Platform';
+import type { AvatarPose, MediaState } from '../peer-session/RoomEvents';
 import {
   PeerSessionEventSink,
   PeerSessionPlatform,
@@ -34,6 +35,10 @@ import { translateRoomEventData } from './Translation';
 export interface PeerSession {
   /** Enqueues a chat command; `true` means queued, not remotely delivered. */
   readonly sendMessage: (message: string) => boolean;
+  /** Enqueues the latest locally owned avatar pose; `true` means queued. */
+  readonly sendAvatarPose: (pose: AvatarPose) => boolean;
+  /** Enqueues the latest local camera/microphone state; `true` means queued. */
+  readonly sendMediaState: (mediaState: MediaState) => boolean;
   /** Host admits or rejects a knocking joiner. */
   readonly respondToJoin: (peerId: PeerId, decision: 'allow' | 'deny') => Promise<void>;
   /** Explicitly releases room membership before the client tears down its transport. */
@@ -43,6 +48,8 @@ export interface PeerSession {
 /** A platform-owned local stream whose finalizer is adopted by the session media scope. */
 export interface PreparedMedia {
   readonly claim: Effect.Effect<MediaStreamHandle, PlatformError, Scope.Scope>;
+  /** Initial camera/microphone snapshot retained before the channel opens. */
+  readonly initialState?: MediaState;
 }
 
 /**
@@ -132,6 +139,7 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
     localStream,
     GOOGLE_STUN_SERVERS,
     dispatchLocalInput,
+    preparedMedia?.initialState ?? null,
   ).pipe(Effect.provideService(PeerSessionSignaling, signaling), Scope.provide(actorScope));
 
   const actorLoop = Stream.merge(roomInputStream, localInputStream, {
@@ -233,6 +241,16 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
       Queue.offerUnsafe(localInputQueue, {
         _tag: 'SendMessage',
         message,
+      }),
+    sendAvatarPose: (pose) =>
+      Queue.offerUnsafe(localInputQueue, {
+        _tag: 'SendAvatarPose',
+        pose,
+      }),
+    sendMediaState: (mediaState) =>
+      Queue.offerUnsafe(localInputQueue, {
+        _tag: 'SendMediaState',
+        mediaState,
       }),
     respondToJoin: (peerId, decision) =>
       Effect.runPromise(

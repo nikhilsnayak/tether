@@ -1,5 +1,5 @@
 import { useAtomValue } from '@effect/atom-react';
-import type { RoomSession } from '@tether/client-runtime/modules/peer-session';
+import type { MediaState, RoomSession } from '@tether/client-runtime/modules/peer-session';
 import {
   isPeerSessionErrorStatus,
   peerLocalStreamAtom,
@@ -41,12 +41,18 @@ const INDICATOR_TONE_CLASS = {
 const statusIndicatorClassName = (presentation: PeerSessionStatusPresentation) =>
   cn(INDICATOR_TONE_CLASS[presentation.tone], presentation.pulse && 'animate-pulse');
 
+const mediaStateAttribute = (enabled: boolean | null) => {
+  if (enabled === null) return 'unknown';
+  return enabled ? 'on' : 'off';
+};
+
 export function CallStage({
   session,
   template,
   respondToJoin,
   onLeave,
   onSendMessage,
+  onMediaStateChange,
   initialMediaSettings,
 }: {
   readonly session: RoomSession;
@@ -54,6 +60,7 @@ export function CallStage({
   readonly respondToJoin: (peerId: PeerId, decision: 'allow' | 'deny') => Promise<void>;
   readonly onLeave: () => void;
   readonly onSendMessage: (message: string) => boolean;
+  readonly onMediaStateChange: (mediaState: MediaState) => boolean;
   readonly initialMediaSettings: InitialMediaSettings;
 }) {
   const view = useAtomValue(peerSessionViewAtom);
@@ -79,17 +86,21 @@ export function CallStage({
     journey === 'together' && !remoteVideoAvailable
       ? 'Their camera is unavailable.'
       : presentation.hint;
+  const remoteCameraState = mediaStateAttribute(view.remoteMediaState?.cameraOn ?? null);
+  const remoteMicrophoneState = mediaStateAttribute(view.remoteMediaState?.microphoneOn ?? null);
 
   const handleLeave = () => onLeave();
   const handleMicToggle = () => {
     const enabled = !micOn;
     for (const track of localStream?.getAudioTracks() ?? []) track.enabled = enabled;
     setMicOn(enabled);
+    onMediaStateChange({ cameraOn, microphoneOn: enabled });
   };
   const handleCameraToggle = () => {
     const enabled = !cameraOn;
     for (const track of localStream?.getVideoTracks() ?? []) track.enabled = enabled;
     setCameraOn(enabled);
+    onMediaStateChange({ cameraOn: enabled, microphoneOn: micOn });
   };
   const handleAudioOutputChange = (value: string) => {
     if (value === SPEAKER_OFF) {
@@ -112,7 +123,12 @@ export function CallStage({
   };
 
   return (
-    <div className='relative z-40 h-svh overflow-hidden'>
+    <div
+      className='relative z-40 h-svh overflow-hidden'
+      data-room-avatar-sync={view.roomEventsReady ? 'ready' : 'unavailable'}
+      data-room-remote-camera={remoteCameraState}
+      data-room-remote-microphone={remoteMicrophoneState}
+    >
       <RoomScenePreview
         template={template}
         admissionPending={pendingJoin !== null}

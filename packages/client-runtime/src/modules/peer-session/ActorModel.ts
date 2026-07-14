@@ -7,6 +7,7 @@ import type {
   PeerSessionSignal,
   PlatformEvent,
 } from './Model';
+import type { AvatarPose, MediaState } from './RoomEvents';
 
 export type PeerRole = 'offerer' | 'answerer';
 
@@ -39,16 +40,25 @@ export type PeerSessionActorState =
     }
   | { readonly _tag: 'TransportLost'; readonly peerId: PeerId };
 
-export type PeerSessionUiCommand = {
-  readonly _tag: 'SendMessage';
-  readonly message: string;
-};
+export type PeerSessionUiCommand =
+  | {
+      readonly _tag: 'SendMessage';
+      readonly message: string;
+    }
+  | { readonly _tag: 'SendAvatarPose'; readonly pose: AvatarPose }
+  | { readonly _tag: 'SendMediaState'; readonly mediaState: MediaState };
 
 /** Identifies the connection generation guarded by a negotiation deadline. */
-export type PeerSessionTimerInput = {
-  readonly _tag: 'NegotiationDeadlineElapsed';
-  readonly peerConnection: PeerConnectionHandle;
-};
+export type PeerSessionTimerInput =
+  | {
+      readonly _tag: 'NegotiationDeadlineElapsed';
+      readonly peerConnection: PeerConnectionHandle;
+    }
+  | {
+      readonly _tag: 'RetryPendingAvatarPose';
+      readonly peerConnection: PeerConnectionHandle;
+      readonly dataChannel: DataChannelHandle;
+    };
 
 export type PeerSessionLocalInput = PlatformEvent | PeerSessionUiCommand | PeerSessionTimerInput;
 

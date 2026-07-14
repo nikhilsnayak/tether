@@ -1,28 +1,8 @@
 import { assert, describe, it } from '@effect/vitest';
-import { Crypto, Effect, Layer } from 'effect';
+import { Effect } from 'effect';
 
+import { webCrypto } from '../../test/WebCrypto';
 import { deriveSasCode, FingerprintMissing, formatSas } from './Sas';
-
-// No DOM lib in this tsconfig, so the Web Crypto global is typed by hand.
-const webCryptoApi = (
-  globalThis as unknown as {
-    readonly crypto: {
-      readonly getRandomValues: <T extends Uint8Array>(array: T) => T;
-      readonly subtle: {
-        readonly digest: (algorithm: string, data: Uint8Array) => Promise<ArrayBuffer>;
-      };
-    };
-  }
-).crypto;
-
-const webCrypto = Layer.succeed(
-  Crypto.Crypto,
-  Crypto.make({
-    randomBytes: (size) => webCryptoApi.getRandomValues(new Uint8Array(size)),
-    digest: (algorithm, data) =>
-      Effect.promise(async () => new Uint8Array(await webCryptoApi.subtle.digest(algorithm, data))),
-  }),
-);
 
 const sdpWith = (fingerprint: string) =>
   [

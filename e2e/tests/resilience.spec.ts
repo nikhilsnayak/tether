@@ -147,6 +147,16 @@ test('a closed data channel disables chat without interrupting the call', async 
     });
 
     await Promise.all([expect(hostInput).toBeDisabled(), expect(guestInput).toBeDisabled()]);
+    await Promise.all([
+      expect(host.locator('[data-room-avatar-sync]')).toHaveAttribute(
+        'data-room-avatar-sync',
+        'unavailable',
+      ),
+      expect(guest.locator('[data-room-avatar-sync]')).toHaveAttribute(
+        'data-room-avatar-sync',
+        'unavailable',
+      ),
+    ]);
     await Promise.all([expectConnected(host), expectConnected(guest)]);
     await Promise.all([
       expect(host.getByLabel('Dusk Suite interactive preview')).toHaveAttribute(

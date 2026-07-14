@@ -26,15 +26,27 @@ it.effect('projects session events into the atom registry', () =>
       const sink = yield* PeerSessionEventSink;
       yield* sink.emit({ _tag: 'LocalStreamReady', stream: localStream });
       yield* sink.emit({ _tag: 'RemoteStreamReady', stream: remoteStream });
-      yield* sink.emit({ _tag: 'ChatReady' });
+      yield* sink.emit({ _tag: 'RoomEventsReady' });
+      yield* sink.emit({
+        _tag: 'RemoteAvatarPoseChanged',
+        pose: { sequence: 0, x: 1, z: 2, yaw: 0, action: 'idle' },
+      });
+      yield* sink.emit({
+        _tag: 'RemoteMediaStateChanged',
+        mediaState: { revision: 0, cameraOn: false, microphoneOn: true },
+      });
 
       assert.strictEqual(registry.get(peerLocalStreamAtom), localStream);
       assert.strictEqual(registry.get(peerRemoteStreamAtom), remoteStream);
-      assert.isTrue(registry.get(peerSessionViewAtom).chatReady);
+      assert.isTrue(registry.get(peerSessionViewAtom).roomEventsReady);
+      assert.strictEqual(registry.get(peerSessionViewAtom).remoteAvatarPose?.x, 1);
+      assert.isFalse(registry.get(peerSessionViewAtom).remoteMediaState?.cameraOn);
 
       yield* sink.emit({ _tag: 'TransportLost', peerId });
       assert.isNull(registry.get(peerRemoteStreamAtom));
       assert.strictEqual(registry.get(peerSessionViewAtom).status, 'transport-lost');
+      assert.isNull(registry.get(peerSessionViewAtom).remoteAvatarPose);
+      assert.isNull(registry.get(peerSessionViewAtom).remoteMediaState);
 
       yield* sink.emit({ _tag: 'RemoteStreamReady', stream: remoteStream });
       yield* sink.emit({ _tag: 'PeerDeparted', peerId });

@@ -38,6 +38,12 @@ export class PeerSessionPlatform extends Context.Service<
       dispatch: PlatformEventDispatch,
     ) => Effect.Effect<void, PlatformError, Scope.Scope>;
     readonly dataChannelLabel: (dataChannel: DataChannelHandle) => string;
+    /** Optional browser backpressure signal; absent platforms send at the caller's capped rate. */
+    readonly dataChannelBufferedAmount?: (dataChannel: DataChannelHandle) => number;
+    /** Optional immediate cleanup for unexpected or duplicate remote channels. */
+    readonly closeDataChannel?: (
+      dataChannel: DataChannelHandle,
+    ) => Effect.Effect<void, PlatformError>;
     readonly createOffer: (
       peerConnection: PeerConnectionHandle,
     ) => Effect.Effect<SessionDescription, PlatformError>;

@@ -135,7 +135,7 @@ export function CallScreen({
           setReadCount(messageCount);
         }}
         messages={view.messages}
-        canChat={view.status === 'connected' && view.chatReady}
+        canChat={view.status === 'connected' && view.roomEventsReady}
         sendMessage={sendMessage}
       />
       <JoinRequestModal

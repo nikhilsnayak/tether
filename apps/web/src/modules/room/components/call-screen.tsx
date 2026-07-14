@@ -17,7 +17,7 @@ export function CallScreen({
   readonly template: RoomTemplate;
   readonly preparedMedia: PreparedMediaSelection;
 }) {
-  const { leave, sendMessage, respondToJoin } = usePeerConnection({
+  const { leave, sendMediaState, sendMessage, respondToJoin } = usePeerConnection({
     session,
     preparedMedia: preparedMedia.media,
   });
@@ -35,6 +35,7 @@ export function CallScreen({
       respondToJoin={respondToJoin}
       onLeave={handleLeave}
       onSendMessage={sendMessage}
+      onMediaStateChange={sendMediaState}
     />
   );
 }

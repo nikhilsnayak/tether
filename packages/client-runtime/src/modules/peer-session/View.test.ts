@@ -12,7 +12,9 @@ import { initialPeerSessionView, reducePeerSessionView } from './View';
 const connectedView: PeerSessionView = {
   status: 'connected',
   messages: [],
-  chatReady: true,
+  roomEventsReady: true,
+  remoteAvatarPose: null,
+  remoteMediaState: null,
   sas: '11111 22222 33333 44444 55555',
   pendingJoinRequests: [],
   roomId: null,
@@ -60,15 +62,53 @@ describe('reducePeerSessionView', () => {
     assert.deepStrictEqual(interrupted, {
       ...connectedView,
       status: 'reconnecting',
-      chatReady: false,
+      roomEventsReady: false,
       sas: null,
     });
     assert.deepStrictEqual(lost, {
       ...connectedView,
       status: 'transport-lost',
-      chatReady: false,
+      roomEventsReady: false,
       sas: null,
     });
+  });
+
+  it('projects room-event families independently and freezes them during reconnect', () => {
+    const pose = { sequence: 4, x: 1, z: 2, yaw: 0.5, action: 'walk' as const };
+    const mediaState = { revision: 7, cameraOn: false, microphoneOn: true };
+    const withPose = reducePeerSessionView(connectedView, {
+      _tag: 'RemoteAvatarPoseChanged',
+      pose,
+    });
+    assert.strictEqual(withPose.remoteAvatarPose, pose);
+    assert.isNull(withPose.remoteMediaState);
+    assert.deepStrictEqual(withPose.messages, []);
+
+    const withMedia = reducePeerSessionView(withPose, {
+      _tag: 'RemoteMediaStateChanged',
+      mediaState,
+    });
+    assert.strictEqual(withMedia.remoteAvatarPose, pose);
+    assert.strictEqual(withMedia.remoteMediaState, mediaState);
+
+    const reconnecting = reducePeerSessionView(withMedia, {
+      _tag: 'PeerInterrupted',
+      peerId,
+    });
+    assert.isFalse(reconnecting.roomEventsReady);
+    assert.strictEqual(reconnecting.remoteAvatarPose, pose);
+    assert.strictEqual(reconnecting.remoteMediaState, mediaState);
+
+    const departed = reducePeerSessionView(reconnecting, {
+      _tag: 'PeerDeparted',
+      peerId,
+    });
+    assert.isNull(departed.remoteAvatarPose);
+    assert.isNull(departed.remoteMediaState);
+
+    const lost = reducePeerSessionView(withMedia, { _tag: 'TransportLost', peerId });
+    assert.isNull(lost.remoteAvatarPose);
+    assert.isNull(lost.remoteMediaState);
   });
 
   it('starts from the initial projection', () => {

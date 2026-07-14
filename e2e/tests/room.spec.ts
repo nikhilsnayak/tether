@@ -133,26 +133,67 @@ test('complete room flow', async ({ browser, page }, testInfo) => {
       ]);
       await Promise.all([expectLocalAndRemoteMedia(page), expectLocalAndRemoteMedia(guestPage)]);
       await Promise.all([
+        expect(page.locator('[data-room-avatar-sync]')).toHaveAttribute(
+          'data-room-avatar-sync',
+          'ready',
+        ),
+        expect(guestPage.locator('[data-room-avatar-sync]')).toHaveAttribute(
+          'data-room-avatar-sync',
+          'ready',
+        ),
+      ]);
+      await expect
+        .poll(() => guestPage.evaluate(() => window.__tetherE2E.dataChannels.at(-1)?.label ?? null))
+        .toBe('room-events-v1');
+      await Promise.all([
         page.getByRole('button', { name: 'We see the same code' }).click(),
         guestPage.getByRole('button', { name: 'We see the same code' }).click(),
       ]);
       await expect(page.getByRole('toolbar', { name: 'Call controls' })).toBeVisible();
     });
 
-    await test.step('local media controls toggle their tracks', async () => {
-      await expect.poll(() => localTrackEnabled(page, 'audio')).toBe(true);
-      await page.getByRole('button', { name: 'Mute microphone' }).click();
-      await expect(page.getByRole('button', { name: 'Unmute microphone' })).toBeVisible();
-      await expect.poll(() => localTrackEnabled(page, 'audio')).toBe(false);
-      await page.getByRole('button', { name: 'Unmute microphone' }).click();
-      await expect.poll(() => localTrackEnabled(page, 'audio')).toBe(true);
-
+    await test.step('local media controls synchronize explicit remote state', async () => {
+      await expect(page.locator('[data-room-remote-camera]')).toHaveAttribute(
+        'data-room-remote-camera',
+        'on',
+      );
+      await expect(page.locator('[data-room-remote-microphone]')).toHaveAttribute(
+        'data-room-remote-microphone',
+        'on',
+      );
       await expect.poll(() => localTrackEnabled(page, 'video')).toBe(true);
       await page.getByRole('button', { name: 'Turn camera off' }).click();
       await expect(page.getByRole('button', { name: 'Turn camera on' })).toBeVisible();
       await expect.poll(() => localTrackEnabled(page, 'video')).toBe(false);
+      await expect(guestPage.locator('[data-room-remote-camera]')).toHaveAttribute(
+        'data-room-remote-camera',
+        'off',
+      );
+      await expect(guestPage.locator('[data-room-remote-microphone]')).toHaveAttribute(
+        'data-room-remote-microphone',
+        'on',
+      );
       await page.getByRole('button', { name: 'Turn camera on' }).click();
       await expect.poll(() => localTrackEnabled(page, 'video')).toBe(true);
+      await expect(guestPage.locator('[data-room-remote-camera]')).toHaveAttribute(
+        'data-room-remote-camera',
+        'on',
+      );
+
+      await expect.poll(() => localTrackEnabled(page, 'audio')).toBe(true);
+      await page.getByRole('button', { name: 'Mute microphone' }).click();
+      await expect(page.getByRole('button', { name: 'Unmute microphone' })).toBeVisible();
+      await expect.poll(() => localTrackEnabled(page, 'audio')).toBe(false);
+      await expect(guestPage.locator('[data-room-remote-microphone]')).toHaveAttribute(
+        'data-room-remote-microphone',
+        'off',
+      );
+      await page.getByRole('button', { name: 'Unmute microphone' }).click();
+      await expect.poll(() => localTrackEnabled(page, 'audio')).toBe(true);
+      await expect(guestPage.locator('[data-room-remote-microphone]')).toHaveAttribute(
+        'data-room-remote-microphone',
+        'on',
+      );
     });
 
     await test.step('peers exchange chat messages', async () => {

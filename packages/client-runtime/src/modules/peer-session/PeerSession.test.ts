@@ -24,10 +24,11 @@ import {
   type RoomEvent,
   type Signal,
 } from '@tether/contracts/modules/room';
-import { Crypto, Deferred, Effect, Exit, Layer, Queue, Scope, Stream } from 'effect';
+import { Deferred, Effect, Exit, Layer, Queue, Scope, Stream } from 'effect';
 import { TestClock } from 'effect/testing';
 
 import { AppClient } from '../../AppClient';
+import { webCrypto } from '../../test/WebCrypto';
 import { startPeerSession, type PreparedMedia } from '../room/PeerSessionHost';
 import {
   type DataChannelHandle,
@@ -41,6 +42,7 @@ import {
 } from './Model';
 import { makePeerSessionActor } from './PeerSession';
 import { PlatformError } from './Platform';
+import { ROOM_EVENTS_CHANNEL_LABEL } from './RoomEvents';
 import { PeerSessionEventSink, PeerSessionPlatform, PeerSessionSignaling } from './Services';
 import { initialPeerSessionView, reducePeerSessionView } from './View';
 
@@ -51,27 +53,6 @@ interface TestPeerConnection {
 interface TestDataChannel {
   readonly label: string;
 }
-
-// No DOM lib in this tsconfig, so the Web Crypto global is typed by hand.
-const webCryptoApi = (
-  globalThis as unknown as {
-    readonly crypto: {
-      readonly getRandomValues: <T extends Uint8Array>(array: T) => T;
-      readonly subtle: {
-        readonly digest: (algorithm: string, data: Uint8Array) => Promise<ArrayBuffer>;
-      };
-    };
-  }
-).crypto;
-
-const webCrypto = Layer.succeed(
-  Crypto.Crypto,
-  Crypto.make({
-    randomBytes: (size) => webCryptoApi.getRandomValues(new Uint8Array(size)),
-    digest: (algorithm, data) =>
-      Effect.promise(async () => new Uint8Array(await webCryptoApi.subtle.digest(algorithm, data))),
-  }),
-);
 
 const session: RoomSession = {
   intent: 'join',
@@ -125,7 +106,7 @@ const makeFixture = Effect.fn('makeFixture')(function* (
     dataChannels.push(dataChannel);
     return dataChannel;
   };
-  const localDataChannel = makeDataChannel('chat');
+  const localDataChannel = makeDataChannel(ROOM_EVENTS_CHANNEL_LABEL);
   const localMediaStream: MediaStreamHandle = { value: { id: 'local-media' } };
   const operations: Array<string> = [];
   const signals: Array<Signal> = [];
@@ -642,6 +623,8 @@ describe('startPeerSession', () => {
         assert.strictEqual(localStream._tag, 'LocalStreamReady');
         assert.deepStrictEqual(event, { _tag: 'SignalingDisconnected' });
         assert.isFalse(peerSession.sendMessage('too late'));
+        assert.isFalse(peerSession.sendAvatarPose({ x: 0, z: 0, yaw: 0, action: 'idle' }));
+        assert.isFalse(peerSession.sendMediaState({ cameraOn: false, microphoneOn: false }));
       }),
     ),
   );
@@ -1041,7 +1024,7 @@ describe('startPeerSession', () => {
         });
         yield* Effect.yieldNow;
         assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), {
-          _tag: 'ChatUnavailable',
+          _tag: 'RoomEventsUnavailable',
         });
 
         yield* Queue.offer(roomEventQueue, {
@@ -1426,7 +1409,9 @@ describe('peer-session actor', () => {
           2,
         );
         assert.lengthOf(
-          fixture.operations.filter((operation) => operation === 'createDataChannel:chat'),
+          fixture.operations.filter(
+            (operation) => operation === `createDataChannel:${ROOM_EVENTS_CHANNEL_LABEL}`,
+          ),
           2,
         );
         assert.lengthOf(
@@ -1473,7 +1458,9 @@ describe('peer-session actor', () => {
           2,
         );
         assert.lengthOf(
-          fixture.operations.filter((operation) => operation === 'createDataChannel:chat'),
+          fixture.operations.filter(
+            (operation) => operation === `createDataChannel:${ROOM_EVENTS_CHANNEL_LABEL}`,
+          ),
           0,
         );
         assert.lengthOf(fixture.signals, 0);
@@ -1763,8 +1750,8 @@ describe('peer-session actor', () => {
           'acquirePeerConnection',
           'observePeerConnection',
           'addLocalTracks',
-          'createDataChannel:chat',
-          'observeDataChannel:chat',
+          `createDataChannel:${ROOM_EVENTS_CHANNEL_LABEL}`,
+          `observeDataChannel:${ROOM_EVENTS_CHANNEL_LABEL}`,
           'createOffer',
           'setLocalDescription:offer:offer-sdp',
           'sendSignal:offer:offer-sdp',
@@ -1773,7 +1760,7 @@ describe('peer-session actor', () => {
         assert.deepStrictEqual(fixture.events, [
           roomOpened,
           { _tag: 'Connected', peerId: bob },
-          { _tag: 'ChatReady' },
+          { _tag: 'RoomEventsReady' },
         ]);
       }),
     ).pipe(Effect.orDie),
@@ -1784,7 +1771,7 @@ describe('peer-session actor', () => {
       Effect.gen(function* () {
         const fixture = yield* makeFixture();
         const remoteDataChannel: DataChannelHandle = {
-          value: { label: 'chat' } satisfies TestDataChannel,
+          value: { label: ROOM_EVENTS_CHANNEL_LABEL } satisfies TestDataChannel,
         };
 
         yield* fixture.actor({
@@ -1822,13 +1809,13 @@ describe('peer-session actor', () => {
           'createAnswer',
           'setLocalDescription:answer:answer-sdp',
           'sendSignal:answer:answer-sdp',
-          'observeDataChannel:chat',
+          `observeDataChannel:${ROOM_EVENTS_CHANNEL_LABEL}`,
         ]);
         assert.deepStrictEqual(fixture.events, [
           roomOpened,
           { _tag: 'WaitingForPeer' },
           { _tag: 'Connected', peerId: bob },
-          { _tag: 'ChatReady' },
+          { _tag: 'RoomEventsReady' },
         ]);
       }),
     ).pipe(Effect.orDie),
@@ -1974,13 +1961,17 @@ describe('peer-session actor', () => {
         yield* fixture.actor({
           _tag: 'DataChannelMessageReceived',
           dataChannel: fixture.localDataChannel,
-          data: 'hello self',
+          data: JSON.stringify({
+            version: 1,
+            type: 'chat-message',
+            text: 'hello self',
+          }),
         });
 
         assert.includeMembers(fixture.operations, [
           'sendSignal:ice:local-ice',
           'addIceCandidate:remote-ice',
-          'sendDataChannelMessage:hello peer',
+          'sendDataChannelMessage:{"version":1,"type":"chat-message","text":"hello peer"}',
         ]);
         assert.strictEqual(
           fixture.signals.find(
@@ -1992,7 +1983,7 @@ describe('peer-session actor', () => {
         assert.deepStrictEqual(fixture.events, [
           roomOpened,
           { _tag: 'Connected', peerId: bob },
-          { _tag: 'ChatReady' },
+          { _tag: 'RoomEventsReady' },
           {
             _tag: 'ChatMessageAdded',
             message: { id: 'aaaaaaaaaaaa:self:0', sender: 'self', text: 'hello peer' },
@@ -2023,7 +2014,7 @@ describe('peer-session actor', () => {
           usernameFragment: null,
         };
         const remoteDataChannel: DataChannelHandle = {
-          value: { label: 'chat' } satisfies TestDataChannel,
+          value: { label: ROOM_EVENTS_CHANNEL_LABEL } satisfies TestDataChannel,
         };
 
         yield* fixture.actor({
@@ -2039,12 +2030,12 @@ describe('peer-session actor', () => {
           'acquirePeerConnection',
           'observePeerConnection',
           'addLocalTracks',
-          'createDataChannel:chat',
-          'observeDataChannel:chat',
+          `createDataChannel:${ROOM_EVENTS_CHANNEL_LABEL}`,
+          `observeDataChannel:${ROOM_EVENTS_CHANNEL_LABEL}`,
           'createOffer',
           'setLocalDescription:offer:offer-sdp',
           'sendSignal:offer:offer-sdp',
-          'unobserveDataChannel:chat',
+          `unobserveDataChannel:${ROOM_EVENTS_CHANNEL_LABEL}`,
           'unobservePeerConnection',
           'closePeerConnection',
           'acquirePeerConnection',
@@ -2096,7 +2087,7 @@ describe('peer-session actor', () => {
           roomOpened,
           { _tag: 'PeerDeparted', peerId: bob },
           { _tag: 'Connected', peerId: charlie },
-          { _tag: 'ChatReady' },
+          { _tag: 'RoomEventsReady' },
         ]);
       }),
     ).pipe(Effect.orDie),
@@ -2180,7 +2171,7 @@ describe('peer-session actor', () => {
         const fixture = yield* makeFixture();
         const stalePeerConnection: PeerConnectionHandle = { value: { id: 'stale' } };
         const staleDataChannel: DataChannelHandle = {
-          value: { label: 'chat' } satisfies TestDataChannel,
+          value: { label: ROOM_EVENTS_CHANNEL_LABEL } satisfies TestDataChannel,
         };
         const staleIce = {
           candidate: 'stale-ice',
@@ -2206,7 +2197,49 @@ describe('peer-session actor', () => {
         });
 
         assert.deepStrictEqual(fixture.signals, []);
-        assert.notInclude(fixture.operations, 'observeDataChannel:chat');
+        assert.notInclude(fixture.operations, `observeDataChannel:${ROOM_EVENTS_CHANNEL_LABEL}`);
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('closes unexpected and duplicate remote data channels when supported', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const closed: DataChannelHandle[] = [];
+        const fixture = yield* makeFixture(undefined, undefined, {
+          closeDataChannel: (dataChannel) =>
+            Effect.sync(() => {
+              closed.push(dataChannel);
+            }),
+        });
+        const wrongLabel: DataChannelHandle = { value: { label: 'chat' } };
+        const accepted: DataChannelHandle = {
+          value: { label: ROOM_EVENTS_CHANNEL_LABEL },
+        };
+        const duplicate: DataChannelHandle = {
+          value: { label: ROOM_EVENTS_CHANNEL_LABEL },
+        };
+
+        yield* fixture.actor({ _tag: 'RoomEvent', event: openedEvent(null) });
+        yield* fixture.actor({ _tag: 'RoomEvent', event: new PeerJoinedEvent({ peerId: bob }) });
+        yield* fixture.actor({
+          _tag: 'RemoteDataChannel',
+          peerConnection: fixture.peerConnection,
+          dataChannel: wrongLabel,
+        });
+        yield* fixture.actor({
+          _tag: 'RemoteDataChannel',
+          peerConnection: fixture.peerConnection,
+          dataChannel: accepted,
+        });
+        yield* fixture.actor({
+          _tag: 'RemoteDataChannel',
+          peerConnection: fixture.peerConnection,
+          dataChannel: duplicate,
+        });
+
+        assert.deepStrictEqual(closed, [wrongLabel, duplicate]);
+        assert.include(fixture.operations, `observeDataChannel:${ROOM_EVENTS_CHANNEL_LABEL}`);
       }),
     ).pipe(Effect.orDie),
   );
@@ -2301,7 +2334,7 @@ describe('peer-session actor', () => {
       Effect.gen(function* () {
         const fixture = yield* makeFixture();
         const staleDataChannel: DataChannelHandle = {
-          value: { label: 'chat' } satisfies TestDataChannel,
+          value: { label: ROOM_EVENTS_CHANNEL_LABEL } satisfies TestDataChannel,
         };
 
         yield* fixture.actor({
@@ -2328,8 +2361,8 @@ describe('peer-session actor', () => {
         assert.deepStrictEqual(fixture.events, [
           roomOpened,
           { _tag: 'Connected', peerId: bob },
-          { _tag: 'ChatReady' },
-          { _tag: 'ChatUnavailable' },
+          { _tag: 'RoomEventsReady' },
+          { _tag: 'RoomEventsUnavailable' },
         ]);
         assert.notInclude(fixture.operations, 'closePeerConnection');
       }),
@@ -2625,10 +2658,10 @@ describe('peer-session actor', () => {
             'RoomOpened',
             'Connected',
             'SasReady',
-            'ChatReady',
+            'RoomEventsReady',
             'PeerInterrupted',
             'PeerRestored',
-            'ChatReady',
+            'RoomEventsReady',
             'SasReady',
           ],
         );
@@ -2655,7 +2688,7 @@ describe('peer-session actor', () => {
         });
 
         assert.lengthOf(
-          fixture.events.filter((event) => event._tag === 'ChatReady'),
+          fixture.events.filter((event) => event._tag === 'RoomEventsReady'),
           1,
         );
       }),
@@ -2667,7 +2700,7 @@ describe('peer-session actor', () => {
       Effect.gen(function* () {
         const fixture = yield* makeFixture();
         const unknownDataChannel: DataChannelHandle = {
-          value: { label: 'chat' } satisfies TestDataChannel,
+          value: { label: ROOM_EVENTS_CHANNEL_LABEL } satisfies TestDataChannel,
         };
 
         yield* fixture.actor({
@@ -2677,8 +2710,210 @@ describe('peer-session actor', () => {
         yield* fixture.actor({ _tag: 'DataChannelOpened', dataChannel: unknownDataChannel });
 
         assert.lengthOf(
-          fixture.events.filter((event) => event._tag === 'ChatReady'),
+          fixture.events.filter((event) => event._tag === 'RoomEventsReady'),
           0,
+        );
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('routes typed room events without cross-family mutation', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture();
+
+        yield* fixture.actor({ _tag: 'RoomEvent', event: openedEvent(bob) });
+        yield* fixture.actor({
+          _tag: 'DataChannelOpened',
+          dataChannel: fixture.localDataChannel,
+        });
+
+        for (const event of [
+          {
+            version: 1,
+            type: 'avatar-pose',
+            sequence: 2,
+            x: 1,
+            z: -1,
+            yaw: 0.5,
+            action: 'walk',
+          },
+          {
+            version: 1,
+            type: 'avatar-pose',
+            sequence: 2,
+            x: 4,
+            z: 4,
+            yaw: 1,
+            action: 'idle',
+          },
+          {
+            version: 1,
+            type: 'media-state',
+            revision: 3,
+            cameraOn: false,
+            microphoneOn: true,
+          },
+          { version: 1, type: 'chat-message', text: 'typed hello' },
+        ] as const) {
+          yield* fixture.actor({
+            _tag: 'DataChannelMessageReceived',
+            dataChannel: fixture.localDataChannel,
+            data: JSON.stringify(event),
+          });
+        }
+        yield* fixture.actor({
+          _tag: 'DataChannelMessageReceived',
+          dataChannel: fixture.localDataChannel,
+          data: '{malformed',
+        });
+
+        assert.deepStrictEqual(
+          fixture.events.filter((event) => event._tag === 'RemoteAvatarPoseChanged'),
+          [
+            {
+              _tag: 'RemoteAvatarPoseChanged',
+              pose: { sequence: 2, x: 1, z: -1, yaw: 0.5, action: 'walk' },
+            },
+          ],
+        );
+        assert.deepStrictEqual(
+          fixture.events.filter((event) => event._tag === 'RemoteMediaStateChanged'),
+          [
+            {
+              _tag: 'RemoteMediaStateChanged',
+              mediaState: {
+                revision: 3,
+                cameraOn: false,
+                microphoneOn: true,
+              },
+            },
+          ],
+        );
+        assert.deepStrictEqual(
+          fixture.events.filter((event) => event._tag === 'ChatMessageAdded'),
+          [
+            {
+              _tag: 'ChatMessageAdded',
+              message: {
+                id: 'aaaaaaaaaaaa:peer:0',
+                sender: 'peer',
+                text: 'typed hello',
+              },
+            },
+          ],
+        );
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('sends retained media then the latest pose and resets counters on reconnect', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture();
+        yield* fixture.actor({
+          _tag: 'SendAvatarPose',
+          pose: { x: 1, z: 2, yaw: 0, action: 'walk' },
+        });
+        yield* fixture.actor({
+          _tag: 'SendMediaState',
+          mediaState: { cameraOn: true, microphoneOn: false },
+        });
+        yield* fixture.actor({ _tag: 'RoomEvent', event: openedEvent(bob) });
+        yield* fixture.actor({
+          _tag: 'DataChannelOpened',
+          dataChannel: fixture.localDataChannel,
+        });
+
+        const firstGenerationSends = fixture.operations.filter((operation) =>
+          operation.startsWith('sendDataChannelMessage:'),
+        );
+        assert.deepStrictEqual(firstGenerationSends, [
+          'sendDataChannelMessage:{"version":1,"type":"media-state","revision":0,"cameraOn":true,"microphoneOn":false}',
+          'sendDataChannelMessage:{"version":1,"type":"avatar-pose","sequence":0,"x":1,"z":2,"yaw":0,"action":"walk"}',
+        ]);
+
+        yield* fixture.actor({
+          _tag: 'PeerConnectionFailed',
+          peerConnection: fixture.peerConnection,
+        });
+        const replacementChannel = fixture.dataChannels[1]!;
+        yield* fixture.actor({ _tag: 'DataChannelOpened', dataChannel: replacementChannel });
+
+        const allSends = fixture.operations.filter((operation) =>
+          operation.startsWith('sendDataChannelMessage:'),
+        );
+        assert.deepStrictEqual(allSends.slice(2), firstGenerationSends);
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('coalesces backpressured poses and flushes the latest idle snapshot', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        let bufferedAmount = 65_536;
+        const fixture = yield* makeFixture(undefined, undefined, {
+          dataChannelBufferedAmount: () => bufferedAmount,
+        });
+        yield* fixture.actor({ _tag: 'RoomEvent', event: openedEvent(bob) });
+        yield* fixture.actor({
+          _tag: 'DataChannelOpened',
+          dataChannel: fixture.localDataChannel,
+        });
+        yield* fixture.actor({
+          _tag: 'SendAvatarPose',
+          pose: { x: 1, z: 1, yaw: 0, action: 'walk' },
+        });
+        yield* fixture.actor({
+          _tag: 'SendAvatarPose',
+          pose: { x: 2, z: 2, yaw: 0.25, action: 'idle' },
+        });
+        yield* fixture.actor({ _tag: 'SendMessage', message: 'chat bypasses pose pressure' });
+        assert.deepStrictEqual(
+          fixture.operations.filter((operation) => operation.startsWith('sendDataChannelMessage:')),
+          [
+            'sendDataChannelMessage:{"version":1,"type":"chat-message","text":"chat bypasses pose pressure"}',
+          ],
+        );
+
+        bufferedAmount = 16_384;
+        yield* fixture.actor({
+          _tag: 'RetryPendingAvatarPose',
+          peerConnection: fixture.peerConnection,
+          dataChannel: fixture.localDataChannel,
+        });
+        assert.include(
+          fixture.operations,
+          'sendDataChannelMessage:{"version":1,"type":"avatar-pose","sequence":0,"x":2,"z":2,"yaw":0.25,"action":"idle"}',
+        );
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('contains a pose send race and marks room events unavailable', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture(undefined, undefined, {
+          sendDataChannelMessage: () =>
+            Effect.fail(new PlatformError({ operation: 'send-message', cause: 'closed' })),
+        });
+        yield* fixture.actor({ _tag: 'RoomEvent', event: openedEvent(bob) });
+        yield* fixture.actor({
+          _tag: 'DataChannelOpened',
+          dataChannel: fixture.localDataChannel,
+        });
+        yield* fixture.actor({
+          _tag: 'SendAvatarPose',
+          pose: { x: 0, z: 0, yaw: 0, action: 'idle' },
+        });
+
+        assert.includeMembers(
+          fixture.events.map((event) => event._tag),
+          ['RoomEventsUnavailable'],
+        );
+        assert.notInclude(
+          fixture.events.map((event) => event._tag),
+          'SessionFailed',
         );
       }),
     ).pipe(Effect.orDie),
@@ -2774,12 +3009,18 @@ describe('peer-session actor', () => {
 });
 
 describe('reducePeerSessionView', () => {
+  const unavailableRoomEvents = {
+    remoteAvatarPose: null,
+    remoteMediaState: null,
+  } as const;
+
   it('resets the projection when a new session starts', () => {
     const view = reducePeerSessionView(
       {
         status: 'connected',
         messages: [{ id: 'message-1', sender: 'peer', text: 'from the previous session' }],
-        chatReady: true,
+        roomEventsReady: true,
+        ...unavailableRoomEvents,
         sas: '11111 22222 33333 44444 55555',
         pendingJoinRequests: [],
         roomId: null,
@@ -2799,7 +3040,7 @@ describe('reducePeerSessionView', () => {
       _tag: 'Connected',
       peerId: bob,
     });
-    const withChat = reducePeerSessionView(connected, { _tag: 'ChatReady' });
+    const withChat = reducePeerSessionView(connected, { _tag: 'RoomEventsReady' });
     const withSas = reducePeerSessionView(withChat, {
       _tag: 'SasReady',
       code: '11111 22222 33333 44444 55555',
@@ -2812,7 +3053,8 @@ describe('reducePeerSessionView', () => {
     assert.deepStrictEqual(withMessage, {
       status: 'connected',
       messages: [{ id: 'message-1', sender: 'peer', text: 'hello' }],
-      chatReady: true,
+      roomEventsReady: true,
+      ...unavailableRoomEvents,
       sas: '11111 22222 33333 44444 55555',
       pendingJoinRequests: [],
       roomId: null,
@@ -2825,7 +3067,8 @@ describe('reducePeerSessionView', () => {
       {
         status: 'connected',
         messages: [{ id: 'message-1', sender: 'peer', text: 'hello' }],
-        chatReady: true,
+        roomEventsReady: true,
+        ...unavailableRoomEvents,
         sas: '11111 22222 33333 44444 55555',
         pendingJoinRequests: [],
         roomId: null,
@@ -2837,7 +3080,8 @@ describe('reducePeerSessionView', () => {
     assert.deepStrictEqual(view, {
       status: 'disconnected',
       messages: [{ id: 'message-1', sender: 'peer', text: 'hello' }],
-      chatReady: true,
+      roomEventsReady: false,
+      ...unavailableRoomEvents,
       sas: '11111 22222 33333 44444 55555',
       pendingJoinRequests: [],
       roomId: null,
@@ -2845,24 +3089,26 @@ describe('reducePeerSessionView', () => {
     });
   });
 
-  it('marks only chat unavailable when its data channel closes', () => {
+  it('marks room events unavailable when the data channel closes', () => {
     const view = reducePeerSessionView(
       {
         status: 'connected',
         messages: [],
-        chatReady: true,
+        roomEventsReady: true,
+        ...unavailableRoomEvents,
         sas: '11111 22222 33333 44444 55555',
         pendingJoinRequests: [],
         roomId: null,
         roomTemplateId: null,
       },
-      { _tag: 'ChatUnavailable' },
+      { _tag: 'RoomEventsUnavailable' },
     );
 
     assert.deepStrictEqual(view, {
       status: 'connected',
       messages: [],
-      chatReady: false,
+      roomEventsReady: false,
+      ...unavailableRoomEvents,
       sas: '11111 22222 33333 44444 55555',
       pendingJoinRequests: [],
       roomId: null,
@@ -2875,7 +3121,8 @@ describe('reducePeerSessionView', () => {
       {
         status: 'connected',
         messages: [{ id: 'message-1', sender: 'self', text: 'hello' }],
-        chatReady: true,
+        roomEventsReady: true,
+        ...unavailableRoomEvents,
         sas: null,
         pendingJoinRequests: [],
         roomId: null,
@@ -2887,7 +3134,8 @@ describe('reducePeerSessionView', () => {
     assert.deepStrictEqual(view, {
       status: 'failed',
       messages: [{ id: 'message-1', sender: 'self', text: 'hello' }],
-      chatReady: true,
+      roomEventsReady: false,
+      ...unavailableRoomEvents,
       sas: null,
       pendingJoinRequests: [],
       roomId: null,
@@ -2900,7 +3148,8 @@ describe('reducePeerSessionView', () => {
       {
         status: 'connecting',
         messages: [{ id: 'message-1', sender: 'self', text: 'hello' }],
-        chatReady: false,
+        roomEventsReady: false,
+        ...unavailableRoomEvents,
         sas: null,
         pendingJoinRequests: [],
         roomId: null,
@@ -2912,7 +3161,8 @@ describe('reducePeerSessionView', () => {
     assert.deepStrictEqual(view, {
       status: 'room-full',
       messages: [{ id: 'message-1', sender: 'self', text: 'hello' }],
-      chatReady: false,
+      roomEventsReady: false,
+      ...unavailableRoomEvents,
       sas: null,
       pendingJoinRequests: [],
       roomId: null,
@@ -2925,7 +3175,8 @@ describe('reducePeerSessionView', () => {
       {
         status: 'connecting',
         messages: [{ id: 'message-1', sender: 'self', text: 'hello' }],
-        chatReady: false,
+        roomEventsReady: false,
+        ...unavailableRoomEvents,
         sas: null,
         pendingJoinRequests: [],
         roomId: null,
@@ -2937,7 +3188,8 @@ describe('reducePeerSessionView', () => {
     assert.deepStrictEqual(view, {
       status: 'peer-already-joined',
       messages: [{ id: 'message-1', sender: 'self', text: 'hello' }],
-      chatReady: false,
+      roomEventsReady: false,
+      ...unavailableRoomEvents,
       sas: null,
       pendingJoinRequests: [],
       roomId: null,
@@ -2950,7 +3202,8 @@ describe('reducePeerSessionView', () => {
       {
         status: 'connected',
         messages: [{ id: 'message-1', sender: 'peer', text: 'hello' }],
-        chatReady: true,
+        roomEventsReady: true,
+        ...unavailableRoomEvents,
         sas: '11111 22222 33333 44444 55555',
         pendingJoinRequests: [],
         roomId: null,
@@ -2962,7 +3215,8 @@ describe('reducePeerSessionView', () => {
     assert.deepStrictEqual(view, {
       status: 'peer-departed',
       messages: [{ id: 'message-1', sender: 'peer', text: 'hello' }],
-      chatReady: false,
+      roomEventsReady: false,
+      ...unavailableRoomEvents,
       sas: null,
       pendingJoinRequests: [],
       roomId: null,
