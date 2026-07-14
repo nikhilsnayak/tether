@@ -3288,6 +3288,7 @@ describe('reducePeerSessionView', () => {
         messages: [],
         roomEventsReady: true,
         ...unavailableRoomEvents,
+        remoteMediaState: { revision: 1, cameraOn: true, microphoneOn: false },
         sas: '11111 22222 33333 44444 55555',
         pendingJoinRequests: [],
         roomId: null,

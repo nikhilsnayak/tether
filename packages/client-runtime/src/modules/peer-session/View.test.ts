@@ -99,6 +99,12 @@ describe('reducePeerSessionView', () => {
     assert.strictEqual(withMedia.remoteAvatarPose, pose);
     assert.strictEqual(withMedia.remoteMediaState, mediaState);
 
+    const unavailable = reducePeerSessionView(withMedia, {
+      _tag: 'RoomEventsUnavailable',
+    });
+    assert.strictEqual(unavailable.remoteAvatarPose, pose);
+    assert.isNull(unavailable.remoteMediaState);
+
     const reconnecting = reducePeerSessionView(withMedia, {
       _tag: 'PeerInterrupted',
       peerId,

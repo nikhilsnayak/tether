@@ -33,7 +33,7 @@ export const reducePeerSessionView = (
     case 'RoomEventsReady':
       return { ...view, roomEventsReady: true };
     case 'RoomEventsUnavailable':
-      return { ...view, roomEventsReady: false };
+      return { ...view, roomEventsReady: false, remoteMediaState: null };
     case 'RemoteAvatarPoseChanged':
       return { ...view, remoteAvatarPose: event.pose };
     case 'RemoteMediaStateChanged':
