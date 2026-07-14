@@ -255,15 +255,18 @@ test('complete room flow', async ({ browser, page }, testInfo) => {
 
     if (!process.env.CI) {
       await test.step('responsive media tiles avoid controls and low quality sustains 30 FPS', async () => {
-        for (const viewport of [
-          { width: 1_280, height: 720 },
-          { width: 390, height: 844 },
-        ]) {
-          await page.setViewportSize(viewport);
-          await expect.poll(() => mediaTilesAvoidToolbar(page)).toBe(true);
-          expect(await lowQualityMedianFps(page)).toBeGreaterThanOrEqual(30);
+        try {
+          for (const viewport of [
+            { width: 1_280, height: 720 },
+            { width: 390, height: 844 },
+          ]) {
+            await page.setViewportSize(viewport);
+            await expect.poll(() => mediaTilesAvoidToolbar(page)).toBe(true);
+            expect(await lowQualityMedianFps(page)).toBeGreaterThanOrEqual(30);
+          }
+        } finally {
+          await page.setViewportSize({ width: 1_280, height: 720 });
         }
-        await page.setViewportSize({ width: 1_280, height: 720 });
       });
     }
 
