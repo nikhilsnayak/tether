@@ -3055,6 +3055,33 @@ describe('peer-session actor', () => {
     ).pipe(Effect.orDie),
   );
 
+  it.effect('contains a chat send race and keeps processing inputs', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture(undefined, undefined, {
+          sendDataChannelMessage: () =>
+            Effect.fail(new PlatformError({ operation: 'send-message', cause: 'closed' })),
+        });
+        yield* fixture.actor({ _tag: 'RoomEvent', event: openedEvent(bob) });
+        yield* fixture.actor({
+          _tag: 'DataChannelOpened',
+          dataChannel: fixture.localDataChannel,
+        });
+        yield* fixture.actor({ _tag: 'SendMessage', message: 'hello peer' });
+        yield* fixture.actor({ _tag: 'RoomEvent', event: new PeerLeftEvent({ peerId: bob }) });
+
+        assert.includeMembers(
+          fixture.events.map((event) => event._tag),
+          ['RoomEventsUnavailable', 'PeerDeparted'],
+        );
+        assert.lengthOf(
+          fixture.events.filter((event) => event._tag === 'ChatMessageAdded'),
+          0,
+        );
+      }),
+    ).pipe(Effect.orDie),
+  );
+
   it.effect('contains a pose send race and marks room events unavailable', () =>
     Effect.scoped(
       Effect.gen(function* () {

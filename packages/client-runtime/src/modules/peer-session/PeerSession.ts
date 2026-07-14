@@ -839,11 +839,20 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       return;
     }
 
-    const sent = yield* transmitRoomEvent(state.dataChannelState.dataChannel, {
+    const dataChannel = state.dataChannelState.dataChannel;
+    const sent = yield* transmitRoomEvent(dataChannel, {
       version: ROOM_EVENT_VERSION,
       type: 'chat-message',
       text,
-    });
+    }).pipe(
+      Effect.catchIf(isPlatformError, (error) =>
+        Effect.logWarning('Failed to send chat message').pipe(
+          Effect.annotateLogs('operation', error.operation),
+          Effect.andThen(markRoomEventsUnavailable(dataChannel)),
+          Effect.as(false),
+        ),
+      ),
+    );
     if (!sent) return;
     yield* eventSink.emit({
       _tag: 'ChatMessageAdded',
