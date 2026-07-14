@@ -991,7 +991,7 @@ describe('startPeerSession', () => {
     ),
   );
 
-  it.effect('processes PeerLeft after chat becomes unavailable', () =>
+  it.effect('processes PeerLeft after room events become unavailable', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const roomEventQueue = yield* Queue.unbounded<{ readonly event: RoomEvent }>();
@@ -2368,7 +2368,7 @@ describe('peer-session actor', () => {
     ).pipe(Effect.orDie),
   );
 
-  it.effect('marks chat unavailable without reconnecting when the data channel closes', () =>
+  it.effect('marks room events unavailable without reconnecting when the channel closes', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const fixture = yield* makeFixture();
@@ -2650,7 +2650,7 @@ describe('peer-session actor', () => {
     ).pipe(Effect.orDie),
   );
 
-  it.effect('re-signals chat readiness and the safety code when a connection is restored', () =>
+  it.effect('re-signals room-event readiness and the safety code after connection recovery', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const offerSdp = fingerprintSdp('AA:BB:CC:DD');
@@ -3111,7 +3111,7 @@ describe('peer-session actor', () => {
     ).pipe(Effect.orDie),
   );
 
-  it.effect('ignores a chat message before the data channel opens', () =>
+  it.effect('ignores a chat message before the room-events channel opens', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const fixture = yield* makeFixture();
@@ -3134,7 +3134,7 @@ describe('peer-session actor', () => {
     ).pipe(Effect.orDie),
   );
 
-  it.effect('ignores a non-text chat payload', () =>
+  it.effect('ignores a non-text room-event payload', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const fixture = yield* makeFixture();

@@ -48,7 +48,7 @@ export interface PeerSession {
 /** A platform-owned local stream whose finalizer is adopted by the session media scope. */
 export interface PreparedMedia {
   readonly claim: Effect.Effect<MediaStreamHandle, PlatformError, Scope.Scope>;
-  /** Initial camera/microphone snapshot retained before the channel opens. */
+  /** Initial camera/microphone snapshot retained until the room-events channel opens. */
   readonly initialState?: MediaState;
 }
 

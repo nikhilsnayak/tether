@@ -96,7 +96,9 @@ const expectLocalAndRemoteMedia = async (page: Page) => {
 };
 
 test('complete room flow', async ({ browser, page }, testInfo) => {
-  test.slow();
+  // This scenario exercises two peer generations plus a rejected join. Give the
+  // shared WebRTC/renderer lifecycle its own budget, especially under SwiftShader.
+  test.setTimeout(360_000);
   const baseURL = requireBaseURL(testInfo.project.use.baseURL);
 
   await installWebRtcProbe(page.context());
@@ -107,7 +109,7 @@ test('complete room flow', async ({ browser, page }, testInfo) => {
   });
   await Promise.all([installWebRtcProbe(guestContext), installWebRtcProbe(replacementContext)]);
   const guestPage = await guestContext.newPage();
-  const replacementPage = await replacementContext.newPage();
+  let replacementPage = await replacementContext.newPage();
 
   let roomId = '';
   try {
@@ -209,8 +211,8 @@ test('complete room flow', async ({ browser, page }, testInfo) => {
     });
 
     // GitHub's single SwiftShader GPU process does not reliably advance two R3F
-    // frame loops. Presence and room-event sync remain covered above; run the
-    // physical movement interaction when Chromium has a hardware renderer.
+    // frame loops. Presence and room-event sync remain covered above; non-CI
+    // browser runs cover the physical movement interaction.
     if (!process.env.CI) {
       await test.step('each peer controls only its own physical avatar', async () => {
         const hostScene = page.getByLabel('Dusk Suite room scene');
@@ -364,6 +366,12 @@ test('complete room flow', async ({ browser, page }, testInfo) => {
         .toBe(true);
       await replacementPage.getByRole('button', { name: 'Back to room setup' }).click();
       await expect(replacementPage).toHaveURL('/');
+
+      // The rejected attempt has already released its media tracks. Recreate the
+      // page as well so its renderer and WebRTC objects cannot affect the peer
+      // generation that is about to replace the departing guest.
+      await replacementPage.close();
+      replacementPage = await replacementContext.newPage();
     });
 
     await test.step('the guest leaves and a replacement peer joins', async () => {

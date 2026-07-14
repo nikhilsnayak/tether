@@ -5,6 +5,8 @@ import {
   avatarSpawn,
   canonicalYaw,
   integrateAvatarPose,
+  resolveAvatarCollision,
+  AVATAR_COLLISION_RADIUS,
   roomGameplayConfigIsWithinWireBounds,
   sampleRemoteAvatarPose,
   shouldSendAvatarPose,
@@ -61,6 +63,40 @@ describe('avatar motion', () => {
       config,
     );
     expect(blocked.x).toBeCloseTo(-0.82);
+  });
+
+  it('keeps avatars from overlapping the other body', () => {
+    const minimum = AVATAR_COLLISION_RADIUS * 2;
+    // clear of the blocker: unchanged
+    expect(resolveAvatarCollision({ x: 3, z: 0 }, { x: 0, z: 0 })).toEqual({ x: 3, z: 0 });
+    // inside the circle: pushed out to exactly the minimum separation
+    const pushed = resolveAvatarCollision({ x: 0.1, z: 0 }, { x: 0, z: 0 });
+    expect(Math.hypot(pushed.x, pushed.z)).toBeCloseTo(minimum);
+    // exact overlap: pushed to a deterministic direction
+    expect(resolveAvatarCollision({ x: 0, z: 0 }, { x: 0, z: 0 })).toEqual({ x: minimum, z: 0 });
+    // no blocker: unchanged
+    expect(resolveAvatarCollision({ x: 1, z: 1 }, null)).toEqual({ x: 1, z: 1 });
+  });
+
+  it('stops the local avatar from walking through the other avatar', () => {
+    const blocker = { x: 1, z: 0.8 };
+    const next = integrateAvatarPose(
+      { x: 0.4, z: 0.8, yaw: Math.PI / 2, action: 'walk' },
+      { forward: 1, turn: 0 },
+      0.05,
+      config,
+      blocker,
+    );
+    expect(Math.hypot(next.x - blocker.x, next.z - blocker.z)).toBeGreaterThanOrEqual(
+      AVATAR_COLLISION_RADIUS * 2 - 1e-6,
+    );
+  });
+
+  it('does not let remote interpolation push an idle local avatar', () => {
+    const pose = { x: 2.4, z: 0.8, yaw: Math.PI / 2, action: 'idle' } as const;
+    expect(
+      integrateAvatarPose(pose, { forward: 0, turn: 0 }, 0.05, config, { x: 2.5, z: 0.8 }),
+    ).toMatchObject({ x: pose.x, z: pose.z, action: 'idle' });
   });
 
   it('uses canonical shortest-angle turning across the wrap', () => {

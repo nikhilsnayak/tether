@@ -4,8 +4,12 @@ import { useEffect, useRef, type RefObject } from 'react';
 import { MathUtils, Vector3 } from 'three';
 
 import type { RoomTemplate } from '../templates/registry';
-import { selectCameraFraming } from './config';
+import { cameraContainmentScale } from './camera-containment';
+import { clampLook, selectCameraFraming } from './config';
 import type { RoomJourneyCue } from './journey';
+
+const WORLD_UP = new Vector3(0, 1, 0);
+const CAMERA_VERTICAL_BOUNDS = { minY: 0.8, maxY: 4.2 } as const;
 
 export function ThirdPersonCamera({
   template,
@@ -33,7 +37,10 @@ export function ThirdPersonCamera({
   const followed = useRef(new Vector3(poseRef.current.x, 0, poseRef.current.z));
   const desiredPosition = useRef(new Vector3());
   const desiredFollow = useRef(new Vector3());
+  const cameraOrigin = useRef(new Vector3());
   const target = useRef(new Vector3());
+  const lookDirection = useRef(new Vector3());
+  const lookRight = useRef(new Vector3());
   const previousRecenterSignal = useRef(recenterSignal.current);
 
   useEffect(() => {
@@ -136,13 +143,19 @@ export function ThirdPersonCamera({
       template.camera,
     );
     if (mode === 'preview' || journey === 'outside') {
+      // Outside the room the guest may only glance around within tight bounds so
+      // they cannot rotate the view to peek inside before being admitted.
+      orbit.current = clampLook(orbit.current.yaw, orbit.current.pitch, template.camera.look);
       desiredPosition.current.set(...framing.position);
       camera.position.lerp(desiredPosition.current, reducedMotion ? 1 : 1 - Math.exp(-delta * 6));
-      target.current.set(
-        framing.target[0] + Math.sin(orbit.current.yaw) * 2,
-        framing.target[1] + orbit.current.pitch * 2,
-        framing.target[2],
-      );
+      lookDirection.current
+        .set(...framing.target)
+        .sub(desiredPosition.current)
+        .normalize()
+        .applyAxisAngle(WORLD_UP, orbit.current.yaw);
+      lookRight.current.crossVectors(lookDirection.current, WORLD_UP).normalize();
+      lookDirection.current.applyAxisAngle(lookRight.current, orbit.current.pitch);
+      target.current.copy(desiredPosition.current).add(lookDirection.current);
       camera.lookAt(target.current);
     } else {
       const followAlpha = reducedMotion
@@ -157,12 +170,23 @@ export function ThirdPersonCamera({
         template.gameplay.camera.height + Math.sin(orbit.current.pitch) * distance.current,
         followed.current.z - Math.cos(yaw) * horizontalDistance,
       );
-      camera.position.lerp(desiredPosition.current, followAlpha);
-      target.current.set(
+      cameraOrigin.current.set(
         followed.current.x,
         template.gameplay.camera.targetHeight,
         followed.current.z,
       );
+      const containmentScale = cameraContainmentScale(
+        cameraOrigin.current,
+        desiredPosition.current,
+        template.gameplay.walkableBounds,
+        CAMERA_VERTICAL_BOUNDS,
+      );
+      desiredPosition.current
+        .sub(cameraOrigin.current)
+        .multiplyScalar(containmentScale)
+        .add(cameraOrigin.current);
+      camera.position.lerp(desiredPosition.current, followAlpha);
+      target.current.copy(cameraOrigin.current);
       camera.lookAt(target.current);
     }
     if ('fov' in camera) {

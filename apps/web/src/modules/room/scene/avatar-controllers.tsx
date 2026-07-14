@@ -30,6 +30,8 @@ export function LocalAvatarController({
   enabled,
   sendAvatarPose,
   surfaceRef,
+  blockerRef,
+  blockerActive,
 }: {
   readonly poseRef: RefObject<AvatarPose>;
   readonly input: AvatarInputIntent;
@@ -39,6 +41,8 @@ export function LocalAvatarController({
   readonly enabled: boolean;
   readonly sendAvatarPose: (pose: AvatarPose) => boolean;
   readonly surfaceRef: RefObject<HTMLDivElement | null>;
+  readonly blockerRef: RefObject<AvatarPose>;
+  readonly blockerActive: boolean;
 }) {
   const previousLocation = useRef<'inside' | 'outside' | null>(null);
   const previousGameplay = useRef<RoomGameplayConfig | null>(null);
@@ -57,9 +61,13 @@ export function LocalAvatarController({
       lastSentPose.current = null;
     }
 
+    const blocker =
+      blockerActive && location === 'inside'
+        ? { x: blockerRef.current.x, z: blockerRef.current.z }
+        : null;
     const next =
       enabled && location === 'inside'
-        ? integrateAvatarPose(poseRef.current, input, delta, gameplay)
+        ? integrateAvatarPose(poseRef.current, input, delta, gameplay, blocker)
         : { ...poseRef.current, action: 'idle' as const };
     poseRef.current = next;
     if (location !== 'inside') return;

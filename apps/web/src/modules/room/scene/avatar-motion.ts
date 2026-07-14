@@ -125,11 +125,30 @@ export const resolveAvatarPosition = (
   );
 };
 
+// Keep a moving avatar's center outside the other avatar's personal circle.
+// Each client resolves only its local movement against the rendered remote pose,
+// so the peers do not need shared collision authority.
+export const resolveAvatarCollision = (
+  point: GroundPoint,
+  blocker: GroundPoint | null,
+): GroundPoint => {
+  if (blocker === null) return point;
+  const minimum = AVATAR_COLLISION_RADIUS * 2;
+  const dx = point.x - blocker.x;
+  const dz = point.z - blocker.z;
+  const distanceSquared = dx * dx + dz * dz;
+  if (distanceSquared >= minimum * minimum) return point;
+  if (distanceSquared === 0) return { x: blocker.x + minimum, z: blocker.z };
+  const scale = minimum / Math.sqrt(distanceSquared);
+  return { x: blocker.x + dx * scale, z: blocker.z + dz * scale };
+};
+
 export const integrateAvatarPose = (
   pose: AvatarPose,
   input: AvatarInputIntent,
   deltaSeconds: number,
   config: RoomGameplayConfig,
+  blocker: GroundPoint | null = null,
 ): AvatarPose => {
   const delta = clamp(deltaSeconds, 0, MAX_MOVEMENT_DELTA_SECONDS);
   const turn = clamp(input.turn, -1, 1);
@@ -140,7 +159,11 @@ export const integrateAvatarPose = (
     x: pose.x + Math.sin(yaw) * distance,
     z: pose.z + Math.cos(yaw) * distance,
   };
-  const position = resolveAvatarPosition(proposed, pose, config);
+  const bounded = resolveAvatarPosition(proposed, pose, config);
+  // Treat the peer as a soft obstacle only while this avatar moves. Remote pose
+  // interpolation therefore cannot push an idle local avatar around the room.
+  const separated = distance === 0 ? bounded : resolveAvatarCollision(bounded, blocker);
+  const position = resolveAvatarPosition(separated, bounded, config);
   return {
     ...position,
     yaw,

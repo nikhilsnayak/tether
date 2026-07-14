@@ -170,7 +170,10 @@ export function CallScreen({
         )
       )}
       <div className='pointer-events-none absolute inset-0'>
-        <div className='absolute inset-x-0 top-0 flex items-center justify-between gap-3 bg-linear-to-b from-black/60 to-transparent p-4 pb-10'>
+        <div
+          data-room-call-header
+          className='absolute inset-x-0 top-0 flex items-center justify-between gap-3 bg-linear-to-b from-black/60 to-transparent p-4 pb-10'
+        >
           <div className='flex min-w-0 items-center gap-3'>
             <Wordmark className='drop-shadow-md max-sm:hidden' />
             <LogoMark className='size-5 shrink-0 drop-shadow-md sm:hidden' />

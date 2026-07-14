@@ -1,9 +1,9 @@
 import { useSyncExternalStore } from 'react';
 
 /**
- * Browser track state is enough to choose a local fallback, but it is not an authenticated signal
- * that the other person intentionally disabled their camera. Explicit camera state would require a
- * separate peer message.
+ * Reports whether the remote stream currently has renderable video pixels.
+ * Intentional camera state arrives separately over the room-events channel;
+ * callers combine that explicit state with this browser track observation.
  */
 export function hasLiveRemoteVideo(stream: MediaStream | null): boolean {
   return (

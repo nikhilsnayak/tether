@@ -108,7 +108,7 @@ test('leaving a call and joining a new room starts with clean media', async ({
   }
 });
 
-test('a closed data channel disables chat without interrupting the call', async ({
+test('a closed room-events channel disables room events without interrupting media', async ({
   browser,
 }, testInfo) => {
   test.setTimeout(90_000);
@@ -132,7 +132,7 @@ test('a closed data channel disables chat without interrupting the call', async 
     ]);
     expect(hostCode).toBe(guestCode);
 
-    await sendMessage(host, guest, 'message before chat closes');
+    await sendMessage(host, guest, 'message before room events close');
     const hostInput = host.getByRole('textbox', { name: 'Message' });
     const guestInput = guest.getByRole('textbox', { name: 'Message' });
 

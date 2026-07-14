@@ -216,9 +216,9 @@ const observePeerConnection = Effect.fnUntraced(function* (
 });
 
 /**
- * Bridges open and text-message events from an owned chat channel into the
- * actor queue. The immediate state checks cover a remotely-created channel that
- * opened before the actor installed its listeners.
+ * Bridges lifecycle and message events from an owned room-events channel into
+ * the actor queue. The immediate state checks cover a remotely-created channel
+ * that opened before the actor installed its listeners.
  */
 const observeDataChannel = Effect.fnUntraced(function* (
   dataChannelHandle: DataChannelHandle,

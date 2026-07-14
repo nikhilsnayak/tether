@@ -69,7 +69,7 @@ export class PeerSessionPlatform extends Context.Service<
   }
 >()('@tether/client-runtime/peer-session/PeerSessionPlatform') {}
 
-/** Emits platform-independent session events to the host UI. */
+/** Emits platform-independent session events to the current client's UI projection. */
 export class PeerSessionEventSink extends Context.Service<
   PeerSessionEventSink,
   {

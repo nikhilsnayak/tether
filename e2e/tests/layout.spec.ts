@@ -29,6 +29,13 @@ test('room waiting screen fits the viewport', async ({ page }) => {
   const controls = page.getByRole('toolbar', { name: 'Call controls' });
   await expect(controls.getByRole('button')).toHaveCount(5);
   await expect(controls.getByRole('button', { name: 'Leave call' })).toBeVisible();
+  const headerBox = await page.locator('[data-room-call-header]').boundingBox();
+  const qualityBox = await page.locator('[data-room-quality-control]').boundingBox();
+  expect(headerBox).not.toBeNull();
+  expect(qualityBox).not.toBeNull();
+  if (headerBox !== null && qualityBox !== null) {
+    expect(qualityBox.y).toBeGreaterThanOrEqual(headerBox.y + headerBox.height);
+  }
   expect(await fitsViewport(page)).toBe(true);
 
   await page.reload();
@@ -61,6 +68,7 @@ test('the WebGPU call room fits phone viewports without covering controls', asyn
     await expect(scene.locator('canvas')).toBeVisible();
     await expect(host.getByRole('button', { name: 'Leave call' })).toBeVisible();
     await expect(host.getByLabel('Local video preview')).toBeVisible();
+    await expect(host.getByLabel('Room rendering quality')).toBeHidden();
     expect(await fitsViewport(host)).toBe(true);
 
     const controls = await host.getByRole('button', { name: 'Leave call' }).boundingBox();

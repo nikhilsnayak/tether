@@ -172,6 +172,8 @@ export function RoomScene({
               enabled={controlsEnabled}
               sendAvatarPose={sendAvatarPose}
               surfaceRef={surfaceRef}
+              blockerRef={remotePoseRef}
+              blockerActive={presentation.remote !== 'absent'}
             />
             <RemoteAvatarController
               poseRef={remotePoseRef}
@@ -227,9 +229,10 @@ export function RoomScene({
       {(mode === 'preview' || journey !== 'outside') && (
         <div
           data-room-scene-ignore-gesture
+          data-room-quality-control
           className={cn(
-            'absolute right-3 z-10 flex items-center gap-2',
-            mode === 'call' ? 'top-14' : 'bottom-3',
+            'absolute z-10 flex items-center gap-2',
+            mode === 'call' ? 'right-4 bottom-24 max-sm:hidden' : 'right-3 bottom-3',
           )}
         >
           <label className='sr-only' htmlFor='room-quality'>

@@ -97,9 +97,15 @@ export default function DuskSuiteScene({
       <Box surface={wallMaterial} position={[0, -0.12, 0]} scale={[10, 0.24, 12]} />
       <Box surface={wallMaterial} position={[0, 4.65, 0]} scale={[10, 0.2, 12]} />
       <Box surface={wallMaterial} position={[0, 2.25, -4.9]} scale={[10, 4.8, 0.2]} />
+      <Box surface={wallMaterial} position={[-4.9, 2.25, 0]} scale={[0.2, 4.8, 10]} />
       <Box surface={wallMaterial} position={[4.9, 2.25, -2.04]} scale={[0.2, 4.8, 5.72]} />
       <Box surface={wallMaterial} position={[4.9, 2.25, 3.69]} scale={[0.2, 4.8, 2.62]} />
-      <Box surface={wallMaterial} position={[4.9, 3.75, 1.65]} scale={[0.2, 1.8, 1.45]} />
+      <Box surface={wallMaterial} position={[4.9, 3.75, 1.65]} scale={[0.2, 1.8, 1.7]} />
+      {/* FrontSide-only so the room is enclosed in play without blocking its exterior preview. */}
+      <mesh position={[0, 2.25, 4.9]} rotation={[0, Math.PI, 0]} receiveShadow>
+        <planeGeometry args={[10, 4.8]} />
+        <meshStandardMaterial {...wallMaterial} />
+      </mesh>
 
       <Box
         surface={{ color: '#171a21', roughness: 0.88, metalness: 0.02 }}
