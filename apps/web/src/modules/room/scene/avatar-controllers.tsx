@@ -106,7 +106,7 @@ export function RemoteAvatarController({
   readonly surfaceRef: RefObject<HTMLDivElement | null>;
 }) {
   const samples = useRef<ReadonlyArray<RemotePoseSample>>([]);
-  const lastIncoming = useRef<SequencedAvatarPose | null>(incoming);
+  const lastIncoming = useRef<SequencedAvatarPose | null>(null);
   const previousReady = useRef(ready);
   const previousPresence = useRef(presence);
   const lastDiagnosticAtMs = useRef(0);
