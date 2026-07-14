@@ -210,7 +210,9 @@ export const sampleRemoteAvatarPose = (
   const sampleSpan = Math.max(1, latest.receivedAtMs - previous.receivedAtMs);
   if (targetMs <= latest.receivedAtMs) {
     const alpha = clamp((targetMs - previous.receivedAtMs) / sampleSpan, 0, 1);
-    return interpolatePose(previous.pose, latest.pose, alpha);
+    const interpolated = interpolatePose(previous.pose, latest.pose, alpha);
+    const position = resolveAvatarPosition(interpolated, previous.pose, config);
+    return { ...interpolated, ...position };
   }
 
   const extrapolationMs = Math.min(targetMs - latest.receivedAtMs, REMOTE_EXTRAPOLATION_LIMIT_MS);

@@ -149,6 +149,15 @@ describe('avatar motion', () => {
     expect(sampleRemoteAvatarPose([], 150, false, config)).toBeNull();
   });
 
+  it('resolves interpolated poses against room geometry', () => {
+    const samples = [
+      { pose: { sequence: 1, x: -1, z: 1.5, yaw: 0, action: 'walk' } as const, receivedAtMs: 0 },
+      { pose: { sequence: 2, x: 1, z: 1.5, yaw: 0, action: 'walk' } as const, receivedAtMs: 100 },
+    ];
+
+    expect(sampleRemoteAvatarPose(samples, 150, false, config)?.x).toBeCloseTo(-0.82);
+  });
+
   it('selects the nearest obstacle edge relative to the previous position', () => {
     const resolved = integrateAvatarPose(
       { x: 0, z: 2.4, yaw: Math.PI, action: 'walk' },
