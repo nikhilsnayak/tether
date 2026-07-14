@@ -93,10 +93,7 @@ test('leaving a call and joining a new room starts with clean media', async ({
     await expect(guest.getByText('Share this room to invite someone.')).toBeVisible();
 
     // No stale remote frame from the previous call may survive the rejoin.
-    await expect(guest.getByLabel('Dusk Suite interactive preview')).toHaveAttribute(
-      'data-room-remote-video',
-      'absent',
-    );
+    await expect(guest.locator('[data-room-media-tile="remote"]')).toHaveCount(0);
     await expect(guest.getByLabel('Local video preview')).toBeVisible();
     const streamStates = await guest.evaluate(() =>
       window.__tetherE2E.localStreams.map((stream) =>
@@ -159,14 +156,18 @@ test('a closed data channel disables chat without interrupting the call', async 
     ]);
     await Promise.all([expectConnected(host), expectConnected(guest)]);
     await Promise.all([
-      expect(host.getByLabel('Dusk Suite interactive preview')).toHaveAttribute(
-        'data-room-remote-video',
+      expect(host.getByLabel('Dusk Suite room scene')).toHaveAttribute(
+        'data-room-remote-avatar',
         'present',
       ),
-      expect(guest.getByLabel('Dusk Suite interactive preview')).toHaveAttribute(
-        'data-room-remote-video',
-        'present',
+      expect(guest.getByLabel('Dusk Suite room scene')).toHaveAttribute(
+        'data-room-display',
+        'idle',
       ),
+    ]);
+    await Promise.all([
+      expect(host.locator('[data-room-media-tile="remote"]')).toBeVisible(),
+      expect(guest.locator('[data-room-media-tile="remote"]')).toBeVisible(),
     ]);
     expect(await host.evaluate(() => window.__tetherE2E.peerConnections.length)).toBe(
       initialHostConnections,

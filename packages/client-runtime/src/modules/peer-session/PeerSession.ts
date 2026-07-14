@@ -211,7 +211,8 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       return;
     }
 
-    const { peerId, role, reconnectAttempts } = state;
+    const { peerId, reconnectAttempts } = state;
+    const role = state.negotiation.role;
     yield* Scope.close(state.generation.scope, Exit.void);
 
     if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
@@ -229,13 +230,10 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
         _tag: 'PeerKnown',
         generation,
         peerId,
-        role,
+        negotiation: { role: 'answerer', phase: 'awaiting-offer' },
         peerConnectionState: 'connecting',
         dataChannelState: { _tag: 'AwaitingRemoteDataChannel' },
-        negotiationEpoch: null,
         reconnectAttempts: reconnectAttempts + 1,
-        offerSdp: null,
-        answerSdp: null,
       };
       yield* armNegotiationDeadline(generation);
       return;
@@ -255,13 +253,15 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       _tag: 'PeerKnown',
       generation,
       peerId,
-      role,
+      negotiation: {
+        role: 'offerer',
+        phase: 'awaiting-answer',
+        epoch: negotiationEpoch,
+        offerSdp,
+      },
       peerConnectionState: 'connecting',
       dataChannelState: { _tag: 'DataChannelConnecting', dataChannel },
-      negotiationEpoch,
       reconnectAttempts: reconnectAttempts + 1,
-      offerSdp,
-      answerSdp: null,
     };
   });
 
@@ -295,13 +295,15 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       _tag: 'PeerKnown',
       generation,
       peerId,
-      role: 'offerer',
+      negotiation: {
+        role: 'offerer',
+        phase: 'awaiting-answer',
+        epoch: negotiationEpoch,
+        offerSdp,
+      },
       peerConnectionState: 'connecting',
       dataChannelState: { _tag: 'DataChannelConnecting', dataChannel },
-      negotiationEpoch,
       reconnectAttempts: 0,
-      offerSdp,
-      answerSdp: null,
     };
   });
 
@@ -316,13 +318,10 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       _tag: 'PeerKnown',
       generation,
       peerId,
-      role: 'answerer',
+      negotiation: { role: 'answerer', phase: 'awaiting-offer' },
       peerConnectionState: 'connecting',
       dataChannelState: { _tag: 'AwaitingRemoteDataChannel' },
-      negotiationEpoch: null,
       reconnectAttempts: 0,
-      offerSdp: null,
-      answerSdp: null,
     };
     yield* armNegotiationDeadline(generation);
   });
@@ -335,7 +334,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     switch (signal._tag) {
       case 'SessionDescription': {
         if (signal.type === 'offer') {
-          if (state.role !== 'answerer') {
+          if (state.negotiation.role !== 'answerer') {
             return yield* Effect.logWarning('Ignored offer received in invalid role');
           }
           const offerDecision = memory.negotiation.acceptRemoteOffer(signal.negotiationEpoch);
@@ -353,41 +352,54 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
           );
           state = {
             ...state,
-            negotiationEpoch: signal.negotiationEpoch,
-            offerSdp: signal.sdp,
-            answerSdp,
+            negotiation: {
+              role: 'answerer',
+              phase: 'answered',
+              epoch: signal.negotiationEpoch,
+              offerSdp: signal.sdp,
+              answerSdp,
+            },
           };
           return;
         }
 
-        if (state.role !== 'offerer') {
+        if (state.negotiation.role !== 'offerer') {
           return yield* Effect.logWarning('Ignored answer received in invalid role');
         }
-        if (signal.negotiationEpoch !== state.negotiationEpoch) {
+        if (signal.negotiationEpoch !== state.negotiation.epoch) {
           return yield* Effect.logWarning('Ignored answer for inactive negotiation epoch').pipe(
             Effect.annotateLogs({
-              activeEpoch: state.negotiationEpoch,
+              activeEpoch: state.negotiation.epoch,
               receivedEpoch: signal.negotiationEpoch,
             }),
           );
         }
-        if (state.answerSdp !== null) {
+        if (state.negotiation.phase === 'answered') {
           return yield* Effect.logWarning('Ignored duplicate answer');
         }
         yield* platform.setRemoteDescription(state.generation.peerConnection, {
           type: 'answer',
           sdp: signal.sdp,
         });
-        state = { ...state, answerSdp: signal.sdp };
+        state = {
+          ...state,
+          negotiation: {
+            ...state.negotiation,
+            phase: 'answered',
+            answerSdp: signal.sdp,
+          },
+        };
         return;
       }
       case 'IceCandidate': {
-        if (signal.negotiationEpoch !== state.negotiationEpoch) {
+        const activeEpoch =
+          state.negotiation.phase === 'awaiting-offer' ? null : state.negotiation.epoch;
+        if (signal.negotiationEpoch !== activeEpoch) {
           return yield* Effect.logWarning(
             'Ignored ICE candidate for inactive negotiation epoch',
           ).pipe(
             Effect.annotateLogs({
-              activeEpoch: state.negotiationEpoch,
+              activeEpoch,
               receivedEpoch: signal.negotiationEpoch,
             }),
           );
@@ -446,7 +458,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     if (
       state._tag !== 'PeerKnown' ||
       state.generation.peerConnection !== peerConnection ||
-      state.role !== 'answerer' ||
+      state.negotiation.role !== 'answerer' ||
       state.dataChannelState._tag !== 'AwaitingRemoteDataChannel' ||
       platform.dataChannelLabel(dataChannel) !== ROOM_EVENTS_CHANNEL_LABEL
     ) {
@@ -487,13 +499,13 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     if (state._tag !== 'PeerKnown' || state.generation.peerConnection !== peerConnection) {
       return;
     }
-    if (state.negotiationEpoch === null) {
+    if (state.negotiation.phase === 'awaiting-offer') {
       return yield* Effect.logWarning('Ignored local ICE candidate without an active epoch');
     }
     yield* sendSignal({
       _tag: 'IceCandidate',
       ...candidate,
-      negotiationEpoch: state.negotiationEpoch,
+      negotiationEpoch: state.negotiation.epoch,
     });
   });
 
@@ -535,8 +547,8 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     state = { ...state, peerConnectionState: 'connected', reconnectAttempts: 0 };
     yield* Effect.logInfo('Peer connection established');
     yield* eventSink.emit({ _tag: 'Connected', peerId: state.peerId });
-    if (state.offerSdp !== null && state.answerSdp !== null) {
-      yield* emitSas(state.offerSdp, state.answerSdp);
+    if (state.negotiation.phase === 'answered') {
+      yield* emitSas(state.negotiation.offerSdp, state.negotiation.answerSdp);
     }
   });
 
@@ -705,8 +717,8 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     if (state.dataChannelState._tag === 'DataChannelOpen') {
       yield* eventSink.emit({ _tag: 'RoomEventsReady' });
     }
-    if (state.offerSdp !== null && state.answerSdp !== null) {
-      yield* emitSas(state.offerSdp, state.answerSdp);
+    if (state.negotiation.phase === 'answered') {
+      yield* emitSas(state.negotiation.offerSdp, state.negotiation.answerSdp);
     }
   });
 

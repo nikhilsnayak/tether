@@ -1,88 +1,16 @@
 import { RoundedBox } from '@react-three/drei';
 import { useFrame, type ThreeElements } from '@react-three/fiber/webgpu';
-import { useEffect, useRef, useState } from 'react';
-import { Color, Group, MathUtils, Mesh, MeshBasicMaterial, PointLight } from 'three';
+import { useRef } from 'react';
+import { Group, MathUtils, PointLight } from 'three';
 
 import type { RoomSceneProps } from '../templates/registry';
-import {
-  doorTransition,
-  doorTransitionOpenness,
-  type DoorTransition,
-  type RoomJourneyCue,
-} from './journey';
-import { createRemoteVideoSurface, containedVideoSize } from './remote-media';
+import { doorTransition, doorTransitionOpenness, type DoorTransition } from './journey';
 
 const wallMaterial = { color: '#18191d', roughness: 0.82, metalness: 0.04 } as const;
 const trimMaterial = { color: '#29282a', roughness: 0.5, metalness: 0.18 } as const;
 type Surface = { readonly color: string; readonly roughness: number; readonly metalness: number };
 
 const DISPLAY_SIZE = [6.5, 3.66] as const;
-const DISPLAY_COLORS = {
-  waiting: new Color('#071026'),
-  outside: new Color('#08090c'),
-  connecting: new Color('#0b1830'),
-  stalled: new Color('#24170d'),
-  together: new Color('#071026'),
-  reconnecting: new Color('#20120c'),
-  departed: new Color('#08090c'),
-  ended: new Color('#08090c'),
-} as const;
-
-function RemoteVideoDisplay({
-  stream,
-  journey,
-}: {
-  readonly stream: MediaStream;
-  readonly journey: RoomJourneyCue;
-}) {
-  const [surface, setSurface] = useState<ReturnType<typeof createRemoteVideoSurface> | null>(null);
-  const [videoSize, setVideoSize] = useState<readonly [number, number]>(DISPLAY_SIZE);
-  const material = useRef<MeshBasicMaterial>(null);
-  const reconnectStartedAt = useRef<number | null>(null);
-  const previousJourney = useRef<RoomJourneyCue | null>(null);
-
-  useFrame((_, delta) => {
-    if (previousJourney.current !== journey) {
-      reconnectStartedAt.current = journey === 'reconnecting' ? performance.now() : null;
-      previousJourney.current = journey;
-    }
-    const videoMaterial = material.current;
-    if (videoMaterial === null) return;
-    const reconnectElapsed =
-      reconnectStartedAt.current === null ? 0 : performance.now() - reconnectStartedAt.current;
-    const targetOpacity = journey === 'reconnecting' && reconnectElapsed > 1_500 ? 0 : 1;
-    videoMaterial.opacity = MathUtils.damp(videoMaterial.opacity, targetOpacity, 8, delta);
-  });
-
-  useEffect(() => {
-    const next = createRemoteVideoSurface(stream);
-    const updateSize = () => {
-      setVideoSize(
-        containedVideoSize(
-          next.element.videoWidth,
-          next.element.videoHeight,
-          DISPLAY_SIZE[0],
-          DISPLAY_SIZE[1],
-        ),
-      );
-    };
-    next.element.addEventListener('loadedmetadata', updateSize);
-    setSurface(next);
-    return () => {
-      next.element.removeEventListener('loadedmetadata', updateSize);
-      next.dispose();
-    };
-  }, [stream]);
-
-  if (surface === null) return null;
-  return (
-    <mesh position={[0, 2.35, -4.595]} scale={[videoSize[0], videoSize[1], 1]}>
-      <planeGeometry />
-      <meshBasicMaterial ref={material} map={surface.texture} toneMapped={false} transparent />
-    </mesh>
-  );
-}
-
 function Box({
   surface,
   ...props
@@ -101,17 +29,14 @@ export default function DuskSuiteScene({
   quality,
   qualityTier,
   reducedMotion,
-  remoteStream,
 }: RoomSceneProps) {
   const detailed = quality.ambientDetail;
-  const displayMaterial = useRef<MeshBasicMaterial>(null);
   const door = useRef<Group>(null);
   const doorLight = useRef<PointLight>(null);
   const doorAdmission = useRef<DoorTransition>({ kind: 'none', durationMs: 0 });
   const doorAdmissionElapsedMs = useRef(0);
   const previousJourney = useRef(journey);
   const previousReducedMotion = useRef(reducedMotion);
-  const signal = useRef<Group>(null);
 
   useFrame((_, delta) => {
     if (previousJourney.current !== journey || previousReducedMotion.current !== reducedMotion) {
@@ -121,10 +46,6 @@ export default function DuskSuiteScene({
       previousReducedMotion.current = reducedMotion;
     }
 
-    const material = displayMaterial.current;
-    if (material !== null) {
-      material.color.lerp(DISPLAY_COLORS[journey], 1 - Math.exp(-delta * 7));
-    }
     const doorGroup = door.current;
     if (doorGroup !== null) {
       doorAdmissionElapsedMs.current += delta * 1_000;
@@ -137,15 +58,6 @@ export default function DuskSuiteScene({
     const light = doorLight.current;
     if (light !== null)
       light.intensity = MathUtils.damp(light.intensity, admissionPending ? 7 : 0, 6, delta);
-    const signalOpacity =
-      journey === 'reconnecting' || journey === 'stalled'
-        ? 0.08 + Math.sin((performance.now() / 1_000) * 3) * 0.035
-        : 0;
-    signal.current?.traverse((object) => {
-      if (object instanceof Mesh && object.material instanceof MeshBasicMaterial) {
-        object.material.opacity = signalOpacity;
-      }
-    });
   });
 
   return (
@@ -245,19 +157,8 @@ export default function DuskSuiteScene({
       </RoundedBox>
       <mesh position={[0, 2.35, -4.61]}>
         <planeGeometry args={[...DISPLAY_SIZE]} />
-        <meshBasicMaterial ref={displayMaterial} color='#071026' toneMapped={false} />
+        <meshBasicMaterial color='#05070c' toneMapped={false} />
       </mesh>
-      <group ref={signal} position={[0, 2.35, -4.595]}>
-        {[-0.7, 0, 0.7].map((y) => (
-          <mesh key={y} position={[0, y, 0]}>
-            <planeGeometry args={[5.7, 0.035]} />
-            <meshBasicMaterial color='#f4b276' transparent opacity={0} depthWrite={false} />
-          </mesh>
-        ))}
-      </group>
-      {remoteStream !== undefined && remoteStream !== null && (
-        <RemoteVideoDisplay stream={remoteStream} journey={journey} />
-      )}
 
       <RoundedBox
         args={[6.55, 0.58, 0.78]}

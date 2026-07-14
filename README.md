@@ -30,9 +30,9 @@
 ## Features
 
 - **Private rooms for two.** Create a short room code and share its invite link without creating an account. Guests enter a display name and knock; the host explicitly allows or denies each request before any WebRTC negotiation begins.
-- **A shared Dusk Suite.** Web and desktop callers enter a responsive procedural 3D room, wait outside until admitted, and see the other caller on the room's display. Rendering quality adapts locally and reduced-motion preferences remove camera travel.
+- **A shared Dusk Suite.** Web and desktop callers enter a responsive procedural 3D room, wait outside until admitted, and each control their own visible avatar. Camera feeds stay in separate draggable tiles while the room display remains ready for future watch-along work.
 - **Web, Android, and desktop clients.** The same room works from a browser, the native Android app, or the Electron desktop app. Shared room links open directly in the installed app — Android App Links on mobile, and on desktop the web page hands off to the app through its `tether://` deep link.
-- **Peer-to-peer video and audio.** Camera and microphone media use WebRTC, with in-call mic, camera, speaker, and audio-output controls.
+- **Peer-to-peer video and audio.** Camera and microphone media use WebRTC, with separate self/remote video tiles plus in-call mic, camera, speaker, and audio-output controls. Turning a camera off never removes its avatar.
 - **Ephemeral chat.** Messages travel over the call's encrypted WebRTC data channel and disappear when the session ends.
 - **Verifiable safety codes.** Both callers can compare a code derived from the negotiated DTLS fingerprints to detect signaling-path fingerprint substitution.
 - **Resilient sessions.** Tether reconnects failed peer connections, rejects stale events, recovers stalled negotiation, and isolates chat-channel closure without interrupting media or invalidating the safety code.
@@ -100,6 +100,8 @@ On the client, room events, WebRTC callbacks, timers, and UI commands enter one 
 Each room also carries an ephemeral template ID. The server retains that ID only with the in-memory
 room record; it does not store scene assets. Web and desktop clients resolve the ID against their
 bundled template registry and render Dusk Suite locally with React Three Fiber's WebGPU renderer.
+The browser gameplay layer reads bounds, obstacles, role spawns, and camera tuning from that
+template, so additional rooms can provide different geometry without forking avatar controls.
 The room is procedural and makes no runtime requests for third-party models, textures,
 environments, fonts, or audio. Android participates in the same room protocol and template
 metadata but keeps its existing native call interface.
@@ -122,7 +124,8 @@ bun run dev --filter=server --filter=web
 Open `http://localhost:5173` in two tabs. Start a call and complete the media check in the first tab,
 then open its invite link in the second, enter a name, and knock. The guest waits outside
 the room until the host allows the request; admission starts the peer connection and brings both
-callers to the room display. Localhost is treated as a secure browser context, so camera,
+callers into the shared room. On web or desktop, use WASD or the arrow keys to move and turn,
+R to recenter the third-person camera, drag to orbit, and scroll to zoom. Localhost is treated as a secure browser context, so camera,
 microphone, and graphics APIs are available during development.
 
 ## Configuration

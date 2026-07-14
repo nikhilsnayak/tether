@@ -97,7 +97,7 @@ export const expectConnected = (page: Page) =>
 export const expectWaitingForPeer = (page: Page) =>
   Promise.all([
     expect(page.getByText('Share this room to invite someone.')).toBeVisible(),
-    expect(page.getByLabel('Dusk Suite interactive preview')).toHaveAttribute(
+    expect(page.getByLabel('Dusk Suite room scene')).toHaveAttribute(
       'data-room-journey',
       'waiting',
     ),
@@ -110,7 +110,7 @@ export const expectPeerDeparted = (page: Page) =>
     expect(
       page.getByText('They left the call. You can wait here in case they rejoin.'),
     ).toBeVisible(),
-    expect(page.getByLabel('Dusk Suite interactive preview')).toHaveAttribute(
+    expect(page.getByLabel('Dusk Suite room scene')).toHaveAttribute(
       'data-room-journey',
       'waiting',
     ),

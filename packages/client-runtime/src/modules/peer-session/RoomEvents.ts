@@ -1,4 +1,4 @@
-import { Exit, Result, Schema } from 'effect';
+import { Result, Schema } from 'effect';
 
 import { utf8ByteLength } from '../../internal/Utf8';
 
@@ -62,6 +62,13 @@ export const RoomEventSchema = Schema.Union([
   AvatarPoseRoomEvent,
   MediaStateRoomEvent,
 ]);
+const RoomEventJsonSchema = Schema.fromJsonString(RoomEventSchema);
+const decodeRoomEventJson = Schema.decodeUnknownResult(RoomEventJsonSchema, {
+  onExcessProperty: 'error',
+});
+const encodeRoomEventJson = Schema.encodeResult(RoomEventJsonSchema, {
+  onExcessProperty: 'error',
+});
 
 export type RoomEvent = typeof RoomEventSchema.Type;
 export type AvatarPose = Omit<typeof AvatarPoseRoomEvent.Type, 'version' | 'type' | 'sequence'>;
@@ -78,33 +85,20 @@ export const takeRoomEventCounter = (
     ? { value: next, next: next + 1 }
     : null;
 
-const decodeStructuredRoomEvent = (
-  input: unknown,
-): Result.Result<RoomEvent, RoomEventCodecError> => {
-  const decoded = Schema.decodeUnknownExit(RoomEventSchema)(input, {
-    onExcessProperty: 'error',
-  });
-  return Exit.isSuccess(decoded) ? Result.succeed(decoded.value) : Result.fail('invalid-event');
-};
-
 export const decodeRoomEvent = (input: unknown): Result.Result<RoomEvent, RoomEventCodecError> => {
   if (typeof input !== 'string') return Result.fail('not-text');
   if (utf8ByteLength(input) > MAX_ROOM_EVENT_BYTES) {
     return Result.fail('oversized');
   }
 
-  const parsed = Schema.decodeUnknownExit(Schema.UnknownFromJsonString)(input);
-  return Exit.isSuccess(parsed)
-    ? decodeStructuredRoomEvent(parsed.value)
-    : Result.fail('invalid-event');
+  return Result.mapError(decodeRoomEventJson(input), () => 'invalid-event' as const);
 };
 
 export const encodeRoomEvent = (event: RoomEvent): Result.Result<string, RoomEventCodecError> => {
-  const validated = decodeStructuredRoomEvent(event);
-  if (Result.isFailure(validated)) return Result.fail(validated.failure);
+  const encoded = encodeRoomEventJson(event);
+  if (Result.isFailure(encoded)) return Result.fail('invalid-event');
 
-  const encoded = JSON.stringify(validated.success);
-  return utf8ByteLength(encoded) <= MAX_ROOM_EVENT_BYTES
-    ? Result.succeed(encoded)
+  return utf8ByteLength(encoded.success) <= MAX_ROOM_EVENT_BYTES
+    ? Result.succeed(encoded.success)
     : Result.fail('oversized');
 };

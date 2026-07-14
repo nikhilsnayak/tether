@@ -45,7 +45,7 @@ test('Dusk Suite loads without third-party room assets', async ({ page }, testIn
   });
 
   await createRoom(page);
-  await expect(page.getByLabel('Dusk Suite interactive preview').locator('canvas')).toBeVisible();
+  await expect(page.getByLabel('Dusk Suite room scene').locator('canvas')).toBeVisible();
   expect(externalAssets).toEqual([]);
 });
 
@@ -59,7 +59,7 @@ test('a guest waits at the exterior before knocking', async ({ browser, page }, 
     const roomId = await createRoom(page);
     await prepareGuestAtThreshold(guest, roomId);
 
-    const scene = guest.getByLabel('Dusk Suite interactive preview');
+    const scene = guest.getByLabel('Dusk Suite room scene');
     await expect(scene.locator('canvas')).toBeVisible();
     await expect(scene).toHaveAttribute('data-room-journey', 'outside');
     await expect(scene).toHaveAttribute('data-room-location', 'outside');
