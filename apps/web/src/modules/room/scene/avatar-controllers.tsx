@@ -75,7 +75,7 @@ export function LocalAvatarController({
     ) {
       return;
     }
-    sendAvatarPose(next);
+    if (!sendAvatarPose(next)) return;
     lastSentAtMs.current = nowMs;
     lastSentPose.current = next;
     if (surfaceRef.current !== null) {
