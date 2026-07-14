@@ -91,6 +91,13 @@ export function ThirdPersonCamera({
       touchPointers.current.delete(event.pointerId);
       if (touchPointers.current.size < 2) pinchDistance.current = null;
       if (drag.current?.pointerId === event.pointerId) drag.current = null;
+      if (event.pointerType === 'touch' && touchPointers.current.size === 1) {
+        const remaining = touchPointers.current.entries().next().value;
+        if (remaining !== undefined) {
+          const [pointerId, position] = remaining;
+          drag.current = { pointerId, ...position };
+        }
+      }
     };
     const wheel = (event: WheelEvent) => {
       if ((event.target as Element).closest('[data-room-scene-ignore-gesture]') !== null) return;
