@@ -35,7 +35,7 @@
     "react-native-incall-manager": "^4.2.1",
     "react-native-reanimated": "4.5.0",
     "react-native-safe-area-context": "~5.7.0",
-    "react-native-svg": "15.15.4",
+    "react-native-svg": "15.15.5",
     "react-native-webrtc": "^124.0.7",
     "react-native-worklets": "0.10.0",
     "typescript": "catalog:",
