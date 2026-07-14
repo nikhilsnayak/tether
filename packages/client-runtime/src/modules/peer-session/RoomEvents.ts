@@ -64,7 +64,7 @@ export const RoomEventSchema = Schema.Union([
 ]);
 const RoomEventJsonSchema = Schema.fromJsonString(RoomEventSchema);
 const decodeRoomEventJson = Schema.decodeUnknownResult(RoomEventJsonSchema, {
-  onExcessProperty: 'error',
+  onExcessProperty: 'ignore',
 });
 const encodeRoomEventJson = Schema.encodeResult(RoomEventJsonSchema, {
   onExcessProperty: 'error',

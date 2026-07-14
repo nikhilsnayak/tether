@@ -57,7 +57,7 @@ describe('room-event codec', () => {
     assert.isNull(takeRoomEventCounter(2_147_483_648));
   });
 
-  it('rejects malformed, non-text, oversized, unknown, and inexact events', () => {
+  it('rejects malformed, non-text, oversized, and unknown events', () => {
     assert.deepStrictEqual(decodeRoomEvent(new Uint8Array()), Result.fail('not-text'));
     assert.deepStrictEqual(decodeRoomEvent('{'), Result.fail('invalid-event'));
     assert.deepStrictEqual(
@@ -68,7 +68,6 @@ describe('room-event codec', () => {
     for (const event of [
       { version: 2, type: 'chat-message', text: 'hello' },
       { version: ROOM_EVENT_VERSION, type: 'unknown', text: 'hello' },
-      { version: ROOM_EVENT_VERSION, type: 'chat-message', text: 'hello', surprise: true },
       { version: ROOM_EVENT_VERSION, type: 'chat-message', text: 'x'.repeat(4_001) },
       {
         version: ROOM_EVENT_VERSION,
@@ -80,6 +79,28 @@ describe('room-event codec', () => {
     ]) {
       assert.deepStrictEqual(decodeRoomEvent(JSON.stringify(event)), Result.fail('invalid-event'));
     }
+  });
+
+  it('ignores unknown fields from compatible future clients', () => {
+    assert.deepStrictEqual(
+      decodeRoomEvent(
+        JSON.stringify({
+          version: ROOM_EVENT_VERSION,
+          type: 'media-state',
+          revision: 1,
+          cameraOn: true,
+          microphoneOn: false,
+          screenSharing: true,
+        }),
+      ),
+      Result.succeed({
+        version: ROOM_EVENT_VERSION,
+        type: 'media-state',
+        revision: 1,
+        cameraOn: true,
+        microphoneOn: false,
+      }),
+    );
   });
 
   it('rejects hostile avatar values without normalizing them', () => {
