@@ -4,6 +4,7 @@ import { useEffect, useRef, type RefObject } from 'react';
 import { MathUtils, Vector3 } from 'three';
 
 import type { RoomTemplate } from '../templates/registry';
+import { selectCameraFraming } from './config';
 import type { RoomJourneyCue } from './journey';
 
 export function ThirdPersonCamera({
@@ -121,15 +122,19 @@ export function ThirdPersonCamera({
       previousRecenterSignal.current = recenterSignal.current;
     }
 
-    const fixedFraming =
-      journey === 'outside' ? template.camera.outside : template.camera.landscape;
+    const framing = selectCameraFraming(
+      size.width,
+      size.height,
+      journey === 'outside',
+      template.camera,
+    );
     if (mode === 'preview' || journey === 'outside') {
-      desiredPosition.current.set(...fixedFraming.position);
+      desiredPosition.current.set(...framing.position);
       camera.position.lerp(desiredPosition.current, reducedMotion ? 1 : 1 - Math.exp(-delta * 6));
       target.current.set(
-        fixedFraming.target[0] + Math.sin(orbit.current.yaw) * 2,
-        fixedFraming.target[1] + orbit.current.pitch * 2,
-        fixedFraming.target[2],
+        framing.target[0] + Math.sin(orbit.current.yaw) * 2,
+        framing.target[1] + orbit.current.pitch * 2,
+        framing.target[2],
       );
       camera.lookAt(target.current);
     } else {
@@ -154,7 +159,7 @@ export function ThirdPersonCamera({
       camera.lookAt(target.current);
     }
     if ('fov' in camera) {
-      const fieldOfView = size.width < size.height ? template.camera.portrait.fieldOfView : 48;
+      const fieldOfView = framing.fieldOfView;
       if (camera.fov !== fieldOfView) {
         camera.fov = fieldOfView;
         camera.updateProjectionMatrix();
