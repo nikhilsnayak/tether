@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { resolve } from 'node:path';
 
 import babel from '@rolldown/plugin-babel';
@@ -12,14 +13,18 @@ import { defineConfig } from 'vite';
 // the production bundle loads over file:// inside Electron. The signaling
 // server URL comes from the reused web app-client (deployed by default,
 // overridable with VITE_SERVER_URL via apps/desktop/.env).
-export default defineConfig(async () => {
+const DEVELOPMENT_CSP_NONCE = randomBytes(16).toString('base64url');
+
+export default defineConfig(async ({ command }) => {
   const { devtools } = await import('@tanstack/devtools-vite');
+  const isDevelopmentServer = command === 'serve';
 
   return {
     root: resolve(__dirname, 'src/renderer'),
     publicDir: resolve(__dirname, 'build'),
     base: './',
     envDir: __dirname,
+    html: isDevelopmentServer ? { cspNonce: DEVELOPMENT_CSP_NONCE } : undefined,
     server: {
       port: 5273,
       strictPort: true,
@@ -32,6 +37,15 @@ export default defineConfig(async () => {
       emptyOutDir: true,
     },
     plugins: [
+      {
+        name: 'desktop-development-csp',
+        apply: 'serve',
+        transformIndexHtml: {
+          order: 'pre',
+          handler: (html: string) =>
+            html.replace("style-src 'self'", `style-src 'self' 'nonce-${DEVELOPMENT_CSP_NONCE}'`),
+        },
+      },
       devtools(),
       tanstackRouter({
         target: 'react',
