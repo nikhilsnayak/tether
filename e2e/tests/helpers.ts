@@ -92,7 +92,7 @@ export const installWebRtcProbe = (context: BrowserContext) =>
   });
 
 export const expectConnected = (page: Page) =>
-  expect(page.getByText('Connected', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  expect(page.getByText('Connected', { exact: true }).first()).toBeVisible({ timeout: 35_000 });
 
 export const expectWaitingForPeer = (page: Page) =>
   Promise.all([

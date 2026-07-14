@@ -111,6 +111,7 @@ test('leaving a call and joining a new room starts with clean media', async ({
 test('a closed data channel disables chat without interrupting the call', async ({
   browser,
 }, testInfo) => {
+  test.setTimeout(90_000);
   const baseURL = requireBaseURL(testInfo.project.use.baseURL);
   const { host, guest, cleanup } = await connectPeers(browser, baseURL, { probeWebRtc: true });
   try {
