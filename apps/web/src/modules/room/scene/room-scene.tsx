@@ -23,6 +23,7 @@ import {
   ROOM_RENDERER_SETTINGS,
   renderingQualitySettings,
   sampleAdaptiveQuality,
+  selectCameraFraming,
   type QualityPreference,
   resolveQualityTier,
 } from './config';
@@ -87,8 +88,6 @@ export function RoomScene({
   const quality = QUALITY_CONFIGS[qualityTier];
   const rendering = renderingQualitySettings(quality);
   const SceneEnvironment = template.scene;
-  const initialCameraFraming =
-    activeJourney === 'outside' ? template.camera.outside : template.camera.landscape;
 
   const updateQuality = (preference: QualityPreference) => {
     setQualityPreference(preference);
@@ -131,10 +130,21 @@ export function RoomScene({
     >
       <Canvas
         camera={{
-          position: [...initialCameraFraming.position],
-          fov: initialCameraFraming.fieldOfView,
+          position: [...template.camera.landscape.position],
+          fov: template.camera.landscape.fieldOfView,
         }}
         dpr={rendering.canvas.dpr}
+        onCreated={({ camera, size }) => {
+          const framing = selectCameraFraming(
+            size.width,
+            size.height,
+            activeJourney === 'outside',
+            template.camera,
+          );
+          camera.position.set(...framing.position);
+          if ('fov' in camera) camera.fov = framing.fieldOfView;
+          camera.updateProjectionMatrix();
+        }}
         shadows={rendering.canvas.shadows}
         renderer={ROOM_RENDERER_SETTINGS}
       >
