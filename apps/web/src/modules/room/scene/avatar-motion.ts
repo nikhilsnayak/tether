@@ -101,8 +101,12 @@ const resolveObstacle = (
     { x: point.x, z: minZ },
     { x: point.x, z: maxZ },
   ];
-  return candidates.reduce((nearest, candidate) =>
-    squaredDistance(candidate, previous) < squaredDistance(nearest, previous) ? candidate : nearest,
+  return candidates.reduce(
+    (nearest, candidate) =>
+      squaredDistance(candidate, previous) < squaredDistance(nearest, previous)
+        ? candidate
+        : nearest,
+    { x: minX, z: point.z },
   );
 };
 
