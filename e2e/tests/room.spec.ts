@@ -225,6 +225,18 @@ test('complete room flow', async ({ browser, page }, testInfo) => {
       await expect.poll(() => guestScene.getAttribute('data-room-remote-pose')).not.toBeNull();
       expect(await guestScene.getAttribute('data-room-local-pose')).toBe(guestLocalBefore);
 
+      const turnLeft = page.getByRole('button', { name: 'Turn avatar left' });
+      await turnLeft.click();
+      await expect(turnLeft).toBeFocused();
+      const hostAfterControlTap = await hostScene.getAttribute('data-room-local-pose');
+      await page.keyboard.down('w');
+      await page.waitForTimeout(350);
+      await page.keyboard.up('w');
+      await expect
+        .poll(() => hostScene.getAttribute('data-room-local-pose'))
+        .not.toBe(hostAfterControlTap);
+      await expect(hostScene).toHaveAttribute('data-room-local-pose', /,idle$/);
+
       const hostLocalAfter = await hostScene.getAttribute('data-room-local-pose');
       const guestLocalStill = await guestScene.getAttribute('data-room-local-pose');
       await guestPage.keyboard.down('ArrowUp');

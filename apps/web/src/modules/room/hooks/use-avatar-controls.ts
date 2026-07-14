@@ -18,9 +18,7 @@ const MOVEMENT_HOTKEYS = [
 
 const shouldIgnoreKeyboardTarget = (target: EventTarget | null): boolean =>
   target instanceof Element &&
-  target.closest(
-    'input, textarea, select, [contenteditable="true"], [role="dialog"], [data-room-scene-ignore-gesture]',
-  ) !== null;
+  target.closest('input, textarea, select, [contenteditable="true"], [role="dialog"]') !== null;
 
 export function useAvatarControls(enabled: boolean, listen: boolean) {
   const heldKeys = useHeldKeys();
