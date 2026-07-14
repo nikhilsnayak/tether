@@ -1,5 +1,6 @@
 import { useFrame, useThree } from '@react-three/fiber/webgpu';
 import { useEffect, useRef } from 'react';
+import type { Renderer } from 'three/webgpu';
 
 export function FramePerformanceMonitor({
   onSample,
@@ -26,15 +27,17 @@ export function ContextLossGuard({
 }) {
   const { renderer } = useThree();
   useEffect(() => {
-    let active = true;
-    const backend = renderer.backend as { readonly device?: GPUDevice };
-    if (backend.device !== undefined) {
-      void backend.device.lost.then(() => {
-        if (active) updateContextLost(true);
-      });
-    }
+    const roomRenderer = renderer as Renderer;
+    const previousOnDeviceLost = roomRenderer.onDeviceLost;
+    const onDeviceLost: Renderer['onDeviceLost'] = (info) => {
+      previousOnDeviceLost.call(roomRenderer, info);
+      updateContextLost(true);
+    };
+    roomRenderer.onDeviceLost = onDeviceLost;
     return () => {
-      active = false;
+      if (roomRenderer.onDeviceLost === onDeviceLost) {
+        roomRenderer.onDeviceLost = previousOnDeviceLost;
+      }
     };
   }, [renderer, updateContextLost]);
   return null;
