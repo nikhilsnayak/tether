@@ -221,11 +221,10 @@ test('complete room flow', async ({ browser, page }, testInfo) => {
         const hostLocalBefore = await hostScene.getAttribute('data-room-local-pose');
 
         await page.keyboard.down('w');
-        await page.waitForTimeout(350);
-        await page.keyboard.up('w');
         await expect
           .poll(() => hostScene.getAttribute('data-room-local-pose'))
           .not.toBe(hostLocalBefore);
+        await page.keyboard.up('w');
         await expect.poll(() => guestScene.getAttribute('data-room-remote-pose')).not.toBeNull();
         expect(await guestScene.getAttribute('data-room-local-pose')).toBe(guestLocalBefore);
 
@@ -234,21 +233,19 @@ test('complete room flow', async ({ browser, page }, testInfo) => {
         await expect(turnLeft).toBeFocused();
         const hostAfterControlTap = await hostScene.getAttribute('data-room-local-pose');
         await page.keyboard.down('w');
-        await page.waitForTimeout(350);
-        await page.keyboard.up('w');
         await expect
           .poll(() => hostScene.getAttribute('data-room-local-pose'))
           .not.toBe(hostAfterControlTap);
+        await page.keyboard.up('w');
         await expect(hostScene).toHaveAttribute('data-room-local-pose', /,idle$/);
 
         const hostLocalAfter = await hostScene.getAttribute('data-room-local-pose');
         const guestLocalStill = await guestScene.getAttribute('data-room-local-pose');
         await guestPage.keyboard.down('ArrowUp');
-        await guestPage.waitForTimeout(350);
-        await guestPage.keyboard.up('ArrowUp');
         await expect
           .poll(() => guestScene.getAttribute('data-room-local-pose'))
           .not.toBe(guestLocalStill);
+        await guestPage.keyboard.up('ArrowUp');
         expect(await hostScene.getAttribute('data-room-local-pose')).toBe(hostLocalAfter);
       });
     }
