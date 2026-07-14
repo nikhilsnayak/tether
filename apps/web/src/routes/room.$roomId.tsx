@@ -120,7 +120,8 @@ function GuestRoomEntry({
     return (
       <MediaSetupPanel
         template={resolution.template}
-        actionLabel='Knock to join'
+        entryContext='guest'
+        actionLabel='Knock on door'
         onBack={onLeave}
         onComplete={onMedia}
       />

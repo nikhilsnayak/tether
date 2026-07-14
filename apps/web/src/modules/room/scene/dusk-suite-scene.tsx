@@ -4,7 +4,12 @@ import { useEffect, useRef, useState } from 'react';
 import { Color, Group, MathUtils, Mesh, MeshBasicMaterial, PointLight } from 'three';
 
 import type { RoomSceneProps } from '../templates/registry';
-import type { RoomJourneyCue } from './journey';
+import {
+  doorTransition,
+  doorTransitionOpenness,
+  type DoorTransition,
+  type RoomJourneyCue,
+} from './journey';
 import { createRemoteVideoSurface, containedVideoSize } from './remote-media';
 
 const wallMaterial = { color: '#18191d', roughness: 0.82, metalness: 0.04 } as const;
@@ -15,12 +20,12 @@ const DISPLAY_SIZE = [6.5, 3.66] as const;
 const DISPLAY_COLORS = {
   waiting: new Color('#071026'),
   outside: new Color('#08090c'),
-  'screen-connecting': new Color('#0b1830'),
-  'screen-stalled': new Color('#24170d'),
-  'screen-live': new Color('#071026'),
-  'screen-reconnecting': new Color('#20120c'),
-  'screen-departed': new Color('#08090c'),
-  'screen-ended': new Color('#08090c'),
+  connecting: new Color('#0b1830'),
+  stalled: new Color('#24170d'),
+  together: new Color('#071026'),
+  reconnecting: new Color('#20120c'),
+  departed: new Color('#08090c'),
+  ended: new Color('#08090c'),
 } as const;
 
 function RemoteVideoDisplay({
@@ -38,14 +43,14 @@ function RemoteVideoDisplay({
 
   useFrame((_, delta) => {
     if (previousJourney.current !== journey) {
-      reconnectStartedAt.current = journey === 'screen-reconnecting' ? performance.now() : null;
+      reconnectStartedAt.current = journey === 'reconnecting' ? performance.now() : null;
       previousJourney.current = journey;
     }
     const videoMaterial = material.current;
     if (videoMaterial === null) return;
     const reconnectElapsed =
       reconnectStartedAt.current === null ? 0 : performance.now() - reconnectStartedAt.current;
-    const targetOpacity = journey === 'screen-reconnecting' && reconnectElapsed > 1_500 ? 0 : 1;
+    const targetOpacity = journey === 'reconnecting' && reconnectElapsed > 1_500 ? 0 : 1;
     videoMaterial.opacity = MathUtils.damp(videoMaterial.opacity, targetOpacity, 8, delta);
   });
 
@@ -95,38 +100,45 @@ export default function DuskSuiteScene({
   journey = 'waiting',
   quality,
   qualityTier,
+  reducedMotion,
   remoteStream,
 }: RoomSceneProps) {
   const detailed = quality.ambientDetail;
   const displayMaterial = useRef<MeshBasicMaterial>(null);
   const door = useRef<Group>(null);
   const doorLight = useRef<PointLight>(null);
+  const doorAdmission = useRef<DoorTransition>({ kind: 'none', durationMs: 0 });
+  const doorAdmissionElapsedMs = useRef(0);
+  const previousJourney = useRef(journey);
+  const previousReducedMotion = useRef(reducedMotion);
   const signal = useRef<Group>(null);
 
   useFrame((_, delta) => {
+    if (previousJourney.current !== journey || previousReducedMotion.current !== reducedMotion) {
+      doorAdmission.current = doorTransition(previousJourney.current, journey, reducedMotion);
+      doorAdmissionElapsedMs.current = 0;
+      previousJourney.current = journey;
+      previousReducedMotion.current = reducedMotion;
+    }
+
     const material = displayMaterial.current;
     if (material !== null) {
       material.color.lerp(DISPLAY_COLORS[journey], 1 - Math.exp(-delta * 7));
     }
     const doorGroup = door.current;
     if (doorGroup !== null) {
-      const isOpen =
-        journey === 'screen-connecting' ||
-        journey === 'screen-stalled' ||
-        journey === 'screen-live' ||
-        journey === 'screen-reconnecting';
-      doorGroup.rotation.y = MathUtils.damp(
-        doorGroup.rotation.y,
-        -Math.PI / 2 + (isOpen ? -0.82 : 0),
-        4.5,
-        delta,
+      doorAdmissionElapsedMs.current += delta * 1_000;
+      const openness = doorTransitionOpenness(
+        doorAdmission.current,
+        doorAdmissionElapsedMs.current,
       );
+      doorGroup.rotation.y = -Math.PI / 2 - openness * 0.82;
     }
     const light = doorLight.current;
     if (light !== null)
       light.intensity = MathUtils.damp(light.intensity, admissionPending ? 7 : 0, 6, delta);
     const signalOpacity =
-      journey === 'screen-reconnecting' || journey === 'screen-stalled'
+      journey === 'reconnecting' || journey === 'stalled'
         ? 0.08 + Math.sin((performance.now() / 1_000) * 3) * 0.035
         : 0;
     signal.current?.traverse((object) => {

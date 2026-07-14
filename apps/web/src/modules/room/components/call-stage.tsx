@@ -73,13 +73,10 @@ export function CallStage({
   const pendingJoin =
     view.pendingJoinRequests.find((request) => !handlingJoinPeerIds.has(request.peerId)) ?? null;
   const sasConfirmed = view.sas !== null && confirmedSas === view.sas;
-  const journey = roomJourneyCue(session.intent, view.status, remoteStream !== null);
-  const displayLabel =
-    journey === 'screen-live' && !remoteVideoAvailable
-      ? 'The other person is here'
-      : roomJourneyLabel(journey);
+  const journey = roomJourneyCue(session.intent, view.status);
+  const displayLabel = roomJourneyLabel(journey);
   const displayHint =
-    journey === 'screen-live' && !remoteVideoAvailable
+    journey === 'together' && !remoteVideoAvailable
       ? 'Their camera is unavailable.'
       : presentation.hint;
 
@@ -120,7 +117,7 @@ export function CallStage({
         template={template}
         admissionPending={pendingJoin !== null}
         remoteStream={
-          remoteStream !== null && (journey === 'screen-live' || journey === 'screen-reconnecting')
+          remoteStream !== null && (journey === 'together' || journey === 'reconnecting')
             ? remoteStream
             : null
         }
@@ -145,7 +142,7 @@ export function CallStage({
           </Button>
         </section>
       ) : (
-        (journey !== 'screen-live' || !remoteVideoAvailable) && (
+        (journey !== 'together' || !remoteVideoAvailable) && (
           <div
             aria-label={displayLabel}
             className='pointer-events-none absolute top-[32%] left-1/2 grid w-[min(48vw,32rem)] -translate-x-1/2 justify-items-center gap-2 px-4 text-center drop-shadow-lg max-sm:top-[30%] max-sm:w-[78vw]'
@@ -248,7 +245,7 @@ export function CallStage({
             </Button>
           </section>
         )}
-        {journey === 'screen-departed' && (
+        {journey === 'departed' && (
           <section
             aria-label='Call ended'
             className='border-border bg-background/90 pointer-events-auto absolute top-1/2 left-1/2 w-[min(24rem,calc(100%-2rem))] -translate-x-1/2 -translate-y-1/2 space-y-3 border p-5 text-center backdrop-blur-sm'

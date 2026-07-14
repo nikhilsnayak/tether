@@ -2,12 +2,15 @@ import { expect, test, type Page } from '@playwright/test';
 
 import {
   admitGuest,
+  createRoom,
+  denyGuest,
   expectConnected,
   expectPeerDeparted,
   expectPreparedMediaTransferred,
   expectWaitingForPeer,
   installWebRtcProbe,
   joinRoom,
+  prepareGuestAtThreshold,
   requireBaseURL,
   startHostingRoom,
 } from './helpers';
@@ -93,12 +96,20 @@ test('complete room flow', async ({ browser, page }, testInfo) => {
     });
 
     await test.step('guest joins by room code and media connects', async () => {
-      await joinRoom(guestPage, roomId);
+      await prepareGuestAtThreshold(guestPage, roomId);
+      const guestScene = guestPage.getByLabel('Dusk Suite interactive preview');
+      await expect(guestScene.locator('canvas')).toBeVisible();
+      await expect(guestScene).toHaveAttribute('data-room-journey', 'outside');
+      await expect(guestScene).toHaveAttribute('data-room-location', 'outside');
+      await expect(guestScene).toHaveAttribute('data-room-admission', 'idle');
+      await expect(page.getByRole('region', { name: 'Join request' })).toBeHidden();
+
+      await guestPage.getByRole('button', { name: 'Knock on door', exact: true }).click();
       await expect(guestPage.getByLabel('Dusk Suite interactive preview')).toHaveAttribute(
         'data-room-journey',
-        /outside|screen-connecting/,
+        /outside|connecting/,
       );
-      await expect(guestPage.getByRole('region', { name: 'Waiting for the host' })).toBeVisible();
+      await expect(guestPage.getByRole('region', { name: 'Waiting outside' })).toBeVisible();
       await expect(guestPage.getByRole('button', { name: 'Leave room' })).toBeVisible();
       await expect(guestPage.getByRole('toolbar', { name: 'Call controls' })).toBeHidden();
       await expect(guestPage.getByLabel('Room rendering quality')).toBeHidden();
@@ -110,6 +121,16 @@ test('complete room flow', async ({ browser, page }, testInfo) => {
       );
       await admitGuest(page);
       await Promise.all([expectConnected(page), expectConnected(guestPage)]);
+      await Promise.all([
+        expect(page.getByLabel('Dusk Suite interactive preview')).toHaveAttribute(
+          'data-room-journey',
+          'together',
+        ),
+        expect(guestPage.getByLabel('Dusk Suite interactive preview')).toHaveAttribute(
+          'data-room-location',
+          'inside',
+        ),
+      ]);
       await Promise.all([expectLocalAndRemoteMedia(page), expectLocalAndRemoteMedia(guestPage)]);
       await Promise.all([
         page.getByRole('button', { name: 'We see the same code' }).click(),
@@ -209,12 +230,46 @@ test('complete room flow', async ({ browser, page }, testInfo) => {
         .toBe(true);
       await expect(replacementPage.getByLabel('Dusk Suite interactive preview')).toHaveAttribute(
         'data-room-journey',
-        'screen-departed',
+        'departed',
       );
       await replacementPage.getByRole('button', { name: 'Return home' }).click();
       await expect(replacementPage).toHaveURL('/');
     });
   } finally {
     await Promise.all([guestContext.close(), replacementContext.close()]);
+  }
+});
+
+test('denying a knock keeps the host inside and the guest outside', async ({
+  browser,
+  page,
+}, testInfo) => {
+  const baseURL = requireBaseURL(testInfo.project.use.baseURL);
+  await installWebRtcProbe(page.context());
+  const guestContext = await browser.newContext({ baseURL, storageState: seededStorageState });
+  await installWebRtcProbe(guestContext);
+  const guest = await guestContext.newPage();
+
+  try {
+    const roomId = await createRoom(page);
+    await joinRoom(guest, roomId, 'Uninvited guest');
+    await expect(page.getByRole('region', { name: 'Join request' })).toBeVisible();
+    await denyGuest(page);
+
+    await expect(page.getByLabel('Dusk Suite interactive preview')).toHaveAttribute(
+      'data-room-journey',
+      'waiting',
+    );
+    await expect(page.getByLabel('Dusk Suite interactive preview')).toHaveAttribute(
+      'data-room-location',
+      'inside',
+    );
+    await expect(guest.getByText('Request declined', { exact: true }).first()).toBeVisible();
+    await expect(guest.getByLabel('Dusk Suite interactive preview')).toHaveAttribute(
+      'data-room-journey',
+      'ended',
+    );
+  } finally {
+    await guestContext.close();
   }
 });

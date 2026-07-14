@@ -3,21 +3,28 @@ import type { PeerSessionView, RoomSession } from '@tether/client-runtime/module
 export type RoomJourneyCue =
   | 'waiting'
   | 'outside'
-  | 'screen-connecting'
-  | 'screen-stalled'
-  | 'screen-live'
-  | 'screen-reconnecting'
-  | 'screen-departed'
-  | 'screen-ended';
+  | 'connecting'
+  | 'stalled'
+  | 'together'
+  | 'reconnecting'
+  | 'departed'
+  | 'ended';
 
 export type RoomTransition =
   | { readonly kind: 'none'; readonly durationMs: 0 }
   | { readonly kind: 'enter'; readonly durationMs: number };
 
+export type DoorTransition =
+  | { readonly kind: 'none'; readonly durationMs: 0 }
+  | { readonly kind: 'admit'; readonly durationMs: number };
+
+const ADMISSION_DURATION_MS = 1_800;
+const ADMISSION_OPEN_FRACTION = 0.35;
+const ADMISSION_CLOSE_FRACTION = 0.6;
+
 export function roomJourneyCue(
   intent: RoomSession['intent'],
   status: PeerSessionView['status'],
-  hasRemoteStream: boolean,
 ): RoomJourneyCue {
   switch (status) {
     case 'disconnected':
@@ -27,35 +34,61 @@ export function roomJourneyCue(
     case 'peer-already-joined':
     case 'room-not-found':
     case 'join-denied':
-      return 'screen-ended';
+      return 'ended';
     case 'awaiting-approval':
       return 'outside';
     case 'peer-departed':
-      return intent === 'join' ? 'screen-departed' : 'waiting';
+      return intent === 'join' ? 'departed' : 'waiting';
     case 'waiting-for-peer':
       return 'waiting';
     case 'reconnecting':
     case 'transport-lost':
-      return 'screen-reconnecting';
+      return 'reconnecting';
     case 'negotiation-stalled':
-      return 'screen-stalled';
+      return 'stalled';
     case 'connecting':
-      return 'screen-connecting';
+      return 'connecting';
     case 'connected':
-      return hasRemoteStream ? 'screen-live' : 'screen-connecting';
+      return 'together';
   }
 }
+
+const successfulAdmission = (previous: RoomJourneyCue, next: RoomJourneyCue) =>
+  (previous === 'waiting' || previous === 'outside') &&
+  (next === 'connecting' || next === 'together');
 
 export function roomTransition(
   previous: RoomJourneyCue,
   next: RoomJourneyCue,
   reducedMotion: boolean,
 ): RoomTransition {
-  if (previous === next) return { kind: 'none', durationMs: 0 };
-  if (previous === 'outside' && next === 'screen-connecting') {
-    return reducedMotion ? { kind: 'none', durationMs: 0 } : { kind: 'enter', durationMs: 900 };
+  if (!reducedMotion && previous === 'outside' && (next === 'connecting' || next === 'together')) {
+    return { kind: 'enter', durationMs: 900 };
   }
   return { kind: 'none', durationMs: 0 };
+}
+
+export function doorTransition(
+  previous: RoomJourneyCue,
+  next: RoomJourneyCue,
+  reducedMotion: boolean,
+): DoorTransition {
+  return !reducedMotion && successfulAdmission(previous, next)
+    ? { kind: 'admit', durationMs: ADMISSION_DURATION_MS }
+    : { kind: 'none', durationMs: 0 };
+}
+
+const smoothstep = (value: number) => value * value * (3 - 2 * value);
+
+export function doorTransitionOpenness(transition: DoorTransition, elapsedMs: number): number {
+  if (transition.kind === 'none' || elapsedMs <= 0 || elapsedMs >= transition.durationMs) return 0;
+
+  const progress = elapsedMs / transition.durationMs;
+  if (progress < ADMISSION_OPEN_FRACTION) {
+    return smoothstep(progress / ADMISSION_OPEN_FRACTION);
+  }
+  if (progress <= ADMISSION_CLOSE_FRACTION) return 1;
+  return 1 - smoothstep((progress - ADMISSION_CLOSE_FRACTION) / (1 - ADMISSION_CLOSE_FRACTION));
 }
 
 export const roomJourneyLabel = (cue: RoomJourneyCue): string => {
@@ -63,18 +96,18 @@ export const roomJourneyLabel = (cue: RoomJourneyCue): string => {
     case 'waiting':
       return 'Waiting for the other person';
     case 'outside':
-      return 'Waiting for the host';
-    case 'screen-connecting':
+      return 'Waiting outside';
+    case 'connecting':
       return 'Connecting';
-    case 'screen-stalled':
+    case 'stalled':
       return 'Still connecting';
-    case 'screen-live':
-      return 'Remote video';
-    case 'screen-reconnecting':
+    case 'together':
+      return 'The other person is here';
+    case 'reconnecting':
       return 'Reconnecting';
-    case 'screen-departed':
+    case 'departed':
       return 'The other person left';
-    case 'screen-ended':
+    case 'ended':
       return 'Call ended';
   }
 };

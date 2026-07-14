@@ -14,6 +14,7 @@ export interface RoomSceneProps {
   readonly quality: QualityConfig;
   readonly qualityTier: ResolvedQualityTier;
   readonly journey?: RoomJourneyCue;
+  readonly reducedMotion: boolean;
   readonly remoteStream?: MediaStream | null;
 }
 

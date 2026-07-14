@@ -233,6 +233,7 @@ export function RoomScenePreview({
       ref={surfaceRef}
       data-room-scene-gesture-surface
       data-room-journey={journey}
+      data-room-location={journey === 'outside' ? 'outside' : 'inside'}
       data-room-quality-tier={qualityTier}
       data-room-admission={admissionPending ? 'pending' : 'idle'}
       data-room-remote-video={
@@ -279,6 +280,7 @@ export function RoomScenePreview({
             admissionPending={admissionPending}
             quality={quality}
             qualityTier={qualityTier}
+            reducedMotion={reducedMotion}
             remoteStream={remoteStream}
             journey={journey}
           />
