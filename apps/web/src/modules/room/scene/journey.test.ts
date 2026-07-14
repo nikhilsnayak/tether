@@ -106,6 +106,8 @@ describe('doorTransition', () => {
   it('opens, holds, and closes exactly at the end of admission', () => {
     const transition = doorTransition('outside', 'connecting', false);
     expect(doorTransitionOpenness(transition, 0)).toBe(0);
+    expect(doorTransitionOpenness(transition, 315)).toBeGreaterThan(0);
+    expect(doorTransitionOpenness(transition, 315)).toBeLessThan(1);
     expect(doorTransitionOpenness(transition, 630)).toBe(1);
     expect(doorTransitionOpenness(transition, 900)).toBe(1);
     expect(doorTransitionOpenness(transition, 1_440)).toBeGreaterThan(0);

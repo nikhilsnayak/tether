@@ -40,6 +40,9 @@ describe('avatar motion', () => {
     expect(
       integrateAvatarPose(avatarSpawn(config, 'host'), { forward: 1, turn: 0 }, 1, config),
     ).toMatchObject({ x: -1.15, z: 0.8, action: 'walk' });
+    expect(
+      integrateAvatarPose(avatarSpawn(config, 'host'), { forward: 0, turn: 0 }, 0.05, config),
+    ).toMatchObject({ action: 'idle' });
   });
 
   it('clamps room edges and resolves obstacle corners', () => {
@@ -95,6 +98,8 @@ describe('avatar motion', () => {
     ).toEqual([first]);
     const teleported = { pose: { ...first.pose, sequence: 3, x: 3 }, receivedAtMs: 100 };
     expect(appendRemotePoseSample([first], teleported)).toEqual([teleported]);
+    const adjacent = { pose: { ...first.pose, sequence: 3, x: 1 }, receivedAtMs: 100 };
+    expect(appendRemotePoseSample([first], adjacent)).toEqual([first, adjacent]);
   });
 
   it('interpolates, extrapolates briefly, then freezes', () => {
@@ -106,6 +111,18 @@ describe('avatar motion', () => {
     expect(sampleRemoteAvatarPose(samples, 300, false, config)?.x).toBeCloseTo(2);
     expect(sampleRemoteAvatarPose(samples, 1_000, false, config)?.x).toBeCloseTo(3.5);
     expect(sampleRemoteAvatarPose(samples, 150, true, config)?.x).toBe(1);
+    expect(sampleRemoteAvatarPose([], 150, false, config)).toBeNull();
+  });
+
+  it('selects the nearest obstacle edge relative to the previous position', () => {
+    const resolved = integrateAvatarPose(
+      { x: 0, z: 2.4, yaw: Math.PI, action: 'walk' },
+      { forward: 1, turn: 0 },
+      0.05,
+      config,
+    );
+
+    expect(resolved.z).toBeCloseTo(2.32);
   });
 
   it('requires every template walkable area to fit the shared wire envelope', () => {

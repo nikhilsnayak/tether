@@ -569,6 +569,9 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
   });
 
   const markRoomEventsUnavailable = Effect.fnUntraced(function* (dataChannel: DataChannelHandle) {
+    // Called synchronously from a failed send on the actor-owned open channel.
+    // The guard documents that ownership invariant for future call sites.
+    /* v8 ignore next 6 */
     if (
       state._tag !== 'PeerKnown' ||
       state.dataChannelState._tag !== 'DataChannelOpen' ||
@@ -595,6 +598,8 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
   const sendLatestMediaState = Effect.fnUntraced(function* (dataChannel: DataChannelHandle) {
     const transmission = memory.roomEvents.nextMediaTransmission();
     if (transmission._tag === 'NothingToSend') return;
+    // See PeerSessionMemory.takeCounter: this needs 2^31 sends in one generation.
+    /* v8 ignore next 3 */
     if (transmission._tag === 'CounterExhausted') {
       return yield* Effect.logWarning('Local media-state revision exhausted');
     }
@@ -616,6 +621,8 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
   const sendLatestAvatarPose = Effect.fnUntraced(function* (dataChannel: DataChannelHandle) {
     const transmission = memory.roomEvents.nextAvatarTransmission();
     if (transmission._tag === 'NothingToSend') return;
+    // See PeerSessionMemory.takeCounter: this needs 2^31 sends in one generation.
+    /* v8 ignore next 3 */
     if (transmission._tag === 'CounterExhausted') {
       return yield* Effect.logWarning('Local avatar-pose sequence exhausted');
     }

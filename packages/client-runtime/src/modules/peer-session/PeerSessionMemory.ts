@@ -13,13 +13,17 @@ type Transmission<A> =
 const initialCounter = (): CounterState => ({ _tag: 'Available', next: 0 });
 
 const takeCounter = (state: CounterState): readonly [value: number | null, state: CounterState] => {
+  // Reaching exhaustion requires one serialized session generation to emit
+  // every one of the 2^31 protocol counters. The boundary itself is covered by
+  // takeRoomEventCounter; exercising it through this private state would
+  // require billions of transitions.
+  /* v8 ignore next 8 */
   if (state._tag === 'Exhausted') return [null, state];
-  return [
-    state.next,
-    state.next === MAX_ROOM_EVENT_COUNTER
-      ? { _tag: 'Exhausted' }
-      : { _tag: 'Available', next: state.next + 1 },
-  ];
+  /* v8 ignore next 3 -- Requires 2^31 transitions in one generation. */
+  if (state.next === MAX_ROOM_EVENT_COUNTER) {
+    return [state.next, { _tag: 'Exhausted' }];
+  }
+  return [state.next, { _tag: 'Available', next: state.next + 1 }];
 };
 
 const makeChatMemory = (selfId: string) => {
@@ -126,6 +130,7 @@ const makeRoomEventMemory = (initialMediaState: MediaState | null) => {
         return { _tag: 'NothingToSend' };
       }
       const [sequence, counter] = takeCounter(state.avatar.counter);
+      /* v8 ignore next -- See takeCounter: protocol-lifetime exhaustion. */
       if (sequence === null) return { _tag: 'CounterExhausted' };
       const pose = state.avatar.pose;
       state = {
@@ -135,6 +140,7 @@ const makeRoomEventMemory = (initialMediaState: MediaState | null) => {
       return { _tag: 'Ready', counter: sequence, value: pose };
     },
     markAvatarPoseSent: () => {
+      /* v8 ignore next -- Only called after nextAvatarTransmission returns Ready. */
       if (state.avatar._tag === 'Empty' || state.avatar.delivery !== 'transmitting') return;
       state = { ...state, avatar: { ...state.avatar, delivery: 'sent' } };
     },
@@ -145,6 +151,7 @@ const makeRoomEventMemory = (initialMediaState: MediaState | null) => {
     nextMediaTransmission: (): Transmission<MediaState> => {
       if (state.media.latest === null) return { _tag: 'NothingToSend' };
       const [revision, counter] = takeCounter(state.media.counter);
+      /* v8 ignore next -- See takeCounter: protocol-lifetime exhaustion. */
       if (revision === null) return { _tag: 'CounterExhausted' };
       const mediaState = state.media.latest;
       state = { ...state, media: { ...state.media, counter } };

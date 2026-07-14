@@ -98,7 +98,12 @@ export const encodeRoomEvent = (event: RoomEvent): Result.Result<string, RoomEve
   const encoded = encodeRoomEventJson(event);
   if (Result.isFailure(encoded)) return Result.fail('invalid-event');
 
-  return utf8ByteLength(encoded.success) <= MAX_ROOM_EVENT_BYTES
-    ? Result.succeed(encoded.success)
-    : Result.fail('oversized');
+  // Every schema-valid event has a tighter bounded payload than the envelope
+  // limit. Keep the post-encode defense in case a future event family changes
+  // that invariant.
+  /* v8 ignore next 3 */
+  if (utf8ByteLength(encoded.success) > MAX_ROOM_EVENT_BYTES) {
+    return Result.fail('oversized');
+  }
+  return Result.succeed(encoded.success);
 };

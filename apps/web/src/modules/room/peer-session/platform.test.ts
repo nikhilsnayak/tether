@@ -398,6 +398,7 @@ describe('web peer-session platform', () => {
             },
           ),
           platform.sendDataChannelMessage({ value: {} }, 'hello'),
+          platform.closeDataChannel!({ value: {} }),
         ];
         const expectedOperations = [
           'add-local-tracks',
@@ -408,6 +409,7 @@ describe('web peer-session platform', () => {
           'set-remote-description',
           'add-ice-candidate',
           'send-message',
+          'close-data-channel',
         ];
 
         for (const [index, failure] of failures.entries()) {

@@ -2159,8 +2159,22 @@ describe('peer-session actor', () => {
             usernameFragment: null,
           },
         });
+        yield* fixture.actor({
+          _tag: 'RoomEvent',
+          event: new SignalReceivedEvent({
+            peerId: bob,
+            signal: new IceCandidateSignal({
+              negotiationEpoch: 0,
+              candidate: 'remote-epochless-ice',
+              sdpMid: '0',
+              sdpMLineIndex: 0,
+              usernameFragment: null,
+            }),
+          }),
+        });
 
         assert.deepStrictEqual(fixture.signals, []);
+        assert.notInclude(fixture.operations, 'addIceCandidate:remote-epochless-ice');
       }),
     ).pipe(Effect.orDie),
   );
@@ -2240,6 +2254,31 @@ describe('peer-session actor', () => {
 
         assert.deepStrictEqual(closed, [wrongLabel, duplicate]);
         assert.include(fixture.operations, `observeDataChannel:${ROOM_EVENTS_CHANNEL_LABEL}`);
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('contains a failure while closing an unexpected remote data channel', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture(undefined, undefined, {
+          closeDataChannel: () =>
+            Effect.fail(new PlatformError({ operation: 'close-data-channel', cause: 'closed' })),
+        });
+        const unexpected: DataChannelHandle = { value: { label: 'unexpected' } };
+
+        yield* fixture.actor({ _tag: 'RoomEvent', event: openedEvent(null) });
+        yield* fixture.actor({ _tag: 'RoomEvent', event: new PeerJoinedEvent({ peerId: bob }) });
+        yield* fixture.actor({
+          _tag: 'RemoteDataChannel',
+          peerConnection: fixture.peerConnection,
+          dataChannel: unexpected,
+        });
+
+        assert.notInclude(
+          fixture.events.map((event) => event._tag),
+          'SessionFailed',
+        );
       }),
     ).pipe(Effect.orDie),
   );
@@ -2754,6 +2793,13 @@ describe('peer-session actor', () => {
             cameraOn: false,
             microphoneOn: true,
           },
+          {
+            version: 1,
+            type: 'media-state',
+            revision: 3,
+            cameraOn: true,
+            microphoneOn: false,
+          },
           { version: 1, type: 'chat-message', text: 'typed hello' },
         ] as const) {
           yield* fixture.actor({
@@ -2885,6 +2931,125 @@ describe('peer-session actor', () => {
         assert.include(
           fixture.operations,
           'sendDataChannelMessage:{"version":1,"type":"avatar-pose","sequence":0,"x":2,"z":2,"yaw":0.25,"action":"idle"}',
+        );
+
+        yield* fixture.actor({
+          _tag: 'RetryPendingAvatarPose',
+          peerConnection: fixture.peerConnection,
+          dataChannel: fixture.localDataChannel,
+        });
+        yield* TestClock.adjust('100 millis');
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('retries a pending pose while the channel remains backpressured', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        let bufferedAmount = 65_536;
+        const fixture = yield* makeFixture(undefined, undefined, {
+          dataChannelBufferedAmount: () => bufferedAmount,
+        });
+        yield* fixture.actor({ _tag: 'RoomEvent', event: openedEvent(bob) });
+        yield* fixture.actor({
+          _tag: 'DataChannelOpened',
+          dataChannel: fixture.localDataChannel,
+        });
+        yield* fixture.actor({
+          _tag: 'SendAvatarPose',
+          pose: { x: 1, z: 1, yaw: 0, action: 'walk' },
+        });
+
+        bufferedAmount = 32_768;
+        yield* fixture.actor({
+          _tag: 'RetryPendingAvatarPose',
+          peerConnection: fixture.peerConnection,
+          dataChannel: fixture.localDataChannel,
+        });
+        yield* TestClock.adjust('100 millis');
+
+        assert.lengthOf(
+          fixture.operations.filter((operation) => operation.startsWith('sendDataChannelMessage:')),
+          0,
+        );
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('sends media changes only through the owned open data channel', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture();
+        const unknownDataChannel: DataChannelHandle = { value: { label: 'unknown' } };
+
+        yield* fixture.actor({ _tag: 'RoomEvent', event: openedEvent(bob) });
+        yield* fixture.actor({
+          _tag: 'SendMediaState',
+          mediaState: { cameraOn: false, microphoneOn: false },
+        });
+        yield* fixture.actor({
+          _tag: 'DataChannelOpened',
+          dataChannel: fixture.localDataChannel,
+        });
+        yield* fixture.actor({
+          _tag: 'SendMediaState',
+          mediaState: { cameraOn: true, microphoneOn: false },
+        });
+        yield* fixture.actor({
+          _tag: 'RetryPendingAvatarPose',
+          peerConnection: fixture.peerConnection,
+          dataChannel: unknownDataChannel,
+        });
+
+        assert.includeMembers(fixture.operations, [
+          'sendDataChannelMessage:{"version":1,"type":"media-state","revision":0,"cameraOn":false,"microphoneOn":false}',
+          'sendDataChannelMessage:{"version":1,"type":"media-state","revision":1,"cameraOn":true,"microphoneOn":false}',
+        ]);
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('drops invalid local chat without sending or projecting it', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture();
+        yield* fixture.actor({ _tag: 'RoomEvent', event: openedEvent(bob) });
+        yield* fixture.actor({
+          _tag: 'DataChannelOpened',
+          dataChannel: fixture.localDataChannel,
+        });
+        yield* fixture.actor({ _tag: 'SendMessage', message: 'x'.repeat(4_001) });
+
+        assert.lengthOf(
+          fixture.events.filter((event) => event._tag === 'ChatMessageAdded'),
+          0,
+        );
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('closes room events when the retained media send fails', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture(undefined, undefined, {
+          sendDataChannelMessage: () =>
+            Effect.fail(new PlatformError({ operation: 'send-message', cause: 'closed' })),
+          closeDataChannel: () =>
+            Effect.fail(new PlatformError({ operation: 'close-data-channel', cause: 'closed' })),
+        });
+        yield* fixture.actor({
+          _tag: 'SendMediaState',
+          mediaState: { cameraOn: true, microphoneOn: true },
+        });
+        yield* fixture.actor({ _tag: 'RoomEvent', event: openedEvent(bob) });
+        yield* fixture.actor({
+          _tag: 'DataChannelOpened',
+          dataChannel: fixture.localDataChannel,
+        });
+
+        assert.include(
+          fixture.events.map((event) => event._tag),
+          'RoomEventsUnavailable',
         );
       }),
     ).pipe(Effect.orDie),
