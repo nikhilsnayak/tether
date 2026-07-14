@@ -13,7 +13,7 @@ const fingerprintLines = (sdp: string): ReadonlyArray<string> =>
 
 // SDP is ASCII; TextEncoder isn't in the platform-neutral lib.
 const asciiBytes = (input: string): Uint8Array =>
-  Uint8Array.from(input, (char) => char.charCodeAt(0));
+  Uint8Array.from(input, (char) => char.codePointAt(0) ?? 0);
 
 /** Hashes both fingerprints as received over signaling, offer first so both roles agree. */
 export const deriveSas = Effect.fnUntraced(function* ({

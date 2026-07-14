@@ -246,7 +246,7 @@ export const connectPeers = async (
 
 export const requireBaseURL = (baseURL: string | undefined) => {
   if (typeof baseURL !== 'string') {
-    throw new Error('This E2E test requires a configured baseURL');
+    throw new TypeError('This E2E test requires a configured baseURL');
   }
   return baseURL;
 };

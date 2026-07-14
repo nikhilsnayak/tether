@@ -3,11 +3,11 @@ import {
   PeerSessionPlatform,
   PlatformError,
   type DataChannelHandle,
+  type IceServer,
   type MediaStreamHandle,
   type PeerConnectionHandle,
   type PlatformEventDispatch,
 } from '@tether/client-runtime/modules/peer-session';
-import type { IceServer } from '@tether/client-runtime/modules/peer-session';
 import type { PreparedMedia } from '@tether/client-runtime/modules/room';
 import { Crypto, Effect, Exit, Layer, Scope } from 'effect';
 
