@@ -98,7 +98,10 @@ export function RoomScene({
   if (contextLost) {
     return (
       <div
-        className='bg-card grid aspect-video place-items-center border p-6 text-center'
+        className={cn(
+          'bg-card grid place-items-center p-6 text-center',
+          mode === 'call' ? 'absolute inset-0' : 'relative aspect-video border',
+        )}
         role='alert'
       >
         <div className='space-y-1'>
