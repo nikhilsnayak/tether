@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   doorTransition,
   doorTransitionOpenness,
+  resolveDoorTransition,
   roomJourneyCue,
   roomJourneyLabel,
   roomTransition,
@@ -101,6 +102,29 @@ describe('doorTransition', () => {
 
   it('does not animate admission with reduced motion', () => {
     expect(doorTransition('outside', 'connecting', true)).toEqual({ kind: 'none', durationMs: 0 });
+  });
+
+  it('preserves an active admission when connecting becomes together', () => {
+    const active = doorTransition('outside', 'connecting', false);
+
+    expect(
+      resolveDoorTransition({ kind: 'none', durationMs: 0 }, 'outside', 'connecting', false),
+    ).toEqual(active);
+    expect(resolveDoorTransition(active, 'connecting', 'together', false)).toBe(active);
+    expect(doorTransitionOpenness(active, 900)).toBe(1);
+  });
+
+  it('aborts an active admission when connection stalls or reduced motion is enabled', () => {
+    const active = doorTransition('outside', 'connecting', false);
+
+    expect(resolveDoorTransition(active, 'connecting', 'stalled', false)).toEqual({
+      kind: 'none',
+      durationMs: 0,
+    });
+    expect(resolveDoorTransition(active, 'connecting', 'together', true)).toEqual({
+      kind: 'none',
+      durationMs: 0,
+    });
   });
 
   it('opens, holds, and closes exactly at the end of admission', () => {

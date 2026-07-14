@@ -4,7 +4,7 @@ import { useRef } from 'react';
 import { Group, MathUtils, PointLight } from 'three';
 
 import type { RoomSceneProps } from '../templates/registry';
-import { doorTransition, doorTransitionOpenness, type DoorTransition } from './journey';
+import { doorTransitionOpenness, resolveDoorTransition, type DoorTransition } from './journey';
 
 const wallMaterial = { color: '#18191d', roughness: 0.82, metalness: 0.04 } as const;
 const trimMaterial = { color: '#29282a', roughness: 0.5, metalness: 0.18 } as const;
@@ -40,8 +40,16 @@ export default function DuskSuiteScene({
 
   useFrame((_, delta) => {
     if (previousJourney.current !== journey || previousReducedMotion.current !== reducedMotion) {
-      doorAdmission.current = doorTransition(previousJourney.current, journey, reducedMotion);
-      doorAdmissionElapsedMs.current = 0;
+      const nextDoorAdmission = resolveDoorTransition(
+        doorAdmission.current,
+        previousJourney.current,
+        journey,
+        reducedMotion,
+      );
+      if (nextDoorAdmission !== doorAdmission.current) {
+        doorAdmission.current = nextDoorAdmission;
+        doorAdmissionElapsedMs.current = 0;
+      }
       previousJourney.current = journey;
       previousReducedMotion.current = reducedMotion;
     }

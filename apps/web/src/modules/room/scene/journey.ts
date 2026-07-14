@@ -78,6 +78,25 @@ export function doorTransition(
     : { kind: 'none', durationMs: 0 };
 }
 
+export function resolveDoorTransition(
+  active: DoorTransition,
+  previous: RoomJourneyCue,
+  next: RoomJourneyCue,
+  reducedMotion: boolean,
+): DoorTransition {
+  const requested = doorTransition(previous, next, reducedMotion);
+  if (requested.kind === 'admit') return requested;
+  if (
+    !reducedMotion &&
+    active.kind === 'admit' &&
+    previous === 'connecting' &&
+    next === 'together'
+  ) {
+    return active;
+  }
+  return requested;
+}
+
 const smoothstep = (value: number) => value * value * (3 - 2 * value);
 
 export function doorTransitionOpenness(transition: DoorTransition, elapsedMs: number): number {
