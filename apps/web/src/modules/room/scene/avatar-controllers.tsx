@@ -43,7 +43,7 @@ export function LocalAvatarController({
   const previousLocation = useRef<'inside' | 'outside' | null>(null);
   const previousGameplay = useRef<RoomGameplayConfig | null>(null);
   const lastSentAtMs = useRef<number | null>(null);
-  const lastSentAction = useRef<AvatarPose['action'] | null>(null);
+  const lastSentPose = useRef<AvatarPose | null>(null);
 
   useFrame((_, delta) => {
     if (previousLocation.current !== location || previousGameplay.current !== gameplay) {
@@ -54,7 +54,7 @@ export function LocalAvatarController({
       previousLocation.current = location;
       previousGameplay.current = gameplay;
       lastSentAtMs.current = null;
-      lastSentAction.current = null;
+      lastSentPose.current = null;
     }
 
     const next =
@@ -69,15 +69,15 @@ export function LocalAvatarController({
       !shouldSendAvatarPose({
         nowMs,
         lastSentAtMs: lastSentAtMs.current,
-        previousAction: lastSentAction.current,
-        action: next.action,
+        lastSentPose: lastSentPose.current,
+        pose: next,
       })
     ) {
       return;
     }
     sendAvatarPose(next);
     lastSentAtMs.current = nowMs;
-    lastSentAction.current = next.action;
+    lastSentPose.current = next;
     if (surfaceRef.current !== null) {
       surfaceRef.current.dataset.roomLocalPose = avatarPoseDiagnostic(next);
     }

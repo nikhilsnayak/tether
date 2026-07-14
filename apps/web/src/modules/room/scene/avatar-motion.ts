@@ -147,17 +147,23 @@ export const integrateAvatarPose = (
 export const shouldSendAvatarPose = ({
   nowMs,
   lastSentAtMs,
-  previousAction,
-  action,
+  lastSentPose,
+  pose,
 }: {
   readonly nowMs: number;
   readonly lastSentAtMs: number | null;
-  readonly previousAction: AvatarPose['action'] | null;
-  readonly action: AvatarPose['action'];
+  readonly lastSentPose: AvatarPose | null;
+  readonly pose: AvatarPose;
 }): boolean => {
-  if (lastSentAtMs === null) return true;
-  if (previousAction === 'walk' && action === 'idle') return true;
-  return action === 'walk' && nowMs - lastSentAtMs >= AVATAR_SEND_INTERVAL_MS;
+  if (lastSentAtMs === null || lastSentPose === null) return true;
+  if (lastSentPose.action === 'walk' && pose.action === 'idle') return true;
+
+  const poseChanged =
+    pose.x !== lastSentPose.x ||
+    pose.z !== lastSentPose.z ||
+    pose.yaw !== lastSentPose.yaw ||
+    pose.action !== lastSentPose.action;
+  return poseChanged && nowMs - lastSentAtMs >= AVATAR_SEND_INTERVAL_MS;
 };
 
 export const appendRemotePoseSample = (

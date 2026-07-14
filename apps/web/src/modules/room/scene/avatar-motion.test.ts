@@ -69,23 +69,58 @@ describe('avatar motion', () => {
   });
 
   it('sends at 10 Hz plus an immediate final idle pose', () => {
+    const idle = { x: 0, z: 0, yaw: 0, action: 'idle' } as const;
+    const walking = { ...idle, z: 0.2, action: 'walk' } as const;
+
     expect(
-      shouldSendAvatarPose({ nowMs: 0, lastSentAtMs: null, previousAction: null, action: 'idle' }),
+      shouldSendAvatarPose({ nowMs: 0, lastSentAtMs: null, lastSentPose: null, pose: idle }),
     ).toBe(true);
     expect(
-      shouldSendAvatarPose({ nowMs: 99, lastSentAtMs: 0, previousAction: 'walk', action: 'walk' }),
+      shouldSendAvatarPose({
+        nowMs: 99,
+        lastSentAtMs: 0,
+        lastSentPose: walking,
+        pose: { ...walking, z: 0.3 },
+      }),
     ).toBe(false);
     expect(
-      shouldSendAvatarPose({ nowMs: 20, lastSentAtMs: 0, previousAction: 'walk', action: 'idle' }),
+      shouldSendAvatarPose({
+        nowMs: 20,
+        lastSentAtMs: 0,
+        lastSentPose: walking,
+        pose: { ...walking, action: 'idle' },
+      }),
     ).toBe(true);
     expect(
       shouldSendAvatarPose({
         nowMs: 1_000,
         lastSentAtMs: 0,
-        previousAction: 'idle',
-        action: 'idle',
+        lastSentPose: idle,
+        pose: idle,
       }),
     ).toBe(false);
+  });
+
+  it('sends turning-in-place yaw changes at the normal cadence', () => {
+    const idle = { x: 0, z: 0, yaw: 0, action: 'idle' } as const;
+    const turned = { ...idle, yaw: 0.25 };
+
+    expect(
+      shouldSendAvatarPose({
+        nowMs: 99,
+        lastSentAtMs: 0,
+        lastSentPose: idle,
+        pose: turned,
+      }),
+    ).toBe(false);
+    expect(
+      shouldSendAvatarPose({
+        nowMs: 100,
+        lastSentAtMs: 0,
+        lastSentPose: idle,
+        pose: turned,
+      }),
+    ).toBe(true);
   });
 
   it('rejects out-of-order samples and resets on a teleport', () => {
