@@ -47,6 +47,8 @@ export function AvatarControls({
       data-room-scene-ignore-gesture
       aria-label='Avatar controls'
       className='absolute bottom-24 left-3 z-20 grid grid-cols-3 gap-1 sm:bottom-28 sm:left-4'
+      // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role
+      role='group'
     >
       {controlButton('forward', 'Move avatar forward', <ArrowUp />, 'col-start-2')}
       {controlButton('left', 'Turn avatar left', <ArrowLeft />, 'col-start-1 row-start-2')}
