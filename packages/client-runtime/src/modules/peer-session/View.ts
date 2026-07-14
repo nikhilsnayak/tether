@@ -49,6 +49,7 @@ export const reducePeerSessionView = (
         roomEventsReady: false,
         remoteAvatarPose: null,
         remoteMediaState: null,
+        sas: null,
       };
     case 'SessionFailed':
       return {
@@ -57,6 +58,7 @@ export const reducePeerSessionView = (
         roomEventsReady: false,
         remoteAvatarPose: null,
         remoteMediaState: null,
+        sas: null,
       };
     case 'TransportLost':
       return {

@@ -58,6 +58,12 @@ describe('reducePeerSessionView', () => {
       _tag: 'TransportLost',
       peerId,
     });
+    const disconnected = reducePeerSessionView(connectedView, {
+      _tag: 'SignalingDisconnected',
+    });
+    const failed = reducePeerSessionView(connectedView, {
+      _tag: 'SessionFailed',
+    });
 
     assert.deepStrictEqual(interrupted, {
       ...connectedView,
@@ -71,6 +77,8 @@ describe('reducePeerSessionView', () => {
       roomEventsReady: false,
       sas: null,
     });
+    assert.isNull(disconnected.sas);
+    assert.isNull(failed.sas);
   });
 
   it('projects room-event families independently and freezes them during reconnect', () => {
