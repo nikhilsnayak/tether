@@ -1,7 +1,4 @@
-import { expect, test } from '@playwright/test';
-
-import { createRoom, installWebRtcProbe, prepareGuestAtThreshold } from './helpers';
-import { seededStorageState } from './storage-seed';
+import { expect, test } from './fixtures';
 
 test('missing WebGL2 stops entry before media is requested', async ({ page }) => {
   await page.addInitScript(() => {
@@ -33,10 +30,8 @@ test('missing WebGL2 stops entry before media is requested', async ({ page }) =>
   expect(await page.evaluate(() => Reflect.get(window, '__tetherMediaRequests'))).toBe(0);
 });
 
-test('Dusk Suite loads without third-party room assets', async ({ page }, testInfo) => {
-  const baseURL = testInfo.project.use.baseURL;
-  if (typeof baseURL !== 'string') throw new Error('Expected a configured baseURL');
-  const appOrigin = new URL(baseURL).origin;
+test('Dusk Suite loads without third-party room assets', async ({ page, room }) => {
+  const appOrigin = new URL(room.baseURL).origin;
   const externalAssets: string[] = [];
   page.on('request', (request) => {
     if (!['font', 'image', 'media', 'fetch', 'xhr'].includes(request.resourceType())) return;
@@ -44,38 +39,31 @@ test('Dusk Suite loads without third-party room assets', async ({ page }, testIn
     if (url.origin !== appOrigin) externalAssets.push(url.href);
   });
 
-  await createRoom(page);
+  await room.createRoom(room.actorFor(page));
   await expect(page.getByLabel('Dusk Suite room scene').locator('canvas')).toBeVisible();
   expect(externalAssets).toEqual([]);
 });
 
-test('a guest waits at the exterior before knocking', async ({ browser, page }, testInfo) => {
-  const baseURL = testInfo.project.use.baseURL;
-  if (typeof baseURL !== 'string') throw new Error('Expected a configured baseURL');
-  const guestContext = await browser.newContext({ baseURL, storageState: seededStorageState });
-  const guest = await guestContext.newPage();
+test('a guest waits at the exterior before knocking', async ({ page, room }) => {
+  const host = room.actorFor(page);
+  const guest = await room.createActor();
+  const roomId = await room.createRoom(host);
+  await room.prepareGuestAtThreshold(guest, roomId);
 
-  try {
-    const roomId = await createRoom(page);
-    await prepareGuestAtThreshold(guest, roomId);
-
-    const scene = guest.getByLabel('Dusk Suite room scene');
-    await expect(scene.locator('canvas')).toBeVisible();
-    await expect(scene).toHaveAttribute('data-room-journey', 'outside');
-    await expect(scene).toHaveAttribute('data-room-location', 'outside');
-    await expect(guest.getByRole('button', { name: 'Knock on door' })).toBeVisible();
-    await expect(page.getByRole('region', { name: 'Join request' })).toBeHidden();
-  } finally {
-    await guestContext.close();
-  }
+  const scene = guest.page.getByLabel('Dusk Suite room scene');
+  await expect(scene.locator('canvas')).toBeVisible();
+  await expect(scene).toHaveAttribute('data-room-journey', 'outside');
+  await expect(scene).toHaveAttribute('data-room-location', 'outside');
+  await expect(guest.page.getByRole('button', { name: 'Knock on door' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Join request' })).toBeHidden();
 });
 
-test('backing out of media setup stops the preview stream', async ({ page }) => {
-  await installWebRtcProbe(page.context());
+test('backing out of media setup stops the preview stream', async ({ page, room }) => {
+  const actor = await room.actorFor(page, { probeWebRtc: true });
   await page.goto('/');
   await page.getByRole('button', { name: 'Call' }).click();
   await expect(page.getByRole('heading', { name: 'Look and sound ready?' })).toBeVisible();
-  expect(await page.evaluate(() => window.__tetherE2E.localStreams.length)).toBe(0);
+  expect(await actor.probe.localStreamCount()).toBe(0);
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await expect(page.getByLabel('Camera preview')).toBeVisible();
 
@@ -84,14 +72,6 @@ test('backing out of media setup stops the preview stream', async ({ page }) => 
   await expect(page).toHaveURL('/');
   await expect(page.getByRole('button', { name: 'Call' })).toBeVisible();
   await expect
-    .poll(() =>
-      page.evaluate(() => ({
-        acquiredStreams: window.__tetherE2E.localStreams.length,
-        previewStopped:
-          window.__tetherE2E.localStreams[0]
-            ?.getTracks()
-            .every((track) => track.readyState === 'ended') ?? false,
-      })),
-    )
+    .poll(() => actor.probe.previewCleanupState())
     .toEqual({ acquiredStreams: 1, previewStopped: true });
 });

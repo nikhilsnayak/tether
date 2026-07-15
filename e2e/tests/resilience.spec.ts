@@ -1,6 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
-
-import { connectPeers, expectConnected, requireBaseURL, startHostingRoom } from './helpers';
+import { expect, test, type Page } from './fixtures';
 
 const sendMessage = async (sender: Page, recipient: Page, message: string) => {
   await Promise.all([
@@ -15,170 +13,108 @@ const sendMessage = async (sender: Page, recipient: Page, message: string) => {
   ).toBeVisible();
 };
 
-const emitIceCandidateBurst = (page: Page, count: number) =>
-  page.evaluate((candidateCount) => {
-    const peerConnection = window.__tetherE2E.peerConnections.at(-1);
-    if (peerConnection === undefined) {
-      throw new Error('Expected an instrumented peer connection');
-    }
-    const candidate = new RTCIceCandidate({
-      candidate: 'candidate:1 1 UDP 2122260223 127.0.0.1 9 typ host',
-      sdpMid: '0',
-      sdpMLineIndex: 0,
-    });
-    for (let index = 0; index < candidateCount; index += 1) {
-      peerConnection.dispatchEvent(new RTCPeerConnectionIceEvent('icecandidate', { candidate }));
-    }
-  }, count);
+test('the Google public STUN configuration reaches the browser', async ({ room }) => {
+  const { guest } = await room.connect({ probeWebRtc: true });
+  const iceServers = await guest.probe.iceServers();
 
-test('the Google public STUN configuration reaches the browser', async ({ browser }, testInfo) => {
-  const baseURL = requireBaseURL(testInfo.project.use.baseURL);
-  const { guest, cleanup } = await connectPeers(browser, baseURL, { probeWebRtc: true });
-  try {
-    const iceServers = await guest.evaluate(
-      () => window.__tetherE2E.configurations[0]?.iceServers ?? [],
-    );
-
-    expect(iceServers).toEqual([{ urls: ['stun:stun.l.google.com:19302'] }]);
-  } finally {
-    await cleanup();
-  }
+  expect(iceServers).toEqual([{ urls: ['stun:stun.l.google.com:19302'] }]);
 });
 
-test('candidate failures and signal bursts do not terminate the call', async ({
-  browser,
-}, testInfo) => {
+test('candidate failures and signal bursts do not terminate the call', async ({ room }) => {
   const burstSize = 100;
-  const baseURL = requireBaseURL(testInfo.project.use.baseURL);
-  const { host, guest, cleanup } = await connectPeers(browser, baseURL, { probeWebRtc: true });
-  try {
-    const baselineCandidateCalls = await guest.evaluate(
-      () => window.__tetherE2E.addIceCandidateCalls,
-    );
-    await guest.evaluate(() => {
-      window.__tetherE2E.failNextIceCandidate = true;
-    });
-    await emitIceCandidateBurst(host, burstSize);
+  const { host, guest } = await room.connect({ probeWebRtc: true });
+  const baselineCandidateCalls = await guest.probe.addIceCandidateCalls();
+  await guest.probe.rejectNextIceCandidate();
+  await host.probe.emitIceCandidateBurst(burstSize);
 
-    await expect.poll(() => guest.evaluate(() => window.__tetherE2E.rejectedIceCandidates)).toBe(1);
-    await expect
-      .poll(() => guest.evaluate(() => window.__tetherE2E.addIceCandidateCalls))
-      .toBeGreaterThan(baselineCandidateCalls);
-    await Promise.all([expectConnected(host), expectConnected(guest)]);
-    await sendMessage(host, guest, 'still connected after signal pressure');
-    const deliveredCandidateCalls =
-      (await guest.evaluate(() => window.__tetherE2E.addIceCandidateCalls)) -
-      baselineCandidateCalls;
-    expect(deliveredCandidateCalls).toBeLessThan(burstSize);
-  } finally {
-    await cleanup();
-  }
+  await expect.poll(() => guest.probe.rejectedIceCandidates()).toBe(1);
+  await expect
+    .poll(() => guest.probe.addIceCandidateCalls())
+    .toBeGreaterThan(baselineCandidateCalls);
+  await Promise.all([room.expectConnected(host), room.expectConnected(guest)]);
+  await sendMessage(host.page, guest.page, 'still connected after signal pressure');
+  const deliveredCandidateCalls =
+    (await guest.probe.addIceCandidateCalls()) - baselineCandidateCalls;
+  expect(deliveredCandidateCalls).toBeLessThan(burstSize);
 });
 
-test('leaving a call and joining a new room starts with clean media', async ({
-  browser,
-}, testInfo) => {
-  const baseURL = requireBaseURL(testInfo.project.use.baseURL);
-  const { guest, cleanup } = await connectPeers(browser, baseURL, { probeWebRtc: true });
-  try {
-    await guest.getByRole('button', { name: 'Leave call' }).click();
-    await expect(guest).toHaveURL('/');
+test('leaving a call and joining a new room starts with clean media', async ({ room }) => {
+  const { guest } = await room.connect({ probeWebRtc: true });
+  const { page } = guest;
+  await page.getByRole('button', { name: 'Leave call' }).click();
+  await expect(page).toHaveURL('/');
 
-    // Create a fresh room via the Call button (SPA navigation) so the probe
-    // keeps both scoped streams. A lone waiting peer now only exists as a host.
-    await guest.getByRole('button', { name: 'Call' }).click();
-    await expect(guest).toHaveURL(/\/host$/);
-    await startHostingRoom(guest);
-    await guest.getByRole('button', { name: 'Close' }).click();
-    await expect(guest.getByText('Share this room to invite someone.')).toBeVisible();
+  // Create a fresh room via the Call button (SPA navigation) so the probe
+  // keeps both scoped streams. A lone waiting peer now only exists as a host.
+  await page.getByRole('button', { name: 'Call' }).click();
+  await expect(page).toHaveURL(/\/host$/);
+  await room.startHostingRoom(guest);
+  await page.getByRole('button', { name: 'Close' }).click();
+  await expect(page.getByText('Share this room to invite someone.')).toBeVisible();
 
-    // No stale remote frame from the previous call may survive the rejoin.
-    await expect(guest.locator('[data-room-media-tile="remote"]')).toHaveCount(0);
-    await expect(guest.getByLabel('Local video preview')).toBeVisible();
-    const streamStates = await guest.evaluate(() =>
-      window.__tetherE2E.localStreams.map((stream) =>
-        stream.getTracks().every((track) => track.readyState === 'ended') ? 'ended' : 'live',
-      ),
-    );
-    // Each room entry acquires one stream that moves from preview into the call.
-    // Leaving must stop the prior room's stream while the new host stream stays live.
-    expect(streamStates).toEqual(['ended', 'live']);
-  } finally {
-    await cleanup();
-  }
+  // No stale remote frame from the previous call may survive the rejoin.
+  await expect(page.locator('[data-room-media-tile="remote"]')).toHaveCount(0);
+  await expect(page.getByLabel('Local video preview')).toBeVisible();
+  const streamStates = await guest.probe.localStreamStates();
+  // Each room entry acquires one stream that moves from preview into the call.
+  // Leaving must stop the prior room's stream while the new host stream stays live.
+  expect(streamStates).toEqual(['ended', 'live']);
 });
 
 test('a closed room-events channel disables room events without interrupting media', async ({
-  browser,
-}, testInfo) => {
+  room,
+}) => {
   test.setTimeout(90_000);
-  const baseURL = requireBaseURL(testInfo.project.use.baseURL);
-  const { host, guest, cleanup } = await connectPeers(browser, baseURL, { probeWebRtc: true });
-  try {
-    const initialHostConnections = await host.evaluate(
-      () => window.__tetherE2E.peerConnections.length,
-    );
-    const initialGuestConnections = await guest.evaluate(
-      () => window.__tetherE2E.peerConnections.length,
-    );
-    const safetyCode = (page: Page) => page.getByLabel('Safety code');
-    await Promise.all([
-      expect(safetyCode(host)).toBeVisible(),
-      expect(safetyCode(guest)).toBeVisible(),
-    ]);
-    const [hostCode, guestCode] = await Promise.all([
-      safetyCode(host).textContent(),
-      safetyCode(guest).textContent(),
-    ]);
-    expect(hostCode).toBe(guestCode);
+  const { host, guest } = await room.connect({ probeWebRtc: true });
+  const hostPage = host.page;
+  const guestPage = guest.page;
+  const initialHostConnections = await host.probe.peerConnectionCount();
+  const initialGuestConnections = await guest.probe.peerConnectionCount();
+  const safetyCode = (page: Page) => page.getByLabel('Safety code');
+  await Promise.all([
+    expect(safetyCode(hostPage)).toBeVisible(),
+    expect(safetyCode(guestPage)).toBeVisible(),
+  ]);
+  const [hostCode, guestCode] = await Promise.all([
+    safetyCode(hostPage).textContent(),
+    safetyCode(guestPage).textContent(),
+  ]);
+  expect(hostCode).toBe(guestCode);
 
-    await sendMessage(host, guest, 'message before room events close');
-    const hostInput = host.getByRole('textbox', { name: 'Message' });
-    const guestInput = guest.getByRole('textbox', { name: 'Message' });
+  await sendMessage(hostPage, guestPage, 'message before room events close');
+  const hostInput = hostPage.getByRole('textbox', { name: 'Message' });
+  const guestInput = guestPage.getByRole('textbox', { name: 'Message' });
 
-    await guest.evaluate(() => {
-      const dataChannel = window.__tetherE2E.dataChannels.at(-1);
-      if (dataChannel === undefined) {
-        throw new Error('Expected an instrumented local data channel');
-      }
-      dataChannel.close();
-    });
+  await guest.probe.closeLatestDataChannel();
 
-    await Promise.all([expect(hostInput).toBeDisabled(), expect(guestInput).toBeDisabled()]);
-    await Promise.all([
-      expect(host.locator('[data-room-avatar-sync]')).toHaveAttribute(
-        'data-room-avatar-sync',
-        'unavailable',
-      ),
-      expect(guest.locator('[data-room-avatar-sync]')).toHaveAttribute(
-        'data-room-avatar-sync',
-        'unavailable',
-      ),
-    ]);
-    await Promise.all([expectConnected(host), expectConnected(guest)]);
-    await Promise.all([
-      expect(host.getByLabel('Dusk Suite room scene')).toHaveAttribute(
-        'data-room-remote-avatar',
-        'present',
-      ),
-      expect(guest.getByLabel('Dusk Suite room scene')).toHaveAttribute(
-        'data-room-display',
-        'idle',
-      ),
-    ]);
-    await Promise.all([
-      expect(host.locator('[data-room-media-tile="remote"]')).toBeVisible(),
-      expect(guest.locator('[data-room-media-tile="remote"]')).toBeVisible(),
-    ]);
-    expect(await host.evaluate(() => window.__tetherE2E.peerConnections.length)).toBe(
-      initialHostConnections,
-    );
-    expect(await guest.evaluate(() => window.__tetherE2E.peerConnections.length)).toBe(
-      initialGuestConnections,
-    );
-    await expect(safetyCode(host)).toHaveText(hostCode ?? '');
-    await expect(safetyCode(guest)).toHaveText(guestCode ?? '');
-  } finally {
-    await cleanup();
-  }
+  await Promise.all([expect(hostInput).toBeDisabled(), expect(guestInput).toBeDisabled()]);
+  await Promise.all([
+    expect(hostPage.locator('[data-room-avatar-sync]')).toHaveAttribute(
+      'data-room-avatar-sync',
+      'unavailable',
+    ),
+    expect(guestPage.locator('[data-room-avatar-sync]')).toHaveAttribute(
+      'data-room-avatar-sync',
+      'unavailable',
+    ),
+  ]);
+  await Promise.all([room.expectConnected(host), room.expectConnected(guest)]);
+  await Promise.all([
+    expect(hostPage.getByLabel('Dusk Suite room scene')).toHaveAttribute(
+      'data-room-remote-avatar',
+      'present',
+    ),
+    expect(guestPage.getByLabel('Dusk Suite room scene')).toHaveAttribute(
+      'data-room-display',
+      'idle',
+    ),
+  ]);
+  await Promise.all([
+    expect(hostPage.locator('[data-room-media-tile="remote"]')).toBeVisible(),
+    expect(guestPage.locator('[data-room-media-tile="remote"]')).toBeVisible(),
+  ]);
+  expect(await host.probe.peerConnectionCount()).toBe(initialHostConnections);
+  expect(await guest.probe.peerConnectionCount()).toBe(initialGuestConnections);
+  await expect(safetyCode(hostPage)).toHaveText(hostCode ?? '');
+  await expect(safetyCode(guestPage)).toHaveText(guestCode ?? '');
 });

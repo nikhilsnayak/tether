@@ -1,6 +1,4 @@
-import { expect, test } from '@playwright/test';
-
-import { createRoom } from './helpers';
+import { expect, test } from './fixtures';
 
 test('web app loads', async ({ page }) => {
   await page.goto('/');
@@ -14,12 +12,10 @@ test('web app loads', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Connect' })).toBeDisabled();
 });
 
-test('a fresh visitor must accept the disclaimer before the app renders', async ({ browser }) => {
-  const context = await browser.newContext({
-    baseURL: 'http://localhost:5173',
+test('a fresh visitor must accept the disclaimer before the app renders', async ({ room }) => {
+  const { page } = await room.createActor({
     storageState: { cookies: [], origins: [] },
   });
-  const page = await context.newPage();
   await page.goto('/');
   await expect(page.getByRole('button', { name: 'I understand and accept' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Call' })).toBeHidden();
@@ -29,11 +25,10 @@ test('a fresh visitor must accept the disclaimer before the app renders', async 
 
   await page.reload();
   await expect(page.getByRole('button', { name: 'I understand and accept' })).toBeHidden();
-  await context.close();
 });
 
-test('web app opens a signaling session', async ({ page }) => {
-  const roomId = await createRoom(page);
+test('web app opens a signaling session', async ({ page, room }) => {
+  const roomId = await room.createRoom(room.actorFor(page));
 
   await expect(page.getByText('Share this room to invite someone.')).toBeVisible();
   await expect(page.getByText(`Room ${roomId}`)).toBeVisible();
