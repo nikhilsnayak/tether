@@ -13,13 +13,17 @@ export default defineConfig({
   // Vulkan initialization and fake WebRTC devices do not starve one another.
   workers: CI ? 1 : 2,
   timeout: 60_000,
-  reporter: 'html',
+  outputDir: 'test-results',
+  reporter: CI
+    ? [['line'], ['html', { open: 'never' }], ['json', { outputFile: 'test-results/results.json' }]]
+    : 'html',
   // Media-heavy specs run concurrently on one machine; the default 5s expect
   // timeout flakes on navigation and status transitions under that load.
   expect: { timeout: 10_000 },
   use: {
     baseURL: `http://localhost:5173`,
-    trace: 'on-first-retry',
+    screenshot: 'only-on-failure',
+    trace: 'retain-on-failure',
     storageState: seededStorageState,
   },
   projects: [
