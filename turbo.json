@@ -11,11 +11,8 @@
       "cache": false,
       "persistent": true
     },
-    "test": {
-      "dependsOn": ["^test"]
-    },
+    "test": {},
     "test:coverage": {
-      "dependsOn": ["^test:coverage"],
       "outputs": ["coverage/**"]
     },
     "test:watch": {

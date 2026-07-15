@@ -15,9 +15,12 @@
     "lint:fix": "oxlint --fix --config oxlint.config.ts",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
-    "test": "turbo test",
+    "test": "bun run test:unit",
+    "test:unit": "turbo test --filter='!e2e'",
+    "test:e2e": "bun run --cwd e2e test",
+    "test:all": "bun run test:unit && bun run test:e2e",
     "test:coverage": "turbo test:coverage",
-    "test:watch": "turbo test:watch",
+    "test:watch": "turbo test:watch --filter='!e2e'",
     "prepare": "effect-language-service patch"
   },
   "dependencies": {
