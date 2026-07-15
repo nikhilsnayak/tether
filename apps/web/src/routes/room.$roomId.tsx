@@ -117,18 +117,6 @@ function GuestRoomEntry({
     return <JoinNamePanel onSubmit={onName} />;
   }
 
-  if (preparedMedia === null) {
-    return (
-      <MediaSetupPanel
-        template={resolution.template}
-        entryContext='guest'
-        actionLabel='Knock on door'
-        onBack={onLeave}
-        onComplete={onMedia}
-      />
-    );
-  }
-
   const session: RoomSession = {
     intent: 'join',
     roomId,
@@ -137,12 +125,30 @@ function GuestRoomEntry({
   };
 
   return (
-    <RoomExperience session={session} template={resolution.template} sessionRequested>
-      <CatchBoundary errorComponent={CallErrorScreen} getResetKey={() => selfId}>
-        <Suspense fallback={<CallLoadingScreen />}>
-          <PeerSessionLayer session={session} preparedMedia={preparedMedia} onLeaveRoom={onLeave} />
-        </Suspense>
-      </CatchBoundary>
+    <RoomExperience
+      session={session}
+      template={resolution.template}
+      sessionRequested={preparedMedia !== null}
+    >
+      {preparedMedia === null ? (
+        <MediaSetupPanel
+          template={resolution.template}
+          entryContext='guest'
+          actionLabel='Knock on door'
+          onBack={onLeave}
+          onComplete={onMedia}
+        />
+      ) : (
+        <CatchBoundary errorComponent={CallErrorScreen} getResetKey={() => selfId}>
+          <Suspense fallback={<CallLoadingScreen />}>
+            <PeerSessionLayer
+              session={session}
+              preparedMedia={preparedMedia}
+              onLeaveRoom={onLeave}
+            />
+          </Suspense>
+        </CatchBoundary>
+      )}
     </RoomExperience>
   );
 }

@@ -6,7 +6,6 @@ import { LogoMark } from '@/components/logo';
 
 import { CallControlButton } from '../components/call-controls';
 import { MediaStreamVideo } from '../components/media-stream-video';
-import { RoomScene } from '../scene/room-scene';
 import type { RoomTemplate } from '../templates/registry';
 import type { PreparedMediaSelection } from './media';
 import { useMediaPreflight } from './use-media-preflight';
@@ -34,9 +33,6 @@ export function MediaSetupPanel({
 
   return (
     <div className='relative isolate grid min-h-svh place-items-center overflow-hidden px-6 py-10'>
-      {guestEntry && (
-        <RoomScene template={template} journey='outside' mode='call' sessionIntent='join' />
-      )}
       <div
         className={cn(
           'relative z-10 w-full max-w-xl space-y-6',
