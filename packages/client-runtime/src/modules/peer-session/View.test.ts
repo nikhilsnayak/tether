@@ -21,6 +21,10 @@ const connectedView: PeerSessionView = {
   roomTemplateId: null,
 };
 const peerId = PeerId.make('pppppppppppp');
+const unavailableRoomEvents = {
+  remoteAvatarPose: null,
+  remoteMediaState: null,
+} as const;
 
 describe('reducePeerSessionView', () => {
   it('keeps media handles outside the serializable view', () => {
@@ -244,5 +248,216 @@ describe('reducePeerSessionView', () => {
         reason,
       );
     }
+  });
+
+  it('resets the projection when a new session starts', () => {
+    const view = reducePeerSessionView(
+      {
+        status: 'connected',
+        messages: [{ id: 'message-1', sender: 'peer', text: 'from the previous session' }],
+        roomEventsReady: true,
+        ...unavailableRoomEvents,
+        sas: '11111 22222 33333 44444 55555',
+        pendingJoinRequests: [],
+        roomId: null,
+        roomTemplateId: null,
+      },
+      { _tag: 'SessionStarted' },
+    );
+
+    assert.deepStrictEqual(view, initialPeerSessionView);
+  });
+
+  it('projects actor events into UI state', () => {
+    const waiting = reducePeerSessionView(initialPeerSessionView, {
+      _tag: 'WaitingForPeer',
+    });
+    const connected = reducePeerSessionView(waiting, {
+      _tag: 'Connected',
+      peerId,
+    });
+    const withChat = reducePeerSessionView(connected, { _tag: 'RoomEventsReady' });
+    const withSas = reducePeerSessionView(withChat, {
+      _tag: 'SasReady',
+      code: '11111 22222 33333 44444 55555',
+    });
+    const withMessage = reducePeerSessionView(withSas, {
+      _tag: 'ChatMessageAdded',
+      message: { id: 'message-1', sender: 'peer', text: 'hello' },
+    });
+
+    assert.deepStrictEqual(withMessage, {
+      status: 'connected',
+      messages: [{ id: 'message-1', sender: 'peer', text: 'hello' }],
+      roomEventsReady: true,
+      ...unavailableRoomEvents,
+      sas: '11111 22222 33333 44444 55555',
+      pendingJoinRequests: [],
+      roomId: null,
+      roomTemplateId: null,
+    });
+  });
+
+  it('projects signaling disconnection while preserving messages', () => {
+    const view = reducePeerSessionView(
+      {
+        status: 'connected',
+        messages: [{ id: 'message-1', sender: 'peer', text: 'hello' }],
+        roomEventsReady: true,
+        ...unavailableRoomEvents,
+        sas: '11111 22222 33333 44444 55555',
+        pendingJoinRequests: [],
+        roomId: null,
+        roomTemplateId: null,
+      },
+      { _tag: 'SignalingDisconnected' },
+    );
+
+    assert.deepStrictEqual(view, {
+      status: 'disconnected',
+      messages: [{ id: 'message-1', sender: 'peer', text: 'hello' }],
+      roomEventsReady: false,
+      ...unavailableRoomEvents,
+      sas: null,
+      pendingJoinRequests: [],
+      roomId: null,
+      roomTemplateId: null,
+    });
+  });
+
+  it('marks room events unavailable when the data channel closes', () => {
+    const view = reducePeerSessionView(
+      {
+        status: 'connected',
+        messages: [],
+        roomEventsReady: true,
+        ...unavailableRoomEvents,
+        remoteMediaState: { revision: 1, cameraOn: true, microphoneOn: false },
+        sas: '11111 22222 33333 44444 55555',
+        pendingJoinRequests: [],
+        roomId: null,
+        roomTemplateId: null,
+      },
+      { _tag: 'RoomEventsUnavailable' },
+    );
+
+    assert.deepStrictEqual(view, {
+      status: 'connected',
+      messages: [],
+      roomEventsReady: false,
+      ...unavailableRoomEvents,
+      sas: '11111 22222 33333 44444 55555',
+      pendingJoinRequests: [],
+      roomId: null,
+      roomTemplateId: null,
+    });
+  });
+
+  it('projects an unexpected session failure while preserving messages', () => {
+    const view = reducePeerSessionView(
+      {
+        status: 'connected',
+        messages: [{ id: 'message-1', sender: 'self', text: 'hello' }],
+        roomEventsReady: true,
+        ...unavailableRoomEvents,
+        sas: '11111 22222 33333 44444 55555',
+        pendingJoinRequests: [],
+        roomId: null,
+        roomTemplateId: null,
+      },
+      { _tag: 'SessionFailed' },
+    );
+
+    assert.deepStrictEqual(view, {
+      status: 'failed',
+      messages: [{ id: 'message-1', sender: 'self', text: 'hello' }],
+      roomEventsReady: false,
+      ...unavailableRoomEvents,
+      sas: null,
+      pendingJoinRequests: [],
+      roomId: null,
+      roomTemplateId: null,
+    });
+  });
+
+  it('projects a full-room rejection while preserving messages', () => {
+    const view = reducePeerSessionView(
+      {
+        status: 'connecting',
+        messages: [{ id: 'message-1', sender: 'self', text: 'hello' }],
+        roomEventsReady: false,
+        ...unavailableRoomEvents,
+        sas: null,
+        pendingJoinRequests: [],
+        roomId: null,
+        roomTemplateId: null,
+      },
+      { _tag: 'RoomJoinRejected', reason: 'room-full' },
+    );
+
+    assert.deepStrictEqual(view, {
+      status: 'room-full',
+      messages: [{ id: 'message-1', sender: 'self', text: 'hello' }],
+      roomEventsReady: false,
+      ...unavailableRoomEvents,
+      sas: null,
+      pendingJoinRequests: [],
+      roomId: null,
+      roomTemplateId: null,
+    });
+  });
+
+  it('projects a duplicate-peer rejection while preserving messages', () => {
+    const view = reducePeerSessionView(
+      {
+        status: 'connecting',
+        messages: [{ id: 'message-1', sender: 'self', text: 'hello' }],
+        roomEventsReady: false,
+        ...unavailableRoomEvents,
+        sas: null,
+        pendingJoinRequests: [],
+        roomId: null,
+        roomTemplateId: null,
+      },
+      { _tag: 'RoomJoinRejected', reason: 'peer-already-joined' },
+    );
+
+    assert.deepStrictEqual(view, {
+      status: 'peer-already-joined',
+      messages: [{ id: 'message-1', sender: 'self', text: 'hello' }],
+      roomEventsReady: false,
+      ...unavailableRoomEvents,
+      sas: null,
+      pendingJoinRequests: [],
+      roomId: null,
+      roomTemplateId: null,
+    });
+  });
+
+  it('records when the active peer departs', () => {
+    const view = reducePeerSessionView(
+      {
+        status: 'connected',
+        messages: [{ id: 'message-1', sender: 'peer', text: 'hello' }],
+        roomEventsReady: true,
+        ...unavailableRoomEvents,
+        sas: '11111 22222 33333 44444 55555',
+        pendingJoinRequests: [],
+        roomId: null,
+        roomTemplateId: null,
+      },
+      { _tag: 'PeerDeparted', peerId },
+    );
+
+    assert.deepStrictEqual(view, {
+      status: 'peer-departed',
+      messages: [{ id: 'message-1', sender: 'peer', text: 'hello' }],
+      roomEventsReady: false,
+      ...unavailableRoomEvents,
+      sas: null,
+      pendingJoinRequests: [],
+      roomId: null,
+      roomTemplateId: null,
+    });
   });
 });

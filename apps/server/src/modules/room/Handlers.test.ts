@@ -3,29 +3,24 @@ import {
   DUSK_SUITE_TEMPLATE_ID,
   DisplayName,
   JoinDenied,
+  JoinRequestedEvent,
   PeerAlreadyJoined,
   PeerId,
   PeerLeftEvent,
   PeerNotInRoom,
-  RoomEvent,
   RoomFull,
   RoomId,
   RoomNotFound,
-  RoomRpcs,
   RoomSessionOpenedEvent,
   ServerAtCapacity,
   SessionToken,
   SessionDescriptionSignal,
   SignalReceivedEvent,
 } from '@tether/contracts/modules/room';
-import { Deferred, Effect, Fiber, Layer, Schema, Stream } from 'effect';
-import { RpcTest } from 'effect/unstable/rpc';
-
-import * as ServerCrypto from '@/lib/ServerCrypto';
+import { Deferred, Effect, Fiber, Schema, Stream } from 'effect';
 
 import { ROOM_CREATE_BUCKET_CAPACITY } from './Constants';
-import { RoomHandlers } from './Handlers';
-import { RoomService } from './RoomService';
+import { makeRoomRpcTestHarness } from './test/RoomRpcTestHarness';
 
 const alice = PeerId.make('aaaaaaaaaaaa');
 const bob = PeerId.make('bbbbbbbbbbbb');
@@ -44,104 +39,17 @@ const letters = (length: number, index: number) => {
 };
 const randomPeerId = (index: number) => PeerId.make(letters(12, index));
 
-const TestHandlers = RoomHandlers.pipe(
-  Layer.provide(RoomService.layer),
-  Layer.provide(ServerCrypto.layer),
-);
-const makeClient = RpcTest.makeClient(RoomRpcs).pipe(Effect.provide(TestHandlers));
-
-type Client = Effect.Success<typeof makeClient>;
-
-const isTag = (entry: { readonly event: { readonly _tag: string } }, tag: string) =>
-  entry.event._tag === tag;
-
-// Hosts alice, knocks as bob, waits for the host to observe the knock, then
-// admits bob. Returns the ids/tokens and the still-running host/joiner fibers.
-const connect = (
-  client: Client,
-  options: { readonly hostTake?: number; readonly joinerTake?: number } = {},
-) =>
-  Effect.gen(function* () {
-    const roomIdDeferred = yield* Deferred.make<RoomId>();
-    const aliceTokenDeferred = yield* Deferred.make<SessionToken>();
-    const knockDeferred = yield* Deferred.make<void>();
-    const bobTokenDeferred = yield* Deferred.make<SessionToken>();
-
-    const hostStream = client.OpenRoomSession({
-      selfId: alice,
-      intent: 'host',
-      roomTemplateId: DUSK_SUITE_TEMPLATE_ID,
-    });
-    const aliceFiber = yield* (
-      options.hostTake === undefined
-        ? hostStream.pipe(Stream.tap(hostTap), Stream.runDrain)
-        : hostStream.pipe(Stream.tap(hostTap), Stream.take(options.hostTake), Stream.runCollect)
-    ).pipe(Effect.forkChild({ startImmediately: true }));
-
-    const roomId = yield* Deferred.await(roomIdDeferred);
-    const aliceToken = yield* Deferred.await(aliceTokenDeferred);
-    assert.deepStrictEqual(yield* client.GetRoomMetadata({ roomId }), {
-      roomTemplateId: DUSK_SUITE_TEMPLATE_ID,
-    });
-
-    const joinStream = client.OpenRoomSession({
-      selfId: bob,
-      intent: 'join',
-      roomId,
-      displayName: bobName,
-    });
-    const bobFiber = yield* (
-      options.joinerTake === undefined
-        ? joinStream.pipe(Stream.tap(bobTap), Stream.runDrain)
-        : joinStream.pipe(Stream.tap(bobTap), Stream.take(options.joinerTake), Stream.runCollect)
-    ).pipe(Effect.forkChild({ startImmediately: true }));
-
-    yield* Deferred.await(knockDeferred);
-    yield* client.RespondToJoin({
-      roomId,
-      selfId: alice,
-      sessionToken: aliceToken,
-      peerId: bob,
-      decision: 'allow',
-    });
-    const bobToken = yield* Deferred.await(bobTokenDeferred);
-
-    // Callers that read the collected events always pass hostTake; drain-path
-    // callers ignore the fiber, so surface the collect result to both.
-    return {
-      roomId,
-      aliceToken,
-      bobToken,
-      aliceFiber: aliceFiber as Fiber.Fiber<ReadonlyArray<{ readonly event: RoomEvent }>>,
-      bobFiber,
-    };
-
-    function hostTap(entry: { readonly event: { readonly _tag: string } }) {
-      if (isTag(entry, '@tether/RoomSessionOpenedEvent')) {
-        const opened = entry.event as RoomSessionOpenedEvent;
-        return Effect.all([
-          Deferred.succeed(roomIdDeferred, opened.roomId),
-          Deferred.succeed(aliceTokenDeferred, opened.sessionToken),
-        ]);
-      }
-      if (isTag(entry, '@tether/JoinRequestedEvent')) {
-        return Deferred.succeed(knockDeferred, undefined);
-      }
-      return Effect.void;
-    }
-
-    function bobTap(entry: { readonly event: { readonly _tag: string } }) {
-      return isTag(entry, '@tether/RoomSessionOpenedEvent')
-        ? Deferred.succeed(bobTokenDeferred, (entry.event as RoomSessionOpenedEvent).sessionToken)
-        : Effect.void;
-    }
-  });
+const isJoinRequestedEvent = Schema.is(JoinRequestedEvent);
+const isRoomSessionOpenedEvent = Schema.is(RoomSessionOpenedEvent);
 
 describe('RoomHandlers', () => {
   it.effect('relays a departure when the joiner stream closes', () =>
     Effect.gen(function* () {
-      const client = yield* makeClient;
-      const { aliceFiber, bobFiber } = yield* connect(client, { hostTake: 4, joinerTake: 2 });
+      const harness = yield* makeRoomRpcTestHarness();
+      const { aliceFiber, bobFiber } = yield* harness.connect({
+        hostTake: 4,
+        joinerTake: 2,
+      });
 
       // Bob's stream completes after [JoinPending, RoomSessionOpened], closing
       // the session, which the host observes as a departure.
@@ -154,10 +62,12 @@ describe('RoomHandlers', () => {
 
   it.effect('explicitly leaves through the RPC', () =>
     Effect.gen(function* () {
-      const client = yield* makeClient;
-      const { roomId, bobToken, aliceFiber } = yield* connect(client, { hostTake: 4 });
+      const harness = yield* makeRoomRpcTestHarness();
+      const { roomId, bobToken, aliceFiber } = yield* harness.connect({
+        hostTake: 4,
+      });
 
-      yield* client.LeaveRoom({ roomId, selfId: bob, sessionToken: bobToken });
+      yield* harness.client.LeaveRoom({ roomId, selfId: bob, sessionToken: bobToken });
       const aliceEvents = yield* Fiber.join(aliceFiber);
 
       assert.deepStrictEqual(aliceEvents[3], { event: new PeerLeftEvent({ peerId: bob }) });
@@ -166,15 +76,17 @@ describe('RoomHandlers', () => {
 
   it.effect('relays a signal to the other peer', () =>
     Effect.gen(function* () {
-      const client = yield* makeClient;
-      const { roomId, bobToken, aliceFiber } = yield* connect(client, { hostTake: 4 });
+      const harness = yield* makeRoomRpcTestHarness();
+      const { roomId, bobToken, aliceFiber } = yield* harness.connect({
+        hostTake: 4,
+      });
 
       const signal = new SessionDescriptionSignal({
         negotiationEpoch: 7,
         type: 'offer',
         sdp: 'relayed-offer',
       });
-      yield* client.SendSignal({ roomId, selfId: bob, sessionToken: bobToken, signal });
+      yield* harness.client.SendSignal({ roomId, selfId: bob, sessionToken: bobToken, signal });
 
       const aliceEvents = yield* Fiber.join(aliceFiber);
       assert.deepStrictEqual(aliceEvents[3], {
@@ -185,10 +97,10 @@ describe('RoomHandlers', () => {
 
   it.effect('does not relay signals from a peer outside the room', () =>
     Effect.gen(function* () {
-      const client = yield* makeClient;
-      const { roomId } = yield* connect(client);
+      const harness = yield* makeRoomRpcTestHarness();
+      const { roomId } = yield* harness.connect();
 
-      const error = yield* client
+      const error = yield* harness.client
         .SendSignal({
           roomId,
           selfId: mallory,
@@ -208,10 +120,10 @@ describe('RoomHandlers', () => {
 
   it.effect('rejects a third peer with RoomFull', () =>
     Effect.gen(function* () {
-      const client = yield* makeClient;
-      const { roomId } = yield* connect(client);
+      const harness = yield* makeRoomRpcTestHarness();
+      const { roomId } = yield* harness.connect();
 
-      const error = yield* client
+      const error = yield* harness.client
         .OpenRoomSession({ selfId: charlie, intent: 'join', roomId, displayName: charlieName })
         .pipe(Stream.runDrain, Effect.flip);
 
@@ -222,9 +134,9 @@ describe('RoomHandlers', () => {
 
   it.effect('returns RoomNotFound for a join to an unknown room', () =>
     Effect.gen(function* () {
-      const client = yield* makeClient;
+      const harness = yield* makeRoomRpcTestHarness();
 
-      const error = yield* client
+      const error = yield* harness.client
         .OpenRoomSession({
           selfId: bob,
           intent: 'join',
@@ -239,8 +151,8 @@ describe('RoomHandlers', () => {
 
   it.effect('returns RoomNotFound for metadata lookup on an unknown room', () =>
     Effect.gen(function* () {
-      const client = yield* makeClient;
-      const error = yield* client
+      const harness = yield* makeRoomRpcTestHarness();
+      const error = yield* harness.client
         .GetRoomMetadata({ roomId: RoomId.make('abc-defg-hij') })
         .pipe(Effect.flip);
       assert.instanceOf(error, RoomNotFound);
@@ -249,12 +161,12 @@ describe('RoomHandlers', () => {
 
   it.effect('returns ServerAtCapacity when the creation bucket is drained', () =>
     Effect.gen(function* () {
-      const client = yield* makeClient;
+      const harness = yield* makeRoomRpcTestHarness();
 
       yield* Effect.forEach(
         Array.from({ length: ROOM_CREATE_BUCKET_CAPACITY }, (_, index) => index),
         (index) =>
-          client
+          harness.client
             .OpenRoomSession({
               selfId: randomPeerId(index),
               intent: 'host',
@@ -264,7 +176,7 @@ describe('RoomHandlers', () => {
         { discard: true },
       );
 
-      const error = yield* client
+      const error = yield* harness.client
         .OpenRoomSession({
           selfId: randomPeerId(999),
           intent: 'host',
@@ -278,10 +190,10 @@ describe('RoomHandlers', () => {
 
   it.effect('returns PeerAlreadyJoined when a member rejoins', () =>
     Effect.gen(function* () {
-      const client = yield* makeClient;
-      const { roomId } = yield* connect(client);
+      const harness = yield* makeRoomRpcTestHarness();
+      const { roomId } = yield* harness.connect();
 
-      const error = yield* client
+      const error = yield* harness.client
         .OpenRoomSession({ selfId: bob, intent: 'join', roomId, displayName: bobName })
         .pipe(Stream.runDrain, Effect.flip);
 
@@ -292,23 +204,22 @@ describe('RoomHandlers', () => {
 
   it.effect('denies a joiner through RespondToJoin', () =>
     Effect.gen(function* () {
-      const client = yield* makeClient;
+      const harness = yield* makeRoomRpcTestHarness();
       const roomIdDeferred = yield* Deferred.make<RoomId>();
       const aliceTokenDeferred = yield* Deferred.make<SessionToken>();
       const knockDeferred = yield* Deferred.make<void>();
 
-      yield* client
+      yield* harness.client
         .OpenRoomSession({ selfId: alice, intent: 'host', roomTemplateId: DUSK_SUITE_TEMPLATE_ID })
         .pipe(
           Stream.tap((entry) => {
-            if (isTag(entry, '@tether/RoomSessionOpenedEvent')) {
-              const opened = entry.event as RoomSessionOpenedEvent;
+            if (isRoomSessionOpenedEvent(entry.event)) {
               return Effect.all([
-                Deferred.succeed(roomIdDeferred, opened.roomId),
-                Deferred.succeed(aliceTokenDeferred, opened.sessionToken),
+                Deferred.succeed(roomIdDeferred, entry.event.roomId),
+                Deferred.succeed(aliceTokenDeferred, entry.event.sessionToken),
               ]);
             }
-            return isTag(entry, '@tether/JoinRequestedEvent')
+            return isJoinRequestedEvent(entry.event)
               ? Deferred.succeed(knockDeferred, undefined)
               : Effect.void;
           }),
@@ -318,12 +229,12 @@ describe('RoomHandlers', () => {
       const roomId = yield* Deferred.await(roomIdDeferred);
       const aliceToken = yield* Deferred.await(aliceTokenDeferred);
 
-      const bobFiber = yield* client
+      const bobFiber = yield* harness.client
         .OpenRoomSession({ selfId: bob, intent: 'join', roomId, displayName: bobName })
         .pipe(Stream.runDrain, Effect.forkChild({ startImmediately: true }));
 
       yield* Deferred.await(knockDeferred);
-      yield* client.RespondToJoin({
+      yield* harness.client.RespondToJoin({
         roomId,
         selfId: alice,
         sessionToken: aliceToken,
@@ -338,10 +249,10 @@ describe('RoomHandlers', () => {
 
   it.effect('rejects RespondToJoin from a caller with a bad token', () =>
     Effect.gen(function* () {
-      const client = yield* makeClient;
-      const { roomId } = yield* connect(client);
+      const harness = yield* makeRoomRpcTestHarness();
+      const { roomId } = yield* harness.connect();
 
-      const error = yield* client
+      const error = yield* harness.client
         .RespondToJoin({
           roomId,
           selfId: alice,
