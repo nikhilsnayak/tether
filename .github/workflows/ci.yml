@@ -161,6 +161,7 @@ jobs:
     needs: [static-checks, build, unit, e2e-fast, e2e-gpu]
     if: always()
     runs-on: ubuntu-latest
+    permissions: {}
     steps:
       - name: Confirm all CI jobs passed
         run: |
