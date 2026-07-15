@@ -47,7 +47,7 @@ export function roomJourneyCue(
     case 'negotiation-stalled':
       return 'stalled';
     case 'connecting':
-      return 'connecting';
+      return intent === 'join' ? 'outside' : 'connecting';
     case 'connected':
       return 'together';
   }
@@ -62,10 +62,29 @@ export function roomTransition(
   next: RoomJourneyCue,
   reducedMotion: boolean,
 ): RoomTransition {
-  if (!reducedMotion && previous === 'outside' && (next === 'connecting' || next === 'together')) {
+  if (!reducedMotion && successfulAdmission(previous, next)) {
     return { kind: 'enter', durationMs: 900 };
   }
   return { kind: 'none', durationMs: 0 };
+}
+
+export function resolveRoomTransition(
+  active: RoomTransition,
+  previous: RoomJourneyCue,
+  next: RoomJourneyCue,
+  reducedMotion: boolean,
+): RoomTransition {
+  const requested = roomTransition(previous, next, reducedMotion);
+  if (requested.kind === 'enter') return requested;
+  if (
+    !reducedMotion &&
+    active.kind === 'enter' &&
+    previous === 'connecting' &&
+    next === 'together'
+  ) {
+    return active;
+  }
+  return requested;
 }
 
 export function doorTransition(

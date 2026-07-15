@@ -10,6 +10,7 @@ import { Suspense, useRef, useState } from 'react';
 import { useReducedMotionPreference } from '@/hooks/use-reduced-motion-preference';
 
 import { AvatarControls } from '../components/avatar-controls';
+import { RoomControlHelp } from '../components/room-control-help';
 import { useAvatarControls } from '../hooks/use-avatar-controls';
 import type { RoomTemplate } from '../templates/registry';
 import { LocalAvatarController, RemoteAvatarController } from './avatar-controllers';
@@ -30,6 +31,7 @@ import {
 import type { RoomJourneyCue } from './journey';
 import { ParticipantAvatar } from './participant-avatar';
 import { ContextLossGuard, FramePerformanceMonitor } from './renderer-lifecycle';
+import { RoomTransitionController } from './room-transition-controller';
 import { ThirdPersonCamera } from './third-person-camera';
 
 const readQualityPreference = (): QualityPreference => {
@@ -47,6 +49,7 @@ export function RoomScene({
   remoteAvatarPose = null,
   roomEventsReady = false,
   sendAvatarPose = () => false,
+  qualityPreference: controlledQualityPreference,
 }: {
   readonly template: RoomTemplate;
   readonly journey?: RoomJourneyCue;
@@ -56,10 +59,13 @@ export function RoomScene({
   readonly remoteAvatarPose?: SequencedAvatarPose | null;
   readonly roomEventsReady?: boolean;
   readonly sendAvatarPose?: (pose: AvatarPose) => boolean;
+  readonly qualityPreference?: QualityPreference;
 }) {
-  const [qualityPreference, setQualityPreference] = useState(readQualityPreference);
+  const [localQualityPreference, setLocalQualityPreference] = useState(readQualityPreference);
+  const qualityPreference = controlledQualityPreference ?? localQualityPreference;
+  const deviceDpr = typeof devicePixelRatio === 'number' ? devicePixelRatio : 1;
   const [adaptiveQuality, setAdaptiveQuality] = useState(() =>
-    initialAdaptiveQualityState(typeof devicePixelRatio === 'number' ? devicePixelRatio : 1),
+    initialAdaptiveQualityState(deviceDpr),
   );
   const [contextLost, setContextLost] = useState(false);
   const surfaceRef = useRef<HTMLDivElement>(null);
@@ -68,7 +74,8 @@ export function RoomScene({
   const remotePoseRef = useRef<AvatarPose>(avatarSpawn(template.gameplay, remoteIntent));
   const reducedMotion = useReducedMotionPreference();
   const activeJourney = journey ?? 'waiting';
-  const presentation = avatarPresentation(sessionIntent, activeJourney);
+  const [spatialJourney, setSpatialJourney] = useState(activeJourney);
+  const presentation = avatarPresentation(sessionIntent, spatialJourney);
   const controlsEnabled =
     mode === 'call' &&
     presentation.localLocation === 'inside' &&
@@ -81,16 +88,13 @@ export function RoomScene({
   const qualityTier =
     qualityPreference === 'auto'
       ? adaptiveQuality.tier
-      : resolveQualityTier(
-          qualityPreference,
-          typeof devicePixelRatio === 'number' ? devicePixelRatio : 1,
-        );
+      : resolveQualityTier(qualityPreference, deviceDpr);
   const quality = QUALITY_CONFIGS[qualityTier];
   const rendering = renderingQualitySettings(quality);
   const SceneEnvironment = template.scene;
 
   const updateQuality = (preference: QualityPreference) => {
-    setQualityPreference(preference);
+    setLocalQualityPreference(preference);
     if (preference === 'auto') localStorage.removeItem(QUALITY_STORAGE_KEY);
     else localStorage.setItem(QUALITY_STORAGE_KEY, preference);
   };
@@ -152,12 +156,17 @@ export function RoomScene({
         renderer={ROOM_RENDERER_SETTINGS}
       >
         <color attach='background' args={['#090b13']} />
+        <RoomTransitionController
+          journey={activeJourney}
+          reducedMotion={reducedMotion}
+          updateSpatialJourney={setSpatialJourney}
+        />
         <ThirdPersonCamera
           template={template}
           poseRef={localPoseRef}
           reducedMotion={reducedMotion}
           surfaceRef={surfaceRef}
-          journey={journey}
+          journey={spatialJourney}
           mode={mode}
           recenterSignal={recenterSignal}
         />
@@ -226,14 +235,11 @@ export function RoomScene({
           onRecenter={recenter}
         />
       )}
-      {(mode === 'preview' || journey !== 'outside') && (
+      {mode === 'preview' && (
         <div
           data-room-scene-ignore-gesture
           data-room-quality-control
-          className={cn(
-            'absolute z-10 flex items-center gap-2',
-            mode === 'call' ? 'right-4 bottom-24 max-sm:hidden' : 'right-3 bottom-3',
-          )}
+          className='absolute right-3 bottom-3 z-10 flex items-center gap-2'
         >
           <label className='sr-only' htmlFor='room-quality'>
             Room rendering quality
@@ -259,14 +265,7 @@ export function RoomScene({
           Drag to look around
         </p>
       )}
-      {mode === 'call' && presentation.localLocation === 'inside' && (
-        <p
-          data-room-scene-ignore-gesture
-          className='bg-background/70 text-muted-foreground absolute bottom-24 left-28 z-10 hidden px-2 py-1 text-[10px] sm:block'
-        >
-          WASD / arrows to move · R to recenter · drag to orbit · scroll to zoom
-        </p>
-      )}
+      {mode === 'call' && presentation.localLocation === 'inside' && <RoomControlHelp />}
     </div>
   );
 }

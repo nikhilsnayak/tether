@@ -5,6 +5,7 @@ import {
   doorTransition,
   doorTransitionOpenness,
   resolveDoorTransition,
+  resolveRoomTransition,
   roomJourneyCue,
   roomJourneyLabel,
   roomTransition,
@@ -33,6 +34,7 @@ describe('roomJourneyCue', () => {
     ['host', 'waiting-for-peer', 'waiting'],
     ['join', 'awaiting-approval', 'outside'],
     ['host', 'connecting', 'connecting'],
+    ['join', 'connecting', 'outside'],
     ['host', 'connected', 'together'],
     ['join', 'reconnecting', 'reconnecting'],
     ['join', 'transport-lost', 'reconnecting'],
@@ -57,6 +59,7 @@ describe('roomJourneyCue', () => {
     for (const status of statuses) {
       expect(roomJourneyLabel(roomJourneyCue('join', status))).not.toBe('');
     }
+    expect(roomJourneyLabel('connecting')).toBe('Connecting');
   });
 });
 
@@ -70,6 +73,35 @@ describe('roomTransition', () => {
       kind: 'enter',
       durationMs: 900,
     });
+    expect(roomTransition('waiting', 'connecting', false)).toEqual({
+      kind: 'enter',
+      durationMs: 900,
+    });
+  });
+
+  it('preserves an active entrance while connecting becomes together', () => {
+    const active = roomTransition('waiting', 'connecting', false);
+
+    expect(
+      resolveRoomTransition({ kind: 'none', durationMs: 0 }, 'outside', 'connecting', false),
+    ).toEqual(active);
+    expect(resolveRoomTransition(active, 'connecting', 'together', false)).toBe(active);
+  });
+
+  it('aborts an active entrance when connection stalls or reduced motion is enabled', () => {
+    const active = roomTransition('waiting', 'connecting', false);
+
+    expect(resolveRoomTransition(active, 'connecting', 'stalled', false)).toEqual({
+      kind: 'none',
+      durationMs: 0,
+    });
+    expect(resolveRoomTransition(active, 'connecting', 'together', true)).toEqual({
+      kind: 'none',
+      durationMs: 0,
+    });
+    expect(
+      resolveRoomTransition({ kind: 'none', durationMs: 0 }, 'outside', 'ended', false),
+    ).toEqual({ kind: 'none', durationMs: 0 });
   });
 
   it('uses immediate placement for reduced motion', () => {

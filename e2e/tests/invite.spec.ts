@@ -17,4 +17,9 @@ test('creating a room offers a copyable invite link', async ({ page, context }) 
   await page.getByRole('button', { name: 'Copy room link' }).click();
   await expect(page.getByRole('button', { name: 'Copy room link' })).toContainText('Copied');
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(inviteLink);
+
+  await page.getByRole('button', { name: 'Close room invite' }).click();
+  await expect(page.getByRole('region', { name: 'Room invite' })).toBeHidden();
+  await page.getByRole('button', { name: /Open room invite/ }).click();
+  await expect(page.getByRole('textbox', { name: 'Room invite link' })).toHaveValue(inviteLink);
 });
