@@ -242,7 +242,7 @@ export function RoomScene({
           className='absolute right-3 bottom-3 z-10 flex items-center gap-2'
         >
           <label className='sr-only' htmlFor='room-quality'>
-            Room rendering quality
+            Room quality
           </label>
           <select
             id='room-quality'

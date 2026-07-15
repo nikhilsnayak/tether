@@ -37,7 +37,7 @@ export function RoomQualityControl({
             <DropdownMenuTrigger
               render={
                 <Button
-                  aria-label='Room rendering quality'
+                  aria-label='Room quality'
                   data-quality-preference={preference}
                   data-room-quality-control
                   variant='secondary'
@@ -52,7 +52,7 @@ export function RoomQualityControl({
             {preference}
           </span>
         </TooltipTrigger>
-        <TooltipContent>Room rendering quality</TooltipContent>
+        <TooltipContent>Room quality</TooltipContent>
       </Tooltip>
       <DropdownMenuContent side='top' align='center'>
         <DropdownMenuRadioGroup
@@ -62,7 +62,7 @@ export function RoomQualityControl({
             setOpen(false);
           }}
         >
-          <DropdownMenuLabel>Rendering quality</DropdownMenuLabel>
+          <DropdownMenuLabel>Room quality</DropdownMenuLabel>
           {QUALITY_OPTIONS.map(([value, label]) => (
             <DropdownMenuRadioItem key={value} value={value}>
               {label}

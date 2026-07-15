@@ -21,7 +21,7 @@ test('room waiting screen fits the viewport', async ({ page }) => {
   await expect(page.getByText('Share this room to invite someone.')).toBeVisible();
   const scene = page.getByLabel('Dusk Suite room scene');
   await expect(scene.locator('canvas')).toBeVisible();
-  const quality = page.getByRole('button', { name: 'Room rendering quality' });
+  const quality = page.getByRole('button', { name: 'Room quality' });
   await quality.click();
   await page.getByRole('menuitemradio', { name: 'Low quality' }).click();
   await expect(quality).toHaveAttribute('data-quality-preference', 'low');
@@ -46,7 +46,7 @@ test('room waiting screen fits the viewport', async ({ page }) => {
 
   await page.reload();
   await completeMediaSetup(page, 'Create room');
-  await expect(page.getByRole('button', { name: 'Room rendering quality' })).toHaveAttribute(
+  await expect(page.getByRole('button', { name: 'Room quality' })).toHaveAttribute(
     'data-quality-preference',
     'low',
   );
@@ -77,7 +77,7 @@ test('the WebGPU call room fits phone viewports without covering controls', asyn
     await expect(scene.locator('canvas')).toBeVisible();
     await expect(host.getByRole('button', { name: 'Leave call' })).toBeVisible();
     await expect(host.getByLabel('Local video preview')).toBeVisible();
-    await expect(host.getByRole('button', { name: 'Room rendering quality' })).toBeVisible();
+    await expect(host.getByRole('button', { name: 'Room quality' })).toBeVisible();
     expect(await fitsViewport(host)).toBe(true);
 
     const controls = await host.getByRole('button', { name: 'Leave call' }).boundingBox();

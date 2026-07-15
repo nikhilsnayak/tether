@@ -57,7 +57,7 @@ const mediaTilesAvoidToolbar = (page: Page) =>
   });
 
 const lowQualityMedianFps = async (page: Page) => {
-  await page.getByRole('button', { name: 'Room rendering quality' }).click();
+  await page.getByRole('button', { name: 'Room quality' }).click();
   await page.getByRole('menuitemradio', { name: 'Low quality' }).click();
   await page.waitForTimeout(2_000);
   const samples: number[] = [];
@@ -157,7 +157,7 @@ test('complete room flow', async ({ browser, page }, testInfo) => {
       await expect(guestPage.getByRole('region', { name: 'Waiting outside' })).toBeVisible();
       await expect(guestPage.getByRole('button', { name: 'Leave room' })).toBeVisible();
       await expect(guestPage.getByRole('toolbar', { name: 'Call controls' })).toBeHidden();
-      await expect(guestPage.getByLabel('Room rendering quality')).toBeHidden();
+      await expect(guestPage.getByLabel('Room quality')).toBeHidden();
       await expectPreparedMediaTransferred(guestPage);
       await expect(page.getByRole('region', { name: 'Join request' })).toBeVisible();
       await expect(page.getByLabel('Dusk Suite room scene')).toHaveAttribute(
