@@ -172,6 +172,31 @@ export function CallErrorScreen({
   );
 }
 
+export function SessionAcquisitionErrorScreen({
+  error,
+  onRestartMediaSetup,
+}: {
+  readonly error: unknown;
+  readonly onRestartMediaSetup: () => void;
+}) {
+  const message = error instanceof Error ? error.message : 'Could not start the session';
+  return (
+    <CallStatusScreen
+      indicatorClassName='bg-destructive'
+      pillLabel='Failed'
+      icon={<AlertTriangle className='size-9' />}
+      iconClassName='bg-destructive/15 text-destructive'
+      label='Could not join'
+      hint={message}
+      action={
+        <Button variant='secondary' onClick={onRestartMediaSetup}>
+          Check media and try again
+        </Button>
+      }
+    />
+  );
+}
+
 export function CallSessionErrorScreen({
   label,
   pillLabel,

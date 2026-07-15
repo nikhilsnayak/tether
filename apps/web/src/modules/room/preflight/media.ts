@@ -8,6 +8,9 @@ export interface InitialMediaSettings {
 export interface PreparedMediaSelection {
   readonly media: PreparedMedia;
   readonly settings: InitialMediaSettings;
+  // Idempotent escape hatch for a transferred-but-unclaimed selection. Once the
+  // session scope claims the media, this is a no-op and that scope owns teardown.
+  readonly release: () => Promise<void>;
 }
 
 export const DEFAULT_MEDIA_SETTINGS: InitialMediaSettings = {
