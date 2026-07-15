@@ -21,14 +21,20 @@ test('room waiting screen fits the viewport', async ({ page }) => {
   await expect(page.getByText('Share this room to invite someone.')).toBeVisible();
   const scene = page.getByLabel('Dusk Suite room scene');
   await expect(scene.locator('canvas')).toBeVisible();
-  const quality = page.getByLabel('Room rendering quality');
-  await quality.selectOption('low');
-  await expect(quality).toHaveValue('low');
+  const quality = page.getByRole('button', { name: 'Room quality' });
+  await quality.click();
+  await page.getByRole('menuitemradio', { name: 'Low quality' }).click();
+  await expect(quality).toHaveAttribute('data-quality-preference', 'low');
   await expect(scene).toHaveAttribute('data-room-quality-tier', 'low');
   expect(await page.evaluate(() => localStorage.getItem('tether.room.quality'))).toBe('low');
   const controls = page.getByRole('toolbar', { name: 'Call controls' });
-  await expect(controls.getByRole('button')).toHaveCount(5);
+  await expect(controls.getByRole('button')).toHaveCount(6);
   await expect(controls.getByRole('button', { name: 'Leave call' })).toBeVisible();
+  await expect(page.getByRole('group', { name: 'Avatar controls' })).toBeHidden();
+  const controlHelp = page.getByRole('button', { name: 'Room controls help' });
+  await expect(controlHelp).toBeVisible();
+  await controlHelp.hover();
+  await expect(page.getByRole('heading', { name: 'Room controls' })).toBeVisible();
   const headerBox = await page.locator('[data-room-call-header]').boundingBox();
   const qualityBox = await page.locator('[data-room-quality-control]').boundingBox();
   expect(headerBox).not.toBeNull();
@@ -40,7 +46,10 @@ test('room waiting screen fits the viewport', async ({ page }) => {
 
   await page.reload();
   await completeMediaSetup(page, 'Create room');
-  await expect(page.getByLabel('Room rendering quality')).toHaveValue('low');
+  await expect(page.getByRole('button', { name: 'Room quality' })).toHaveAttribute(
+    'data-quality-preference',
+    'low',
+  );
   await expect(page.getByLabel('Dusk Suite room scene')).toHaveAttribute(
     'data-room-quality-tier',
     'low',
@@ -68,7 +77,7 @@ test('the WebGPU call room fits phone viewports without covering controls', asyn
     await expect(scene.locator('canvas')).toBeVisible();
     await expect(host.getByRole('button', { name: 'Leave call' })).toBeVisible();
     await expect(host.getByLabel('Local video preview')).toBeVisible();
-    await expect(host.getByLabel('Room rendering quality')).toBeHidden();
+    await expect(host.getByRole('button', { name: 'Room quality' })).toBeVisible();
     expect(await fitsViewport(host)).toBe(true);
 
     const controls = await host.getByRole('button', { name: 'Leave call' }).boundingBox();

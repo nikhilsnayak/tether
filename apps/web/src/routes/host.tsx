@@ -10,7 +10,6 @@ import {
   CallLoadingScreen,
   UnsupportedBrowserScreen,
 } from '@/modules/room/components/call-status-screens';
-import { RoomInvite } from '@/modules/room/components/room-invite';
 import { detectRoomCapabilities } from '@/modules/room/preflight/capabilities';
 import type { PreparedMediaSelection } from '@/modules/room/preflight/media';
 import { MediaSetupPanel } from '@/modules/room/preflight/media-setup-panel';
@@ -57,7 +56,6 @@ function HostPage() {
           preparedMedia={preparedMedia}
           onLeaveRoom={leave}
         />
-        <RoomInvite />
       </Suspense>
     </CatchBoundary>
   );

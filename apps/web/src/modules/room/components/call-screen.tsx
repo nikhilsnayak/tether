@@ -23,6 +23,7 @@ import { useRemoteVideoAvailability } from '../hooks/use-remote-video-availabili
 import { useScreenWakeLock } from '../hooks/use-screen-wake-lock';
 import { mediaStreamValue } from '../peer-session/platform';
 import type { PreparedMediaSelection } from '../preflight/media';
+import { isQualityPreference, QUALITY_STORAGE_KEY, type QualityPreference } from '../scene/config';
 import { roomJourneyCue, roomJourneyLabel } from '../scene/journey';
 import { RoomScene } from '../scene/room-scene';
 import type { RoomTemplate } from '../templates/registry';
@@ -31,6 +32,7 @@ import { CallControlsToolbar } from './call-controls-toolbar';
 import { JoinRequestOverlay } from './join-request-overlay';
 import { DraggableMediaTile, RemoteVideo, SelfVideo } from './media-stage';
 import { RemoteAudio } from './remote-audio';
+import { RoomInvite } from './room-invite';
 import { SafetyCodeCard } from './safety-code-card';
 
 const INDICATOR_TONE_CLASS = {
@@ -46,6 +48,11 @@ const statusIndicatorClassName = (presentation: PeerSessionStatusPresentation) =
 const mediaStateAttribute = (enabled: boolean | null) => {
   if (enabled === null) return 'unknown';
   return enabled ? 'on' : 'off';
+};
+
+const readQualityPreference = (): QualityPreference => {
+  const stored = localStorage.getItem(QUALITY_STORAGE_KEY);
+  return isQualityPreference(stored) ? stored : 'auto';
 };
 
 export function CallScreen({
@@ -74,6 +81,7 @@ export function CallScreen({
   const [cameraOn, setCameraOn] = useState(preparedMedia.settings.camera);
   const [sinkId, setSinkId] = useState('');
   const [speakerOn, setSpeakerOn] = useState(true);
+  const [qualityPreference, setQualityPreference] = useState(readQualityPreference);
   const [confirmedSas, setConfirmedSas] = useState<string | null>(null);
   const [handlingJoinPeerIds, setHandlingJoinPeerIds] = useState<ReadonlySet<PeerId>>(new Set());
   const selfPreviewBoundaryRef = useRef<HTMLDivElement>(null);
@@ -113,6 +121,11 @@ export function CallScreen({
     setSpeakerOn(true);
     setSinkId(value);
   };
+  const handleQualityChange = (preference: QualityPreference) => {
+    setQualityPreference(preference);
+    if (preference === 'auto') localStorage.removeItem(QUALITY_STORAGE_KEY);
+    else localStorage.setItem(QUALITY_STORAGE_KEY, preference);
+  };
   const handleJoinDecision = (peerId: PeerId, decision: 'allow' | 'deny') => {
     setHandlingJoinPeerIds((current) => new Set(current).add(peerId));
     const clearHandling = () => {
@@ -140,6 +153,7 @@ export function CallScreen({
         remoteAvatarPose={view.remoteAvatarPose}
         roomEventsReady={view.roomEventsReady}
         sendAvatarPose={sendAvatarPose}
+        qualityPreference={qualityPreference}
       />
       <RemoteAudio
         stream={remoteStream}
@@ -162,7 +176,7 @@ export function CallScreen({
         (journey !== 'together' || !remoteVideoAvailable) && (
           <div
             aria-label={displayLabel}
-            className='pointer-events-none absolute top-[32%] left-1/2 grid w-[min(48vw,32rem)] -translate-x-1/2 justify-items-center gap-2 px-4 text-center drop-shadow-lg max-sm:top-[30%] max-sm:w-[78vw]'
+            className='border-border/70 bg-background/75 pointer-events-none absolute top-[32%] left-1/2 grid w-[min(48vw,32rem)] -translate-x-1/2 justify-items-center gap-2 rounded-xl border px-4 py-3 text-center shadow-2xl backdrop-blur-md max-sm:top-[30%] max-sm:w-[78vw]'
           >
             <p className='font-mono text-xs tracking-[0.2em] uppercase'>{displayLabel}</p>
             <p className='text-muted-foreground text-xs'>{displayHint}</p>
@@ -193,12 +207,7 @@ export function CallScreen({
             </div>
           </div>
           <div className='flex shrink-0 flex-col items-end gap-1.5'>
-            {view.roomId !== null && (
-              <Badge variant='secondary' className='font-mono tracking-[0.15em] uppercase'>
-                <span className='max-sm:hidden'>Room&nbsp;</span>
-                {view.roomId}
-              </Badge>
-            )}
+            {session.intent === 'host' && <RoomInvite />}
             {view.sas !== null && sasConfirmed && (
               <Tooltip>
                 <TooltipTrigger
@@ -300,9 +309,11 @@ export function CallScreen({
           cameraOn={cameraOn}
           sinkId={sinkId}
           speakerOn={speakerOn}
+          qualityPreference={qualityPreference}
           onMicToggle={handleMicToggle}
           onCameraToggle={handleCameraToggle}
           onAudioOutputChange={handleAudioOutputChange}
+          onQualityChange={handleQualityChange}
           onSendMessage={sendMessage}
           onLeave={handleLeave}
         />
