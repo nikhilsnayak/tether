@@ -37,13 +37,15 @@ test(
     const appOrigin = new URL(room.baseURL).origin;
     const externalAssets: string[] = [];
     page.on('request', (request) => {
-      if (!['font', 'image', 'media', 'fetch', 'xhr'].includes(request.resourceType())) return;
       const url = new URL(request.url());
       if (url.origin !== appOrigin) externalAssets.push(url.href);
     });
 
     await room.createRoom(room.actorFor(page));
     await expect(page.getByLabel('Dusk Suite room scene').locator('canvas')).toBeVisible();
+    // The room keeps a live signaling connection open, so true network-idle
+    // never fires; a short settle window is enough to catch lazy-loaded assets.
+    await page.waitForTimeout(1_000);
     expect(externalAssets).toEqual([]);
   },
 );
