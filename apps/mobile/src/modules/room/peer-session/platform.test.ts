@@ -155,6 +155,7 @@ const makeNativePlatformTestHarness = (): NativePlatformTestHarness => {
       setDataChannelState: (handle, state) => {
         channel(handle).readyState = state;
       },
+      emitDataChannelOpen: (handle) => channel(handle).emit('open'),
       emitDataChannelMessage: (handle, data) => channel(handle).emit('message', { data }),
       emitDataChannelClose: (handle) => channel(handle).emit('close'),
     },

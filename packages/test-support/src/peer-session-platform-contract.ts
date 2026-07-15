@@ -35,6 +35,7 @@ export interface PeerSessionPlatformTestHarness {
       state: ConnectionState,
     ) => void;
     readonly setDataChannelState: (dataChannel: DataChannelHandle, state: DataChannelState) => void;
+    readonly emitDataChannelOpen: (dataChannel: DataChannelHandle) => void;
     readonly emitDataChannelMessage: (dataChannel: DataChannelHandle, data: unknown) => void;
     readonly emitDataChannelClose: (dataChannel: DataChannelHandle) => void;
   };
@@ -209,8 +210,9 @@ export const describePeerSessionPlatformContract = (
             const dataChannel = yield* platform.createDataChannel(peerConnection, 'chat');
             const events: PlatformEvent[] = [];
 
-            harness.controls.setDataChannelState(dataChannel, 'open');
             yield* platform.observeDataChannel(dataChannel, (event) => events.push(event));
+            harness.controls.setDataChannelState(dataChannel, 'open');
+            harness.controls.emitDataChannelOpen(dataChannel);
             harness.controls.emitDataChannelMessage(dataChannel, 'hello');
             harness.controls.setDataChannelState(dataChannel, 'closed');
             harness.controls.emitDataChannelClose(dataChannel);
