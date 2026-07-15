@@ -82,6 +82,7 @@ jobs:
           if-no-files-found: error
 
   e2e-fast:
+    needs: [build]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -114,6 +115,7 @@ jobs:
           retention-days: 7
 
   e2e-gpu:
+    needs: [build]
     runs-on: ubuntu-latest
     permissions:
       contents: read
