@@ -1,4 +1,4 @@
-import { useAtomValue } from '@effect/atom-react';
+import { RegistryProvider, useAtomValue } from '@effect/atom-react';
 import type { RoomSession } from '@tether/client-runtime/modules/room';
 import {
   makePeerSessionControllerBinding,
@@ -11,17 +11,30 @@ import { RoomScene } from '../scene/room-scene';
 import type { RoomTemplate } from '../templates/registry';
 import { RoomExperienceProvider } from './room-experience-context';
 
-export function RoomExperience({
-  session,
-  template,
-  sessionRequested,
-  children,
-}: {
+type RoomExperienceProps = {
   readonly session: RoomSession;
   readonly template: RoomTemplate;
   readonly sessionRequested: boolean;
   readonly children: ReactNode;
-}) {
+};
+
+// The nested registry scopes peer view/stream projections and the peer-session
+// resource to this experience's lifetime, so they cannot outlive the room owner
+// or leak across room attempts. Metadata queries stay in the app registry.
+export function RoomExperience(props: RoomExperienceProps) {
+  return (
+    <RegistryProvider>
+      <RoomExperienceOwner {...props} />
+    </RegistryProvider>
+  );
+}
+
+function RoomExperienceOwner({
+  session,
+  template,
+  sessionRequested,
+  children,
+}: RoomExperienceProps) {
   const [binding] = useState(makePeerSessionControllerBinding);
   const active = useSyncExternalStore(binding.subscribe, binding.getSnapshot);
   const view = useAtomValue(peerSessionViewAtom);
