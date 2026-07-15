@@ -40,8 +40,9 @@ const makeSession = (queued = true) => {
 
 describe('PeerSessionController', () => {
   it('reports unavailable commands while inactive', async () => {
-    const { controller } = makePeerSessionControllerBinding();
+    const { controller, getSnapshot } = makePeerSessionControllerBinding();
 
+    assert.isFalse(getSnapshot());
     assert.isFalse(controller.isActive());
     assert.strictEqual(controller.sendMessage('hello'), 'unavailable');
     assert.strictEqual(controller.sendAvatarPose(pose), 'unavailable');
@@ -102,10 +103,13 @@ describe('PeerSessionController', () => {
       const binding = makePeerSessionControllerBinding();
       const first = makeSession();
       const second = makeSession();
+      const snapshots: Array<boolean> = [];
+      binding.subscribe(() => snapshots.push(binding.getSnapshot()));
 
       yield* binding.activate(first.session).pipe(Scope.provide(scope));
       const error = yield* binding.activate(second.session).pipe(Effect.flip, Scope.provide(scope));
       assert.instanceOf(error, PeerSessionControllerAlreadyActive);
+      assert.deepStrictEqual(snapshots, [true]);
       assert.strictEqual(binding.controller.sendMessage('still first'), 'queued');
       assert.deepStrictEqual(first.calls, [['sendMessage', 'still first']]);
       assert.deepStrictEqual(second.calls, []);
@@ -113,4 +117,63 @@ describe('PeerSessionController', () => {
       yield* Scope.close(scope, Exit.void);
     }),
   );
+
+  it.effect('publishes activation and scope-bound deactivation synchronously', () =>
+    Effect.gen(function* () {
+      const scope = yield* Scope.make();
+      const binding = makePeerSessionControllerBinding();
+      const snapshots: Array<boolean> = [];
+      binding.subscribe(() => snapshots.push(binding.getSnapshot()));
+
+      yield* binding.activate(makeSession().session).pipe(Scope.provide(scope));
+      assert.deepStrictEqual(snapshots, [true]);
+
+      yield* Scope.close(scope, Exit.void);
+      assert.deepStrictEqual(snapshots, [true, false]);
+    }),
+  );
+
+  it.effect('does not notify an unsubscribed listener', () =>
+    Effect.gen(function* () {
+      const scope = yield* Scope.make();
+      const binding = makePeerSessionControllerBinding();
+      const snapshots: Array<boolean> = [];
+      const unsubscribe = binding.subscribe(() => snapshots.push(binding.getSnapshot()));
+
+      unsubscribe();
+      unsubscribe();
+      yield* binding.activate(makeSession().session).pipe(Scope.provide(scope));
+      yield* Scope.close(scope, Exit.void);
+
+      assert.deepStrictEqual(snapshots, []);
+    }),
+  );
+
+  it.effect('reuses one binding across sequential sessions without changing identity', () =>
+    Effect.gen(function* () {
+      const binding = makePeerSessionControllerBinding();
+      const controller = binding.controller;
+      const snapshots: Array<boolean> = [];
+      binding.subscribe(() => snapshots.push(binding.getSnapshot()));
+
+      const firstScope = yield* Scope.make();
+      yield* binding.activate(makeSession().session).pipe(Scope.provide(firstScope));
+      yield* Scope.close(firstScope, Exit.void);
+
+      const secondScope = yield* Scope.make();
+      yield* binding.activate(makeSession().session).pipe(Scope.provide(secondScope));
+      yield* Scope.close(secondScope, Exit.void);
+
+      assert.strictEqual(binding.controller, controller);
+      assert.deepStrictEqual(snapshots, [true, false, true, false]);
+    }),
+  );
+
+  it('creates a unique binding and controller for each owner', () => {
+    const first = makePeerSessionControllerBinding();
+    const second = makePeerSessionControllerBinding();
+
+    assert.notStrictEqual(first, second);
+    assert.notStrictEqual(first.controller, second.controller);
+  });
 });

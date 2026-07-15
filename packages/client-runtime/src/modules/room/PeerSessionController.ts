@@ -26,6 +26,8 @@ export interface PeerSessionController {
 
 export interface PeerSessionControllerBinding {
   readonly controller: PeerSessionController;
+  readonly getSnapshot: () => boolean;
+  readonly subscribe: (listener: () => void) => () => void;
   readonly activate: (
     session: PeerSession,
   ) => Effect.Effect<PeerSession, PeerSessionControllerAlreadyActive, Scope.Scope>;
@@ -33,6 +35,21 @@ export interface PeerSessionControllerBinding {
 
 export const makePeerSessionControllerBinding = (): PeerSessionControllerBinding => {
   let activeSession: PeerSession | null = null;
+  const listeners = new Set<() => void>();
+
+  const publish = () => {
+    const currentListeners = Array.from(listeners);
+    for (const listener of currentListeners) listener();
+  };
+
+  const getSnapshot = () => activeSession !== null;
+
+  const subscribe = (listener: () => void) => {
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  };
 
   const send = (command: (session: PeerSession) => boolean): PeerSessionCommandResult => {
     if (activeSession === null) return 'unavailable';
@@ -59,14 +76,17 @@ export const makePeerSessionControllerBinding = (): PeerSessionControllerBinding
     return yield* Effect.acquireRelease(
       Effect.sync(() => {
         activeSession = session;
+        publish();
         return session;
       }),
       (acquiredSession) =>
         Effect.sync(() => {
-          if (activeSession === acquiredSession) activeSession = null;
+          if (activeSession !== acquiredSession) return;
+          activeSession = null;
+          publish();
         }),
     );
   });
 
-  return { controller, activate };
+  return { controller, getSnapshot, subscribe, activate };
 };
