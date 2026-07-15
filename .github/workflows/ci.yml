@@ -159,7 +159,13 @@ jobs:
 
   check:
     needs: [static-checks, build, unit, e2e-fast, e2e-gpu]
+    if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Confirm all CI jobs passed
-        run: echo "All CI jobs passed."
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "One or more CI jobs did not pass."
+            exit 1
+          fi
+          echo "All CI jobs passed."
