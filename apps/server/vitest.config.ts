@@ -11,7 +11,7 @@ export default defineConfig({
       provider: 'v8',
       include: ['src/**/*.ts'],
       // Composition roots (DI wiring) carry no logic worth unit-testing.
-      exclude: ['src/index.ts', 'src/App.ts', 'src/Rpc.ts'],
+      exclude: ['src/**/test/**', 'src/index.ts', 'src/App.ts', 'src/Rpc.ts'],
       thresholds: {
         statements: 100,
         branches: 100,

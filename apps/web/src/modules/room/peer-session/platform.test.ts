@@ -2,11 +2,26 @@ import { assert, describe, it } from '@effect/vitest';
 import {
   PeerSessionPlatform,
   PlatformError,
+  type DataChannelHandle,
+  type IceCandidate,
+  type IceServer,
+  type PeerConnectionHandle,
   ROOM_EVENTS_CHANNEL_LABEL,
-  type PlatformEvent,
+  type SessionDescription,
 } from '@tether/client-runtime/modules/peer-session';
+import {
+  describePeerSessionPlatformContract,
+  type PeerSessionPlatformTestHarness,
+} from '@tether/test-support/peer-session-platform-contract';
 import { Crypto, Effect, Exit, Scope } from 'effect';
-import { vi } from 'vitest';
+import { afterEach, vi } from 'vitest';
+
+import {
+  mediaStreamValue,
+  prepareLocalMedia,
+  webCryptoLayer,
+  webPeerSessionPlatformLayer,
+} from './platform';
 
 class FakeTrack {
   readonly stop = vi.fn();
@@ -23,9 +38,9 @@ class FakeDataChannel {
   readonly close = vi.fn(() => {
     this.readyState = 'closed';
   });
-  readonly label: string;
   readyState = 'connecting';
   bufferedAmount = 0;
+  readonly label: string;
 
   constructor(label: string) {
     this.label = label;
@@ -54,13 +69,13 @@ class FakePeerConnection {
   readonly close = vi.fn();
   readonly createOffer = vi.fn(async () => ({ sdp: 'offer-sdp' }));
   readonly createAnswer = vi.fn(async () => ({ sdp: 'answer-sdp' }));
-  readonly setLocalDescription = vi.fn(async () => undefined);
-  readonly setRemoteDescription = vi.fn(async () => undefined);
+  readonly setLocalDescription = vi.fn(async (_description: unknown) => undefined);
+  readonly setRemoteDescription = vi.fn(async (_description: unknown) => undefined);
   readonly addIceCandidate = vi.fn(async (_candidate: unknown) => undefined);
-  readonly configuration: unknown;
   connectionState = 'new';
+  readonly configuration: { readonly iceServers: ReadonlyArray<IceServer> };
 
-  constructor(configuration: unknown) {
+  constructor(configuration: { readonly iceServers: ReadonlyArray<IceServer> }) {
     this.configuration = configuration;
   }
 
@@ -85,388 +100,222 @@ class FakePeerConnection {
   }
 }
 
-const mediaStream = new FakeMediaStream();
-const getUserMedia = vi.fn(async (_constraints: unknown) => mediaStream);
-const getRandomValues = vi.fn((array: Uint8Array) => {
-  array.fill(7);
-  return array;
+interface WebPlatformTestHarness extends PeerSessionPlatformTestHarness {
+  readonly mediaStream: FakeMediaStream;
+  readonly getUserMedia: ReturnType<typeof vi.fn>;
+}
+
+const makeWebPlatformTestHarness = (): WebPlatformTestHarness => {
+  const mediaStream = new FakeMediaStream();
+  const getUserMedia = vi.fn(async (_constraints: unknown) => mediaStream);
+  const getRandomValues = vi.fn((array: Uint8Array) => {
+    array.fill(7);
+    return array;
+  });
+  const digest = vi.fn(async (_algorithm: string, data: Uint8Array) => data);
+
+  vi.stubGlobal('RTCPeerConnection', FakePeerConnection);
+  vi.stubGlobal('navigator', { mediaDevices: { getUserMedia } });
+  vi.stubGlobal('crypto', { getRandomValues, subtle: { digest } });
+
+  const peer = (handle: PeerConnectionHandle) => handle.value as FakePeerConnection;
+  const channel = (handle: DataChannelHandle) => handle.value as FakeDataChannel;
+
+  return {
+    layer: webPeerSessionPlatformLayer,
+    localMedia: { value: mediaStream },
+    mediaStream,
+    getUserMedia,
+    controls: {
+      failLocalMediaAcquisition: () => {
+        getUserMedia.mockRejectedValueOnce(new Error('permission denied'));
+      },
+      failPeerConnectionAcquisition: () => {
+        vi.stubGlobal(
+          'RTCPeerConnection',
+          class {
+            constructor() {
+              throw new Error('construction failed');
+            }
+          },
+        );
+      },
+      emitIceCandidate: (handle, candidate) => peer(handle).emit('icecandidate', { candidate }),
+      emitRemoteDataChannel: (handle, label) =>
+        peer(handle).emit('datachannel', { channel: new FakeDataChannel(label) }),
+      emitRemoteTrack: (handle, stream) =>
+        peer(handle).emit('track', { streams: stream === null ? [] : [stream.value] }),
+      transitionConnection: (handle, state) => {
+        peer(handle).connectionState = state;
+        peer(handle).emit('connectionstatechange');
+      },
+      setDataChannelState: (handle, state) => {
+        channel(handle).readyState = state;
+      },
+      emitDataChannelMessage: (handle, data) => channel(handle).emit('message', { data }),
+      emitDataChannelClose: (handle) => channel(handle).emit('close'),
+    },
+    observations: {
+      iceServers: (handle) => peer(handle).configuration.iceServers,
+      addedTrackCount: (handle) => peer(handle).addTrack.mock.calls.length,
+      localDescriptions: (handle) =>
+        peer(handle).setLocalDescription.mock.calls.map(
+          ([description]) => description as Required<SessionDescription>,
+        ),
+      remoteDescriptions: (handle) =>
+        peer(handle).setRemoteDescription.mock.calls.map(
+          ([description]) => description as Required<SessionDescription>,
+        ),
+      iceCandidates: (handle) =>
+        peer(handle).addIceCandidate.mock.calls.map(([value]) => {
+          const ice = value as IceCandidate;
+          return {
+            candidate: ice.candidate,
+            sdpMid: ice.sdpMid,
+            sdpMLineIndex: ice.sdpMLineIndex,
+          };
+        }),
+      sentMessages: (handle) => channel(handle).send.mock.calls.map(([message]) => String(message)),
+      peerConnectionCloseCount: (handle) => peer(handle).close.mock.calls.length,
+      peerConnectionListenerCount: (handle) =>
+        [...peer(handle).listeners.values()].reduce(
+          (count, listeners) => count + listeners.size,
+          0,
+        ),
+      dataChannelListenerCount: (handle) =>
+        [...channel(handle).listeners.values()].reduce(
+          (count, listeners) => count + listeners.size,
+          0,
+        ),
+    },
+  };
+};
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
-const digest = vi.fn(async (_algorithm: string, data: Uint8Array) => data);
 
-vi.stubGlobal('RTCPeerConnection', FakePeerConnection);
-vi.stubGlobal('navigator', { mediaDevices: { getUserMedia } });
-vi.stubGlobal('crypto', { getRandomValues, subtle: { digest } });
-
-import {
-  mediaStreamValue,
-  prepareLocalMedia,
-  webCryptoLayer,
-  webPeerSessionPlatformLayer,
-} from './platform';
-
-const withPlatform = <A, E, R>(effect: Effect.Effect<A, E, R | PeerSessionPlatform>) =>
-  effect.pipe(Effect.provide(webPeerSessionPlatformLayer));
+describePeerSessionPlatformContract('web', makeWebPlatformTestHarness);
 
 describe('web peer-session platform', () => {
-  it.effect('provides browser cryptography', () =>
-    Effect.gen(function* () {
+  it.effect('provides browser cryptography', () => {
+    makeWebPlatformTestHarness();
+    return Effect.gen(function* () {
       const crypto = yield* Crypto.Crypto;
       assert.deepStrictEqual(yield* crypto.randomBytes(3), new Uint8Array([7, 7, 7]));
       assert.deepStrictEqual(
         yield* crypto.digest('SHA-256', new Uint8Array([1, 2, 3])),
         new Uint8Array([1, 2, 3]),
       );
-    }).pipe(Effect.provide(webCryptoLayer)),
-  );
+    }).pipe(Effect.provide(webCryptoLayer));
+  });
 
-  it.effect('acquires and releases local media', () =>
-    Effect.scoped(
-      withPlatform(
-        Effect.gen(function* () {
-          const platform = yield* PeerSessionPlatform;
-          const handle = yield* platform.acquireLocalMedia;
-          assert.strictEqual(
-            mediaStreamValue(handle),
-            mediaStream as unknown as ReturnType<typeof mediaStreamValue>,
-          );
-          assert.deepStrictEqual(getUserMedia.mock.calls[0]?.[0], {
-            video: true,
-            audio: true,
-          });
-        }),
-      ),
+  it.effect('acquires and releases browser local media', () => {
+    const harness = makeWebPlatformTestHarness();
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const platform = yield* PeerSessionPlatform;
+        const handle = yield* platform.acquireLocalMedia;
+        assert.strictEqual(
+          mediaStreamValue(handle),
+          harness.mediaStream as unknown as ReturnType<typeof mediaStreamValue>,
+        );
+        assert.deepStrictEqual(harness.getUserMedia.mock.calls[0]?.[0], {
+          video: true,
+          audio: true,
+        });
+      }).pipe(Effect.provide(harness.layer)),
     ).pipe(
       Effect.ensuring(
         Effect.sync(() => {
-          assert.isTrue(mediaStream.track.stop.mock.calls.length > 0);
+          assert.strictEqual(harness.mediaStream.track.stop.mock.calls.length, 1);
         }),
       ),
-    ),
-  );
+    );
+  });
 
-  it.effect('cancels prepared local media exactly once before transfer', () =>
-    Effect.gen(function* () {
-      mediaStream.track.stop.mockClear();
+  it.effect('cancels prepared local media exactly once before transfer', () => {
+    const harness = makeWebPlatformTestHarness();
+    return Effect.gen(function* () {
       const prepared = yield* prepareLocalMedia();
-
       yield* Effect.promise(prepared.cancel);
       yield* Effect.promise(prepared.cancel);
+      assert.strictEqual(harness.mediaStream.track.stop.mock.calls.length, 1);
+    });
+  });
 
-      assert.strictEqual(mediaStream.track.stop.mock.calls.length, 1);
-    }),
-  );
-
-  it.effect('transfers the exact prepared stream into a session scope', () =>
-    Effect.gen(function* () {
-      mediaStream.track.stop.mockClear();
+  it.effect('transfers the exact prepared stream into a session scope', () => {
+    const harness = makeWebPlatformTestHarness();
+    return Effect.gen(function* () {
       const prepared = yield* prepareLocalMedia();
       const transferred = prepared.transfer();
       assert.throws(() => prepared.transfer(), 'Prepared local media can only be transferred once');
 
       const scope = yield* Scope.make();
       const handle = yield* transferred.claim.pipe(Scope.provide(scope));
-      assert.strictEqual(mediaStreamValue(handle), mediaStream as unknown as MediaStream);
-
+      assert.strictEqual(mediaStreamValue(handle), harness.mediaStream as unknown as MediaStream);
       const secondClaimError = yield* transferred.claim.pipe(Scope.provide(scope), Effect.flip);
       assert.instanceOf(secondClaimError, PlatformError);
 
-      // Once claimed, the session scope owns teardown; cancel is a no-op.
       yield* Effect.promise(prepared.cancel);
-      assert.strictEqual(mediaStream.track.stop.mock.calls.length, 0);
-
+      assert.strictEqual(harness.mediaStream.track.stop.mock.calls.length, 0);
       yield* Scope.close(scope, Exit.void);
       yield* Scope.close(scope, Exit.void);
-      assert.strictEqual(mediaStream.track.stop.mock.calls.length, 1);
-    }),
-  );
+      assert.strictEqual(harness.mediaStream.track.stop.mock.calls.length, 1);
+    });
+  });
 
-  it.effect('releases transferred media that is abandoned without claim', () =>
-    Effect.gen(function* () {
-      mediaStream.track.stop.mockClear();
+  it.effect('releases transferred media that is abandoned without claim', () => {
+    const harness = makeWebPlatformTestHarness();
+    return Effect.gen(function* () {
       const prepared = yield* prepareLocalMedia();
       prepared.transfer();
-
-      // No claim. The only cleanup entry point left on PreparedLocalMedia is cancel.
       yield* Effect.promise(prepared.cancel);
+      assert.strictEqual(harness.mediaStream.track.stop.mock.calls.length, 1);
+    });
+  });
 
-      assert.strictEqual(
-        mediaStream.track.stop.mock.calls.length,
-        1,
-        'transferred-but-unclaimed media must still be releasable (leak if 0)',
-      );
-    }),
-  );
-
-  it.effect('closes its empty scope when prepared acquisition fails', () =>
-    Effect.gen(function* () {
-      getUserMedia.mockRejectedValueOnce(new Error('permission denied'));
-
+  it.effect('closes its empty scope when prepared acquisition fails', () => {
+    const harness = makeWebPlatformTestHarness();
+    return Effect.gen(function* () {
+      harness.getUserMedia.mockRejectedValueOnce(new Error('permission denied'));
       const error = yield* prepareLocalMedia().pipe(Effect.flip);
-
       assert.instanceOf(error, PlatformError);
       assert.strictEqual(error.operation, 'acquire-local-media');
-    }),
-  );
+    });
+  });
 
-  it.effect('performs peer-connection and data-channel operations', () =>
-    Effect.scoped(
-      withPlatform(
-        Effect.gen(function* () {
-          const platform = yield* PeerSessionPlatform;
-          const peerConnection = yield* platform.acquirePeerConnection([
-            { urls: ['stun:stun.l.google.com:19302'] },
-          ]);
-          const nativePeer = peerConnection.value as FakePeerConnection;
-          const stream = { value: mediaStream };
-
-          yield* platform.addLocalTracks(peerConnection, stream);
-          const dataChannel = yield* platform.createDataChannel(
-            peerConnection,
-            ROOM_EVENTS_CHANNEL_LABEL,
-          );
-          const nativeChannel = dataChannel.value as FakeDataChannel;
-          nativeChannel.bufferedAmount = 65_536;
-          assert.strictEqual(platform.dataChannelLabel(dataChannel), ROOM_EVENTS_CHANNEL_LABEL);
-          assert.strictEqual(platform.dataChannelBufferedAmount?.(dataChannel), 65_536);
-          assert.deepStrictEqual(yield* platform.createOffer(peerConnection), {
-            type: 'offer',
-            sdp: 'offer-sdp',
-          });
-          assert.deepStrictEqual(yield* platform.createAnswer(peerConnection), {
-            type: 'answer',
-            sdp: 'answer-sdp',
-          });
-          yield* platform.setLocalDescription(peerConnection, { type: 'offer', sdp: 'offer' });
-          yield* platform.setRemoteDescription(peerConnection, {
-            type: 'answer',
-            sdp: 'answer',
-          });
-          yield* platform.addIceCandidate(peerConnection, {
-            candidate: 'candidate',
-            sdpMid: '0',
-            sdpMLineIndex: 0,
-            usernameFragment: 'ufrag',
-          });
-          yield* platform.sendDataChannelMessage(dataChannel, 'hello');
-          assert.isDefined(platform.closeDataChannel);
-          if (platform.closeDataChannel === undefined) return;
-          yield* platform.closeDataChannel(dataChannel);
-
-          assert.deepStrictEqual(nativePeer.configuration, {
-            iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }],
-          });
-          assert.strictEqual(nativePeer.addTrack.mock.calls[0]?.[0], mediaStream.track);
-          assert.deepStrictEqual(nativePeer.addIceCandidate.mock.calls[0]?.[0], {
-            candidate: 'candidate',
-            sdpMid: '0',
-            sdpMLineIndex: 0,
-            usernameFragment: 'ufrag',
-          });
-          assert.deepStrictEqual((dataChannel.value as FakeDataChannel).send.mock.calls[0], [
-            'hello',
-          ]);
-          assert.isTrue(nativeChannel.close.mock.calls.length === 1);
-        }),
-      ),
-    ),
-  );
-
-  it.effect('forwards peer-connection events and ignores incomplete events', () =>
-    Effect.scoped(
-      withPlatform(
-        Effect.gen(function* () {
-          const platform = yield* PeerSessionPlatform;
-          const peerConnection = yield* platform.acquirePeerConnection([]);
-          const nativePeer = peerConnection.value as FakePeerConnection;
-          const events: PlatformEvent[] = [];
-          yield* platform.observePeerConnection(peerConnection, (event) => events.push(event));
-
-          nativePeer.emit('icecandidate', { candidate: null });
-          nativePeer.emit('icecandidate', {
-            candidate: {
-              candidate: 'candidate',
-              sdpMid: '0',
-              sdpMLineIndex: 0,
-              usernameFragment: 'ufrag',
-            },
-          });
-          const channel = new FakeDataChannel('chat');
-          nativePeer.emit('datachannel', { channel });
-          nativePeer.emit('track', { streams: [] });
-          nativePeer.emit('track', { streams: [mediaStream] });
-
-          nativePeer.connectionState = 'disconnected';
-          nativePeer.emit('connectionstatechange');
-          nativePeer.connectionState = 'connected';
-          nativePeer.emit('connectionstatechange');
-          nativePeer.connectionState = 'disconnected';
-          nativePeer.emit('connectionstatechange');
-          nativePeer.connectionState = 'connected';
-          nativePeer.emit('connectionstatechange');
-          nativePeer.connectionState = 'failed';
-          nativePeer.emit('connectionstatechange');
-          nativePeer.emit('connectionstatechange');
-
-          assert.deepStrictEqual(
-            events.map((event) => event._tag),
-            [
-              'LocalIceCandidate',
-              'RemoteDataChannel',
-              'RemoteTrackReceived',
-              'PeerConnectionConnected',
-              'PeerConnectionInterrupted',
-              'PeerConnectionRestored',
-              'PeerConnectionFailed',
-            ],
-          );
-        }),
-      ),
-    ),
-  );
-
-  it.effect('forwards data-channel lifecycle and messages', () =>
-    Effect.scoped(
-      withPlatform(
-        Effect.gen(function* () {
-          const platform = yield* PeerSessionPlatform;
-          const peerConnection = yield* platform.acquirePeerConnection([]);
-          const dataChannel = yield* platform.createDataChannel(peerConnection, 'chat');
-          const nativeChannel = dataChannel.value as FakeDataChannel;
-          const events: PlatformEvent[] = [];
-
-          nativeChannel.readyState = 'open';
-          yield* platform.observeDataChannel(dataChannel, (event) => events.push(event));
-          nativeChannel.emit('message', { data: 'hello' });
-          nativeChannel.readyState = 'closed';
-          nativeChannel.emit('close');
-
-          assert.deepStrictEqual(
-            events.map((event) => event._tag),
-            ['DataChannelOpened', 'DataChannelMessageReceived', 'DataChannelClosed'],
-          );
-        }),
-      ),
-    ),
-  );
-
-  it.effect('maps resource-acquisition failures to PlatformError', () =>
-    Effect.gen(function* () {
-      getUserMedia.mockRejectedValueOnce(new Error('permission denied'));
-      const mediaError = yield* Effect.scoped(
-        withPlatform(Effect.flatMap(PeerSessionPlatform, (platform) => platform.acquireLocalMedia)),
-      ).pipe(Effect.flip);
-      assert.instanceOf(mediaError, PlatformError);
-      assert.strictEqual(mediaError.operation, 'acquire-local-media');
-
-      vi.stubGlobal(
-        'RTCPeerConnection',
-        class {
-          constructor() {
-            throw new Error('construction failed');
-          }
-        },
-      );
-      const peerError = yield* Effect.scoped(
-        withPlatform(
-          Effect.flatMap(PeerSessionPlatform, (platform) => platform.acquirePeerConnection([])),
-        ),
-      ).pipe(Effect.flip);
-      assert.instanceOf(peerError, PlatformError);
-      assert.strictEqual(peerError.operation, 'acquire-peer-connection');
-      vi.stubGlobal('RTCPeerConnection', FakePeerConnection);
-    }),
-  );
-
-  it.effect('maps browser failures to PlatformError', () =>
-    withPlatform(
+  it.effect('exposes browser backpressure and immediate channel cleanup', () => {
+    const harness = makeWebPlatformTestHarness();
+    return Effect.scoped(
       Effect.gen(function* () {
         const platform = yield* PeerSessionPlatform;
-        const failures = [
-          platform.addLocalTracks({ value: {} }, { value: mediaStream }),
-          platform.createDataChannel({ value: {} }, 'chat'),
-          platform.createOffer({ value: {} }),
-          platform.createAnswer({ value: {} }),
-          platform.setLocalDescription({ value: {} }, { type: 'offer', sdp: 'offer' }),
-          platform.setRemoteDescription({ value: {} }, { type: 'answer', sdp: 'answer' }),
-          platform.addIceCandidate(
-            { value: {} },
-            {
-              candidate: 'candidate',
-              sdpMid: null,
-              sdpMLineIndex: null,
-              usernameFragment: null,
-            },
-          ),
-          platform.sendDataChannelMessage({ value: {} }, 'hello'),
-          platform.closeDataChannel!({ value: {} }),
-        ];
-        const expectedOperations = [
-          'add-local-tracks',
-          'create-data-channel',
-          'create-offer',
-          'create-answer',
-          'set-local-description',
-          'set-remote-description',
-          'add-ice-candidate',
-          'send-message',
-          'close-data-channel',
-        ];
+        const peerConnection = yield* platform.acquirePeerConnection([]);
+        const dataChannel = yield* platform.createDataChannel(
+          peerConnection,
+          ROOM_EVENTS_CHANNEL_LABEL,
+        );
+        const channel = dataChannel.value as FakeDataChannel;
+        channel.bufferedAmount = 65_536;
 
-        for (const [index, failure] of failures.entries()) {
-          const error = yield* failure.pipe(Effect.flip);
-          assert.instanceOf(error, PlatformError);
-          assert.strictEqual(error.operation, expectedOperations[index]);
-        }
-      }),
-    ),
-  );
+        assert.strictEqual(platform.dataChannelBufferedAmount?.(dataChannel), 65_536);
+        assert.isDefined(platform.closeDataChannel);
+        if (platform.closeDataChannel === undefined) return;
+        yield* platform.closeDataChannel(dataChannel);
+        assert.strictEqual(channel.close.mock.calls.length, 1);
+      }).pipe(Effect.provide(harness.layer)),
+    );
+  });
 
-  it.effect('ignores redundant and post-failure connection transitions', () =>
-    Effect.scoped(
-      withPlatform(
-        Effect.gen(function* () {
-          const platform = yield* PeerSessionPlatform;
-          const peerConnection = yield* platform.acquirePeerConnection([]);
-          const nativePeer = peerConnection.value as FakePeerConnection;
-          const events: PlatformEvent[] = [];
-          yield* platform.observePeerConnection(peerConnection, (event) => events.push(event));
-
-          nativePeer.connectionState = 'connected';
-          nativePeer.emit('connectionstatechange');
-          // A duplicate 'connected' notification is dropped.
-          nativePeer.emit('connectionstatechange');
-          nativePeer.connectionState = 'failed';
-          nativePeer.emit('connectionstatechange');
-          // A 'connected' after a terminal failure is dropped.
-          nativePeer.connectionState = 'connected';
-          nativePeer.emit('connectionstatechange');
-
-          assert.deepStrictEqual(
-            events.map((event) => event._tag),
-            ['PeerConnectionConnected', 'PeerConnectionFailed'],
-          );
-        }),
-      ),
-    ),
-  );
-
-  it.effect('does not open a data channel that is not yet ready', () =>
-    Effect.scoped(
-      withPlatform(
-        Effect.gen(function* () {
-          const platform = yield* PeerSessionPlatform;
-          const peerConnection = yield* platform.acquirePeerConnection([]);
-          const dataChannel = yield* platform.createDataChannel(peerConnection, 'chat');
-          const nativeChannel = dataChannel.value as FakeDataChannel;
-          const events: PlatformEvent[] = [];
-
-          // The channel is still 'connecting' when observation begins.
-          nativeChannel.readyState = 'connecting';
-          yield* platform.observeDataChannel(dataChannel, (event) => events.push(event));
-
-          assert.deepStrictEqual(events, []);
-        }),
-      ),
-    ),
-  );
+  it.effect('maps browser channel-close failures to PlatformError', () => {
+    const harness = makeWebPlatformTestHarness();
+    return Effect.gen(function* () {
+      const platform = yield* PeerSessionPlatform;
+      assert.isDefined(platform.closeDataChannel);
+      if (platform.closeDataChannel === undefined) return;
+      const error = yield* platform.closeDataChannel({ value: {} }).pipe(Effect.flip);
+      assert.instanceOf(error, PlatformError);
+      assert.strictEqual(error.operation, 'close-data-channel');
+    }).pipe(Effect.provide(harness.layer));
+  });
 });
