@@ -312,12 +312,16 @@ bun run test
 bun run test:unit
 ```
 
-Run the Playwright suite explicitly, or run the complete unit-and-browser gate:
+Run Playwright, a specific E2E lane, or the complete unit-and-browser gate:
 
 ```sh
 bun run test:e2e
+bun run test:e2e:fast
+bun run test:e2e:gpu
 bun run test:all
 ```
+
+Use the fast lane for non-GPU flows and the GPU lane for media and room flows.
 
 Run the remaining repository gates from the root:
 

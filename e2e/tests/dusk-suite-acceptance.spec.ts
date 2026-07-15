@@ -1,6 +1,6 @@
 import { expect, test } from './fixtures';
 
-test('missing WebGL2 stops entry before media is requested', async ({ page }) => {
+test('missing WebGL2 stops entry before media is requested', { tag: '@gpu' }, async ({ page }) => {
   await page.addInitScript(() => {
     const mediaDevices = navigator.mediaDevices;
     const getUserMedia = mediaDevices.getUserMedia.bind(mediaDevices);
@@ -30,21 +30,25 @@ test('missing WebGL2 stops entry before media is requested', async ({ page }) =>
   expect(await page.evaluate(() => Reflect.get(window, '__tetherMediaRequests'))).toBe(0);
 });
 
-test('Dusk Suite loads without third-party room assets', async ({ page, room }) => {
-  const appOrigin = new URL(room.baseURL).origin;
-  const externalAssets: string[] = [];
-  page.on('request', (request) => {
-    if (!['font', 'image', 'media', 'fetch', 'xhr'].includes(request.resourceType())) return;
-    const url = new URL(request.url());
-    if (url.origin !== appOrigin) externalAssets.push(url.href);
-  });
+test(
+  'Dusk Suite loads without third-party room assets',
+  { tag: '@gpu' },
+  async ({ page, room }) => {
+    const appOrigin = new URL(room.baseURL).origin;
+    const externalAssets: string[] = [];
+    page.on('request', (request) => {
+      if (!['font', 'image', 'media', 'fetch', 'xhr'].includes(request.resourceType())) return;
+      const url = new URL(request.url());
+      if (url.origin !== appOrigin) externalAssets.push(url.href);
+    });
 
-  await room.createRoom(room.actorFor(page));
-  await expect(page.getByLabel('Dusk Suite room scene').locator('canvas')).toBeVisible();
-  expect(externalAssets).toEqual([]);
-});
+    await room.createRoom(room.actorFor(page));
+    await expect(page.getByLabel('Dusk Suite room scene').locator('canvas')).toBeVisible();
+    expect(externalAssets).toEqual([]);
+  },
+);
 
-test('a guest waits at the exterior before knocking', async ({ page, room }) => {
+test('a guest waits at the exterior before knocking', { tag: '@gpu' }, async ({ page, room }) => {
   const host = room.actorFor(page);
   const guest = await room.createActor();
   const roomId = await room.createRoom(host);
@@ -58,20 +62,24 @@ test('a guest waits at the exterior before knocking', async ({ page, room }) => 
   await expect(page.getByRole('region', { name: 'Join request' })).toBeHidden();
 });
 
-test('backing out of media setup stops the preview stream', async ({ page, room }) => {
-  const actor = await room.actorFor(page, { probeWebRtc: true });
-  await page.goto('/');
-  await page.getByRole('button', { name: 'Call' }).click();
-  await expect(page.getByRole('heading', { name: 'Look and sound ready?' })).toBeVisible();
-  expect(await actor.probe.localStreamCount()).toBe(0);
-  await page.getByRole('button', { name: 'Continue', exact: true }).click();
-  await expect(page.getByLabel('Camera preview')).toBeVisible();
+test(
+  'backing out of media setup stops the preview stream',
+  { tag: '@gpu' },
+  async ({ page, room }) => {
+    const actor = await room.actorFor(page, { probeWebRtc: true });
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Call' }).click();
+    await expect(page.getByRole('heading', { name: 'Look and sound ready?' })).toBeVisible();
+    expect(await actor.probe.localStreamCount()).toBe(0);
+    await page.getByRole('button', { name: 'Continue', exact: true }).click();
+    await expect(page.getByLabel('Camera preview')).toBeVisible();
 
-  await page.getByRole('button', { name: 'Back' }).click();
+    await page.getByRole('button', { name: 'Back' }).click();
 
-  await expect(page).toHaveURL('/');
-  await expect(page.getByRole('button', { name: 'Call' })).toBeVisible();
-  await expect
-    .poll(() => actor.probe.previewCleanupState())
-    .toEqual({ acquiredStreams: 1, previewStopped: true });
-});
+    await expect(page).toHaveURL('/');
+    await expect(page.getByRole('button', { name: 'Call' })).toBeVisible();
+    await expect
+      .poll(() => actor.probe.previewCleanupState())
+      .toEqual({ acquiredStreams: 1, previewStopped: true });
+  },
+);

@@ -27,7 +27,7 @@ test('a fresh visitor must accept the disclaimer before the app renders', async 
   await expect(page.getByRole('button', { name: 'I understand and accept' })).toBeHidden();
 });
 
-test('web app opens a signaling session', async ({ page, room }) => {
+test('web app opens a signaling session', { tag: '@gpu' }, async ({ page, room }) => {
   const roomId = await room.createRoom(room.actorFor(page));
 
   await expect(page.getByText('Share this room to invite someone.')).toBeVisible();
