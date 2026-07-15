@@ -13,7 +13,6 @@ import { Suspense, useEffect, useState } from 'react';
 import { AppAtomClient } from '@/lib/app-client';
 import { canOfferDesktopApp, desktopRoomUrl } from '@/lib/desktop-handoff';
 import { generatePeerId } from '@/lib/utils';
-import { CallScreen } from '@/modules/room/components/call-screen';
 import {
   CallErrorScreen,
   CallHandoffScreen,
@@ -24,6 +23,8 @@ import {
   UpdateRequiredScreen,
 } from '@/modules/room/components/call-status-screens';
 import { JoinNamePanel } from '@/modules/room/components/join-name-panel';
+import { PeerSessionLayer } from '@/modules/room/components/peer-session-layer';
+import { RoomExperience } from '@/modules/room/components/room-experience';
 import { detectRoomCapabilities } from '@/modules/room/preflight/capabilities';
 import type { PreparedMediaSelection } from '@/modules/room/preflight/media';
 import { MediaSetupPanel } from '@/modules/room/preflight/media-setup-panel';
@@ -136,13 +137,12 @@ function GuestRoomEntry({
   };
 
   return (
-    <Suspense fallback={<CallLoadingScreen />}>
-      <CallScreen
-        session={session}
-        template={resolution.template}
-        preparedMedia={preparedMedia}
-        onLeaveRoom={onLeave}
-      />
-    </Suspense>
+    <RoomExperience session={session} template={resolution.template} sessionRequested>
+      <CatchBoundary errorComponent={CallErrorScreen} getResetKey={() => selfId}>
+        <Suspense fallback={<CallLoadingScreen />}>
+          <PeerSessionLayer session={session} preparedMedia={preparedMedia} onLeaveRoom={onLeave} />
+        </Suspense>
+      </CatchBoundary>
+    </RoomExperience>
   );
 }

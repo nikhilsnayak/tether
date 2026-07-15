@@ -12,15 +12,14 @@ import { useReducedMotionPreference } from '@/hooks/use-reduced-motion-preferenc
 import { AvatarControls } from '../components/avatar-controls';
 import { RoomControlHelp } from '../components/room-control-help';
 import { useAvatarControls } from '../hooks/use-avatar-controls';
+import { useRoomQualityPreference } from '../hooks/use-room-quality-preference';
 import type { RoomTemplate } from '../templates/registry';
 import { LocalAvatarController, RemoteAvatarController } from './avatar-controllers';
 import { avatarSpawn } from './avatar-motion';
 import { avatarPresentation } from './avatar-presentation';
 import {
   initialAdaptiveQualityState,
-  isQualityPreference,
   QUALITY_CONFIGS,
-  QUALITY_STORAGE_KEY,
   ROOM_RENDERER_SETTINGS,
   renderingQualitySettings,
   sampleAdaptiveQuality,
@@ -34,12 +33,6 @@ import { ContextLossGuard, FramePerformanceMonitor } from './renderer-lifecycle'
 import { RoomTransitionController } from './room-transition-controller';
 import { ThirdPersonCamera } from './third-person-camera';
 
-const readQualityPreference = (): QualityPreference => {
-  if (typeof localStorage === 'undefined') return 'auto';
-  const stored = localStorage.getItem(QUALITY_STORAGE_KEY);
-  return isQualityPreference(stored) ? stored : 'auto';
-};
-
 export function RoomScene({
   template,
   journey,
@@ -49,7 +42,6 @@ export function RoomScene({
   remoteAvatarPose = null,
   roomEventsReady = false,
   sendAvatarPose = () => false,
-  qualityPreference: controlledQualityPreference,
 }: {
   readonly template: RoomTemplate;
   readonly journey?: RoomJourneyCue;
@@ -59,10 +51,8 @@ export function RoomScene({
   readonly remoteAvatarPose?: SequencedAvatarPose | null;
   readonly roomEventsReady?: boolean;
   readonly sendAvatarPose?: (pose: AvatarPose) => boolean;
-  readonly qualityPreference?: QualityPreference;
 }) {
-  const [localQualityPreference, setLocalQualityPreference] = useState(readQualityPreference);
-  const qualityPreference = controlledQualityPreference ?? localQualityPreference;
+  const { qualityPreference, setQualityPreference } = useRoomQualityPreference();
   const deviceDpr = typeof devicePixelRatio === 'number' ? devicePixelRatio : 1;
   const [adaptiveQuality, setAdaptiveQuality] = useState(() =>
     initialAdaptiveQualityState(deviceDpr),
@@ -92,12 +82,6 @@ export function RoomScene({
   const quality = QUALITY_CONFIGS[qualityTier];
   const rendering = renderingQualitySettings(quality);
   const SceneEnvironment = template.scene;
-
-  const updateQuality = (preference: QualityPreference) => {
-    setLocalQualityPreference(preference);
-    if (preference === 'auto') localStorage.removeItem(QUALITY_STORAGE_KEY);
-    else localStorage.setItem(QUALITY_STORAGE_KEY, preference);
-  };
 
   if (contextLost) {
     return (
@@ -247,7 +231,7 @@ export function RoomScene({
           <select
             id='room-quality'
             value={qualityPreference}
-            onChange={(event) => updateQuality(event.target.value as QualityPreference)}
+            onChange={(event) => setQualityPreference(event.target.value as QualityPreference)}
             className='border-border bg-background/85 text-foreground h-8 border px-2 text-xs backdrop-blur'
           >
             <option value='auto'>Auto quality</option>

@@ -4,12 +4,13 @@ import { DUSK_SUITE_TEMPLATE_ID, PeerId } from '@tether/contracts/modules/room';
 import { Suspense, useState } from 'react';
 
 import { generatePeerId } from '@/lib/utils';
-import { CallScreen } from '@/modules/room/components/call-screen';
 import {
   CallErrorScreen,
   CallLoadingScreen,
   UnsupportedBrowserScreen,
 } from '@/modules/room/components/call-status-screens';
+import { PeerSessionLayer } from '@/modules/room/components/peer-session-layer';
+import { RoomExperience } from '@/modules/room/components/room-experience';
 import { detectRoomCapabilities } from '@/modules/room/preflight/capabilities';
 import type { PreparedMediaSelection } from '@/modules/room/preflight/media';
 import { MediaSetupPanel } from '@/modules/room/preflight/media-setup-panel';
@@ -48,15 +49,12 @@ function HostPage() {
   }
 
   return (
-    <CatchBoundary errorComponent={CallErrorScreen} getResetKey={() => selfId}>
-      <Suspense fallback={<CallLoadingScreen />}>
-        <CallScreen
-          session={session}
-          template={DUSK_SUITE_TEMPLATE}
-          preparedMedia={preparedMedia}
-          onLeaveRoom={leave}
-        />
-      </Suspense>
-    </CatchBoundary>
+    <RoomExperience session={session} template={DUSK_SUITE_TEMPLATE} sessionRequested>
+      <CatchBoundary errorComponent={CallErrorScreen} getResetKey={() => selfId}>
+        <Suspense fallback={<CallLoadingScreen />}>
+          <PeerSessionLayer session={session} preparedMedia={preparedMedia} onLeaveRoom={leave} />
+        </Suspense>
+      </CatchBoundary>
+    </RoomExperience>
   );
 }
