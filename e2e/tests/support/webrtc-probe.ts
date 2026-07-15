@@ -97,10 +97,12 @@ export class WebRtcProbe {
   }
 
   allStreamsEnded() {
-    return this.page.evaluate(() =>
-      window.__tetherE2E.localStreams.every((stream) =>
-        stream.getTracks().every((track) => track.readyState === 'ended'),
-      ),
+    return this.page.evaluate(
+      () =>
+        window.__tetherE2E.localStreams.length > 0 &&
+        window.__tetherE2E.localStreams.every((stream) =>
+          stream.getTracks().every((track) => track.readyState === 'ended'),
+        ),
     );
   }
 
