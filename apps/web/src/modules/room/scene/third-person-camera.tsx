@@ -17,7 +17,6 @@ export function ThirdPersonCamera({
   reducedMotion,
   surfaceRef,
   journey,
-  mode,
   recenterSignal,
 }: {
   readonly template: RoomTemplate;
@@ -25,7 +24,6 @@ export function ThirdPersonCamera({
   readonly reducedMotion: boolean;
   readonly surfaceRef: RefObject<HTMLDivElement | null>;
   readonly journey?: RoomJourneyCue;
-  readonly mode: 'preview' | 'call';
   readonly recenterSignal: RefObject<number>;
 }) {
   const { camera, size } = useThree();
@@ -142,7 +140,7 @@ export function ThirdPersonCamera({
       journey === 'outside',
       template.camera,
     );
-    if (mode === 'preview' || journey === 'outside') {
+    if (journey === 'outside') {
       // Outside the room the guest may only glance around within tight bounds so
       // they cannot rotate the view to peek inside before being admitted.
       orbit.current = clampLook(orbit.current.yaw, orbit.current.pitch, template.camera.look);

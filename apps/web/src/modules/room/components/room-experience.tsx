@@ -50,7 +50,6 @@ function RoomExperienceOwner({ session, template, entryStage, children }: RoomEx
           template={template}
           admissionPending={active && view.pendingJoinRequests.length > 0}
           journey={journey}
-          mode='call'
           sessionIntent={session.intent}
           remoteAvatarPose={active ? view.remoteAvatarPose : null}
           roomEventsReady={active && view.roomEventsReady}
