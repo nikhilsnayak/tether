@@ -37,7 +37,7 @@ export function RoomQualityControl({
             <DropdownMenuTrigger
               render={
                 <Button
-                  aria-label='Room quality'
+                  aria-label={`Room quality: ${preference}`}
                   data-quality-preference={preference}
                   data-room-quality-control
                   variant='secondary'
