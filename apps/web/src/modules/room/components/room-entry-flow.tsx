@@ -13,7 +13,7 @@ import { RoomExperience } from './room-experience';
 const mediaSetupCopy = (intent: RoomSession['intent']) =>
   intent === 'join'
     ? 'You are outside the private room. Check your camera and microphone before knocking; this preview is never sent.'
-    : 'Check your default camera and microphone before entering. This preview is never sent.';
+    : "You're in your room. Check your camera and microphone, then invite someone to join. This preview is never sent.";
 
 export function RoomEntryFlow({
   session,

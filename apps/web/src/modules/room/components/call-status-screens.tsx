@@ -23,7 +23,7 @@ function CallStatusScreen({
   readonly action?: ReactNode;
 }) {
   return (
-    <div className='relative z-40 grid content-center justify-items-center gap-6 px-6 text-center'>
+    <div className='relative z-40 grid min-h-svh content-center justify-items-center gap-6 px-6 text-center'>
       <div className='absolute top-4 right-4 left-4 flex items-center gap-3'>
         <Wordmark className='max-sm:hidden' />
         <LogoMark className='size-5 sm:hidden' />

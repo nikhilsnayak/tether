@@ -33,7 +33,7 @@ function HostPage() {
     <RoomEntryFlow
       session={session}
       template={DUSK_SUITE_TEMPLATE}
-      actionLabel='Create room'
+      actionLabel='Invite someone'
       onLeave={leave}
     />
   );

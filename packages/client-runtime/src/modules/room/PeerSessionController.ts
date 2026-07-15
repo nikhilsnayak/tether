@@ -81,6 +81,7 @@ export const makePeerSessionControllerBinding = (): PeerSessionControllerBinding
       }),
       (acquiredSession) =>
         Effect.sync(() => {
+          /* v8 ignore next -- guards a stale release when a concurrent activation replaced the session; unreachable through the single-activation API */
           if (activeSession !== acquiredSession) return;
           activeSession = null;
           publish();
