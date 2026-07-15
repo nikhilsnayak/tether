@@ -12,13 +12,13 @@ import { useMediaPreflight } from './use-media-preflight';
 
 export function MediaSetupPanel({
   template,
-  entryContext = 'host',
+  description,
   actionLabel,
   onBack,
   onComplete,
 }: {
   readonly template: RoomTemplate;
-  readonly entryContext?: 'host' | 'guest';
+  readonly description: string;
   readonly actionLabel: string;
   readonly onBack: () => void;
   readonly onComplete: (selection: PreparedMediaSelection) => void;
@@ -29,17 +29,10 @@ export function MediaSetupPanel({
   const finish = () => {
     onComplete(transfer());
   };
-  const guestEntry = entryContext === 'guest';
 
   return (
     <div className='relative isolate grid min-h-svh place-items-center overflow-hidden px-6 py-10'>
-      <div
-        className={cn(
-          'relative z-10 w-full max-w-xl space-y-6',
-          guestEntry &&
-            'border-border bg-background/95 rounded-xl border p-6 shadow-2xl backdrop-blur-sm sm:p-8',
-        )}
-      >
+      <div className='border-border bg-background/95 relative z-10 w-full max-w-xl space-y-6 rounded-xl border p-6 shadow-2xl backdrop-blur-sm sm:p-8'>
         <span className='flex items-center gap-2.5'>
           <LogoMark className='size-5' />
           <span className='font-medium tracking-tight'>tether</span>
@@ -49,11 +42,7 @@ export function MediaSetupPanel({
             Checking media — {template.name}
           </p>
           <h1 className='text-2xl tracking-tight'>Look and sound ready?</h1>
-          <p className='text-muted-foreground text-sm leading-6'>
-            {guestEntry
-              ? 'You are outside the private room. Check your camera and microphone before knocking; this preview is never sent.'
-              : 'Check your default camera and microphone before entering. This preview is never sent.'}
-          </p>
+          <p className='text-muted-foreground text-sm leading-6'>{description}</p>
         </div>
 
         {status === 'idle' && <Button onClick={() => void acquire()}>Continue</Button>}

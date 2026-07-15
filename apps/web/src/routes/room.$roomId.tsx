@@ -16,18 +16,14 @@ import { generatePeerId } from '@/lib/utils';
 import {
   CallErrorScreen,
   CallHandoffScreen,
-  CallLoadingScreen,
   RoomMetadataLoadingScreen,
   RoomMissingScreen,
   UnsupportedBrowserScreen,
   UpdateRequiredScreen,
 } from '@/modules/room/components/call-status-screens';
 import { JoinNamePanel } from '@/modules/room/components/join-name-panel';
-import { PeerSessionLayer } from '@/modules/room/components/peer-session-layer';
-import { RoomExperience } from '@/modules/room/components/room-experience';
+import { RoomEntryFlow } from '@/modules/room/components/room-entry-flow';
 import { detectRoomCapabilities } from '@/modules/room/preflight/capabilities';
-import type { PreparedMediaSelection } from '@/modules/room/preflight/media';
-import { MediaSetupPanel } from '@/modules/room/preflight/media-setup-panel';
 import { resolveRoomTemplate } from '@/modules/room/templates/registry';
 
 export const Route = createFileRoute('/room/$roomId')({
@@ -36,13 +32,18 @@ export const Route = createFileRoute('/room/$roomId')({
 
 function RoomPage() {
   const { roomId } = Route.useParams();
+  // The raw parameter is the guest's terminal identity boundary. Keying the
+  // lifetime child on it releases every room resource when $roomId changes.
+  return <GuestRoomRouteLifetime key={roomId} roomId={roomId} />;
+}
+
+function GuestRoomRouteLifetime({ roomId }: { readonly roomId: string }) {
   const navigate = useNavigate();
   const [selfId] = useState(() => PeerId.make(generatePeerId()));
   // On a desktop web browser we hand off to the app first, so hold the call
   // (and its media grab) until the caller opts to stay in the browser.
   const [joinInBrowser, setJoinInBrowser] = useState(() => !canOfferDesktopApp());
   const [displayName, setDisplayName] = useState<DisplayName | null>(null);
-  const [preparedMedia, setPreparedMedia] = useState<PreparedMediaSelection | null>(null);
   const [capabilities] = useState(detectRoomCapabilities);
   const typedRoomId = RoomId.make(roomId);
   const leave = () => void navigate({ to: '/' });
@@ -79,9 +80,7 @@ function RoomPage() {
           roomId={typedRoomId}
           selfId={selfId}
           displayName={displayName}
-          preparedMedia={preparedMedia}
           onName={setDisplayName}
-          onMedia={setPreparedMedia}
           onLeave={leave}
         />
       </Suspense>
@@ -93,17 +92,13 @@ function GuestRoomEntry({
   roomId,
   selfId,
   displayName,
-  preparedMedia,
   onName,
-  onMedia,
   onLeave,
 }: {
   readonly roomId: RoomId;
   readonly selfId: PeerId;
   readonly displayName: DisplayName | null;
-  readonly preparedMedia: PreparedMediaSelection | null;
   readonly onName: (name: DisplayName) => void;
-  readonly onMedia: (selection: PreparedMediaSelection) => void;
   readonly onLeave: () => void;
 }) {
   const metadata = useAtomSuspense(AppAtomClient.query('GetRoomMetadata', { roomId })).value;
@@ -125,30 +120,11 @@ function GuestRoomEntry({
   };
 
   return (
-    <RoomExperience
+    <RoomEntryFlow
       session={session}
       template={resolution.template}
-      sessionRequested={preparedMedia !== null}
-    >
-      {preparedMedia === null ? (
-        <MediaSetupPanel
-          template={resolution.template}
-          entryContext='guest'
-          actionLabel='Knock on door'
-          onBack={onLeave}
-          onComplete={onMedia}
-        />
-      ) : (
-        <CatchBoundary errorComponent={CallErrorScreen} getResetKey={() => selfId}>
-          <Suspense fallback={<CallLoadingScreen />}>
-            <PeerSessionLayer
-              session={session}
-              preparedMedia={preparedMedia}
-              onLeaveRoom={onLeave}
-            />
-          </Suspense>
-        </CatchBoundary>
-      )}
-    </RoomExperience>
+      actionLabel='Knock on door'
+      onLeave={onLeave}
+    />
   );
 }
