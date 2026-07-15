@@ -7,6 +7,7 @@ export default defineConfig({
       include: ['src/**/*.ts'],
       // Composition roots (DI wiring) carry no logic worth unit-testing.
       exclude: [
+        'src/**/test/**',
         'src/**/index.ts',
         'src/AppClient.ts',
         // Type-only domain models and Effect service interfaces have no

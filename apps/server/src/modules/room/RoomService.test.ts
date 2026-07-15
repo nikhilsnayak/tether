@@ -33,6 +33,7 @@ import {
   SIGNAL_BUCKET_CAPACITY,
 } from './Constants';
 import { RoomService } from './RoomService';
+import { makeRoomServiceTestHarness } from './test/RoomServiceTestHarness';
 
 const alice = PeerId.make('aaaaaaaaaaaa');
 const bob = PeerId.make('bbbbbbbbbbbb');
@@ -75,71 +76,6 @@ const requireOpenedEvent = (event: unknown): RoomSessionOpenedEvent => {
 
 const isOpened = (event: { readonly _tag: string }) =>
   event._tag === '@tether/RoomSessionOpenedEvent';
-
-// Opens a host session and returns its minted roomId, keeping the room alive
-// via a forked drain fiber for the rest of the test.
-const openHostRoomId = Effect.fnUntraced(function* (self: PeerId) {
-  const room = yield* RoomService;
-  const roomIdDeferred = yield* Deferred.make<RoomId>();
-  const stream = yield* hostRoom(room, self);
-  yield* stream.pipe(
-    Stream.tap((event) =>
-      isOpened(event)
-        ? Deferred.succeed(roomIdDeferred, (event as RoomSessionOpenedEvent).roomId)
-        : Effect.void,
-    ),
-    Stream.runDrain,
-    Effect.forkChild({ startImmediately: true }),
-  );
-  return yield* Deferred.await(roomIdDeferred);
-});
-
-// Drives alice (host) + bob (join, allowed) to a connected room. The host and
-// joiner streams are collected by forked fibers of the requested lengths.
-const connect = Effect.fnUntraced(function* (options: {
-  readonly hostTake: number;
-  readonly joinerTake: number;
-}) {
-  const room = yield* RoomService;
-  const roomIdDeferred = yield* Deferred.make<RoomId>();
-  const aliceTokenDeferred = yield* Deferred.make<string>();
-  const bobTokenDeferred = yield* Deferred.make<string>();
-
-  const aliceStream = yield* hostRoom(room, alice);
-  const aliceFiber = yield* aliceStream.pipe(
-    Stream.tap((event) =>
-      isOpened(event)
-        ? Effect.all([
-            Deferred.succeed(roomIdDeferred, (event as RoomSessionOpenedEvent).roomId),
-            Deferred.succeed(aliceTokenDeferred, (event as RoomSessionOpenedEvent).sessionToken),
-          ])
-        : Effect.void,
-    ),
-    Stream.take(options.hostTake),
-    Stream.runCollect,
-    Effect.forkChild({ startImmediately: true }),
-  );
-
-  const roomId = yield* Deferred.await(roomIdDeferred);
-  const aliceToken = yield* Deferred.await(aliceTokenDeferred);
-
-  const bobStream = yield* room.join(roomId, bob, bobName);
-  const bobFiber = yield* bobStream.pipe(
-    Stream.tap((event) =>
-      isOpened(event)
-        ? Deferred.succeed(bobTokenDeferred, (event as RoomSessionOpenedEvent).sessionToken)
-        : Effect.void,
-    ),
-    Stream.take(options.joinerTake),
-    Stream.runCollect,
-    Effect.forkChild({ startImmediately: true }),
-  );
-
-  yield* room.respondToJoin(roomId, alice, aliceToken, bob, 'allow');
-  const bobToken = yield* Deferred.await(bobTokenDeferred);
-
-  return { roomId, aliceToken, bobToken, aliceFiber, bobFiber };
-});
 
 const offer = (sdp: string) =>
   new SessionDescriptionSignal({ negotiationEpoch: 0, type: 'offer', sdp });
@@ -213,8 +149,9 @@ describe('RoomService knock-to-join', () => {
   it.effect('admits a joiner the host allows and connects both peers', () =>
     withRoomService(
       Effect.gen(function* () {
-        const room = yield* RoomService;
-        const { roomId, aliceToken, bobToken, aliceFiber, bobFiber } = yield* connect({
+        const harness = yield* makeRoomServiceTestHarness();
+        const room = harness.room;
+        const { roomId, aliceToken, bobToken, aliceFiber, bobFiber } = yield* harness.connect({
           hostTake: 3,
           joinerTake: 2,
         });
@@ -432,8 +369,9 @@ describe('RoomService knock-to-join', () => {
   it.effect('cleans up safely when two consumers observe the same knock timing out', () =>
     withRoomService(
       Effect.gen(function* () {
-        const room = yield* RoomService;
-        const roomId = yield* openHostRoomId(alice);
+        const harness = yield* makeRoomServiceTestHarness();
+        const room = harness.room;
+        const roomId = yield* harness.openHostRoomId(alice);
         const bobStream = yield* room.join(roomId, bob, bobName);
         const firstFiber = yield* bobStream.pipe(
           Stream.runDrain,
@@ -471,8 +409,9 @@ describe('RoomService knock-to-join', () => {
   it.effect('does not relay signals from a pending joiner', () =>
     withRoomService(
       Effect.gen(function* () {
-        const room = yield* RoomService;
-        const roomId = yield* openHostRoomId(alice);
+        const harness = yield* makeRoomServiceTestHarness();
+        const room = harness.room;
+        const roomId = yield* harness.openHostRoomId(alice);
 
         const bobStream = yield* room.join(roomId, bob, bobName);
         yield* bobStream.pipe(Stream.take(1), Stream.runCollect);
@@ -731,8 +670,9 @@ describe('RoomService knock-to-join', () => {
   it.effect('rejects a third peer once the room is full', () =>
     withRoomService(
       Effect.gen(function* () {
-        const room = yield* RoomService;
-        const { roomId } = yield* connect({ hostTake: 3, joinerTake: 2 });
+        const harness = yield* makeRoomServiceTestHarness();
+        const room = harness.room;
+        const { roomId } = yield* harness.connect({ hostTake: 3, joinerTake: 2 });
 
         const error = yield* room.join(roomId, charlie, charlieName).pipe(Effect.flip);
         assert.instanceOf(error, RoomFull);
@@ -745,8 +685,12 @@ describe('RoomService signalling', () => {
   it.effect('delivers signals to the peer in FIFO order', () =>
     withRoomService(
       Effect.gen(function* () {
-        const room = yield* RoomService;
-        const { roomId, bobToken, aliceFiber } = yield* connect({ hostTake: 6, joinerTake: 2 });
+        const harness = yield* makeRoomServiceTestHarness();
+        const room = harness.room;
+        const { roomId, bobToken, aliceFiber } = yield* harness.connect({
+          hostTake: 6,
+          joinerTake: 2,
+        });
 
         const signals = ['one', 'two', 'three'].map(offer);
         yield* Effect.forEach(signals, (signal) => room.sendSignal(roomId, bob, bobToken, signal));
@@ -763,8 +707,9 @@ describe('RoomService signalling', () => {
   it.effect('silently drops signals beyond the member rate limit', () =>
     withRoomService(
       Effect.gen(function* () {
-        const room = yield* RoomService;
-        const { roomId, bobToken, aliceFiber } = yield* connect({
+        const harness = yield* makeRoomServiceTestHarness();
+        const room = harness.room;
+        const { roomId, bobToken, aliceFiber } = yield* harness.connect({
           hostTake: 3 + SIGNAL_BUCKET_CAPACITY,
           joinerTake: 2,
         });
@@ -785,8 +730,9 @@ describe('RoomService signalling', () => {
   it.effect('maintains a separate signal bucket for each member', () =>
     withRoomService(
       Effect.gen(function* () {
-        const room = yield* RoomService;
-        const { roomId, aliceToken, bobToken, aliceFiber } = yield* connect({
+        const harness = yield* makeRoomServiceTestHarness();
+        const room = harness.room;
+        const { roomId, aliceToken, bobToken, aliceFiber } = yield* harness.connect({
           hostTake: 4,
           joinerTake: 2,
         });
@@ -809,8 +755,12 @@ describe('RoomService signalling', () => {
   it.effect('rejects forged signals while accepting the member token', () =>
     withRoomService(
       Effect.gen(function* () {
-        const room = yield* RoomService;
-        const { roomId, aliceToken } = yield* connect({ hostTake: 3, joinerTake: 2 });
+        const harness = yield* makeRoomServiceTestHarness();
+        const room = harness.room;
+        const { roomId, aliceToken } = yield* harness.connect({
+          hostTake: 3,
+          joinerTake: 2,
+        });
 
         const error = yield* room
           .sendSignal(roomId, alice, 'wrong-session-token', offer('forged'))
@@ -826,7 +776,11 @@ describe('RoomService signalling', () => {
   it.effect('issues distinct non-empty session tokens to each member', () =>
     withRoomService(
       Effect.gen(function* () {
-        const { aliceToken, bobToken } = yield* connect({ hostTake: 3, joinerTake: 2 });
+        const harness = yield* makeRoomServiceTestHarness();
+        const { aliceToken, bobToken } = yield* harness.connect({
+          hostTake: 3,
+          joinerTake: 2,
+        });
         assert.isNotEmpty(aliceToken);
         assert.isNotEmpty(bobToken);
         assert.notStrictEqual(aliceToken, bobToken);
@@ -837,8 +791,12 @@ describe('RoomService signalling', () => {
   it.effect('lets an admitted peer leave and notifies the host', () =>
     withRoomService(
       Effect.gen(function* () {
-        const room = yield* RoomService;
-        const { roomId, bobToken, aliceFiber } = yield* connect({ hostTake: 4, joinerTake: 2 });
+        const harness = yield* makeRoomServiceTestHarness();
+        const room = harness.room;
+        const { roomId, bobToken, aliceFiber } = yield* harness.connect({
+          hostTake: 4,
+          joinerTake: 2,
+        });
 
         yield* room.leave(roomId, bob, bobToken);
 
@@ -851,8 +809,12 @@ describe('RoomService signalling', () => {
   it.effect('ignores a leave request with the wrong session token', () =>
     withRoomService(
       Effect.gen(function* () {
-        const room = yield* RoomService;
-        const { roomId, bobToken, aliceFiber } = yield* connect({ hostTake: 4, joinerTake: 2 });
+        const harness = yield* makeRoomServiceTestHarness();
+        const room = harness.room;
+        const { roomId, bobToken, aliceFiber } = yield* harness.connect({
+          hostTake: 4,
+          joinerTake: 2,
+        });
 
         yield* room.leave(roomId, bob, 'wrong-session-token');
         yield* room.leave(roomId, bob, bobToken);
@@ -996,8 +958,9 @@ describe('RoomService capacity', () => {
   it.effect('allows joining an existing room when the creation bucket is empty', () =>
     withRoomService(
       Effect.gen(function* () {
-        const room = yield* RoomService;
-        const roomId = yield* openHostRoomId(alice);
+        const harness = yield* makeRoomServiceTestHarness();
+        const room = harness.room;
+        const roomId = yield* harness.openHostRoomId(alice);
 
         yield* Effect.forEach(
           Array.from({ length: ROOM_CREATE_BUCKET_CAPACITY - 1 }, (_, index) => index),
@@ -1018,8 +981,9 @@ describe('RoomService capacity', () => {
   it.effect('caps new rooms while allowing joins to existing rooms', () =>
     withRoomService(
       Effect.gen(function* () {
-        const room = yield* RoomService;
-        const roomId = yield* openHostRoomId(alice);
+        const harness = yield* makeRoomServiceTestHarness();
+        const room = harness.room;
+        const roomId = yield* harness.openHostRoomId(alice);
 
         yield* Effect.forEach(
           Array.from({ length: MAX_LIVE_ROOMS - 1 }, (_, index) => index),

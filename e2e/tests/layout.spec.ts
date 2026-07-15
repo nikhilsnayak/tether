@@ -1,6 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
-
-import { completeMediaSetup, connectPeers, createRoom, requireBaseURL } from './helpers';
+import { expect, test, type Page } from './fixtures';
 
 const fitsViewport = (page: Page) =>
   page.evaluate(() => {
@@ -16,8 +14,9 @@ test('home page fits the viewport', async ({ page }) => {
   expect(await fitsViewport(page)).toBe(true);
 });
 
-test('room waiting screen fits the viewport', async ({ page }) => {
-  await createRoom(page);
+test('room waiting screen fits the viewport', { tag: '@gpu' }, async ({ page, room }) => {
+  const actor = room.actorFor(page);
+  await room.createRoom(actor);
   await expect(page.getByText('Share this room to invite someone.')).toBeVisible();
   const scene = page.getByLabel('Dusk Suite room scene');
   await expect(scene.locator('canvas')).toBeVisible();
@@ -45,7 +44,7 @@ test('room waiting screen fits the viewport', async ({ page }) => {
   expect(await fitsViewport(page)).toBe(true);
 
   await page.reload();
-  await completeMediaSetup(page, 'Create room');
+  await room.completeMediaSetup(actor, 'Create room');
   await expect(page.getByRole('button', { name: 'Room quality' })).toHaveAttribute(
     'data-quality-preference',
     'low',
@@ -56,51 +55,52 @@ test('room waiting screen fits the viewport', async ({ page }) => {
   );
 });
 
-test('reduced motion keeps the full 3D room without camera travel', async ({ page }) => {
-  await page.emulateMedia({ reducedMotion: 'reduce' });
-  await createRoom(page);
-  const scene = page.getByLabel('Dusk Suite room scene');
-  await expect(scene).toHaveAttribute('data-room-reduced-motion', 'true');
-  await expect(scene.locator('canvas')).toBeVisible();
-});
-
-test('the WebGPU call room fits phone viewports without covering controls', async ({
-  browser,
-}, testInfo) => {
-  const baseURL = requireBaseURL(testInfo.project.use.baseURL);
-  const { host, cleanup } = await connectPeers(browser, baseURL);
-  try {
-    await host.setViewportSize({ width: 390, height: 844 });
-    const scene = host.getByLabel('Dusk Suite room scene');
-    await expect(scene).toHaveAttribute('data-room-remote-avatar', 'present');
-    await expect(host.getByLabel('Other person video')).toBeVisible();
+test(
+  'reduced motion keeps the full 3D room without camera travel',
+  { tag: '@gpu' },
+  async ({ page, room }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await room.createRoom(room.actorFor(page));
+    const scene = page.getByLabel('Dusk Suite room scene');
+    await expect(scene).toHaveAttribute('data-room-reduced-motion', 'true');
     await expect(scene.locator('canvas')).toBeVisible();
-    await expect(host.getByRole('button', { name: 'Leave call' })).toBeVisible();
-    await expect(host.getByLabel('Local video preview')).toBeVisible();
-    await expect(host.getByRole('button', { name: 'Room quality' })).toBeVisible();
-    expect(await fitsViewport(host)).toBe(true);
+  },
+);
 
-    const controls = await host.getByRole('button', { name: 'Leave call' }).boundingBox();
-    const preview = await host.getByLabel('Local video preview').boundingBox();
+test(
+  'the WebGPU call room fits phone viewports without covering controls',
+  { tag: '@gpu' },
+  async ({ room }) => {
+    const { host } = await room.connect();
+    const { page } = host;
+    await page.setViewportSize({ width: 390, height: 844 });
+    const scene = page.getByLabel('Dusk Suite room scene');
+    await expect(scene).toHaveAttribute('data-room-remote-avatar', 'present');
+    await expect(scene.locator('canvas')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Leave call' })).toBeVisible();
+    await expect(page.getByLabel('Local video preview')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Room quality' })).toBeVisible();
+    expect(await fitsViewport(page)).toBe(true);
+
+    const controls = await page.getByRole('button', { name: 'Leave call' }).boundingBox();
+    const preview = await page.getByLabel('Local video preview').boundingBox();
     expect(controls).not.toBeNull();
     expect(preview).not.toBeNull();
     if (controls !== null && preview !== null) {
       expect(preview.y + preview.height).toBeLessThanOrEqual(controls.y);
     }
 
-    await host.setViewportSize({ width: 844, height: 390 });
-    await expect(host.getByRole('button', { name: 'Leave call' })).toBeVisible();
-    await expect(host.getByLabel('Local video preview')).toBeVisible();
-    expect(await fitsViewport(host)).toBe(true);
+    await page.setViewportSize({ width: 844, height: 390 });
+    await expect(page.getByRole('button', { name: 'Leave call' })).toBeVisible();
+    await expect(page.getByLabel('Local video preview')).toBeVisible();
+    expect(await fitsViewport(page)).toBe(true);
 
-    const landscapeControls = await host.getByRole('button', { name: 'Leave call' }).boundingBox();
-    const landscapePreview = await host.getByLabel('Local video preview').boundingBox();
+    const landscapeControls = await page.getByRole('button', { name: 'Leave call' }).boundingBox();
+    const landscapePreview = await page.getByLabel('Local video preview').boundingBox();
     expect(landscapeControls).not.toBeNull();
     expect(landscapePreview).not.toBeNull();
     if (landscapeControls !== null && landscapePreview !== null) {
       expect(landscapePreview.y + landscapePreview.height).toBeLessThanOrEqual(landscapeControls.y);
     }
-  } finally {
-    await cleanup();
-  }
-});
+  },
+);

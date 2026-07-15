@@ -44,6 +44,7 @@
         "@effect/vitest": "catalog:",
         "@tether/client-runtime": "workspace:*",
         "@tether/contracts": "workspace:*",
+        "@tether/test-support": "workspace:*",
         "@types/react": "~19.2.2",
         "@vitest/coverage-v8": "catalog:",
         "effect": "catalog:",
@@ -102,6 +103,7 @@
         "@tanstack/router-plugin": "catalog:",
         "@tether/client-runtime": "workspace:*",
         "@tether/contracts": "workspace:*",
+        "@tether/test-support": "workspace:*",
         "@tether/ui": "workspace:*",
         "@types/node": "catalog:",
         "@types/react": "catalog:",
@@ -147,6 +149,17 @@
       "version": "0.0.0",
       "dependencies": {
         "@effect/vitest": "catalog:",
+        "effect": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
+    "packages/test-support": {
+      "name": "@tether/test-support",
+      "version": "0.0.0",
+      "dependencies": {
+        "@effect/vitest": "catalog:",
+        "@tether/client-runtime": "workspace:*",
         "effect": "catalog:",
         "typescript": "catalog:",
         "vitest": "catalog:",
@@ -889,6 +902,8 @@
     "@tether/client-runtime": ["@tether/client-runtime@workspace:packages/client-runtime"],
 
     "@tether/contracts": ["@tether/contracts@workspace:packages/contracts"],
+
+    "@tether/test-support": ["@tether/test-support@workspace:packages/test-support"],
 
     "@tether/ui": ["@tether/ui@workspace:packages/ui"],
 

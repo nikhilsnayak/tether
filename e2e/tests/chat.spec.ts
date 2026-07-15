@@ -1,23 +1,24 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures';
 
-import { connectPeers, createRoom, requireBaseURL } from './helpers';
+test.describe('real room', { tag: '@gpu' }, () => {
+  test('message input is disabled until a peer connects', async ({ page, room }) => {
+    await room.createRoom(room.actorFor(page));
+    await expect(page.getByText('Share this room to invite someone.')).toBeVisible();
 
-test('message input is disabled until a peer connects', async ({ page }) => {
-  await createRoom(page);
-  await expect(page.getByText('Share this room to invite someone.')).toBeVisible();
+    await page.getByRole('button', { name: 'Open chat' }).click();
+    await expect(
+      page.getByText('No messages yet. Say hello once you are connected.'),
+    ).toBeVisible();
+    await expect(page.getByRole('textbox', { name: 'Message' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Send message' })).toBeDisabled();
+  });
 
-  await page.getByRole('button', { name: 'Open chat' }).click();
-  await expect(page.getByText('No messages yet. Say hello once you are connected.')).toBeVisible();
-  await expect(page.getByRole('textbox', { name: 'Message' })).toBeDisabled();
-  await expect(page.getByRole('button', { name: 'Send message' })).toBeDisabled();
-});
-
-test('unread indicator shows for messages received while the chat is closed', async ({
-  browser,
-}, testInfo) => {
-  const baseURL = requireBaseURL(testInfo.project.use.baseURL);
-  const { host, guest, cleanup } = await connectPeers(browser, baseURL);
-  try {
+  test('unread indicator shows for messages received while the chat is closed', async ({
+    room,
+  }) => {
+    const { host: hostActor, guest: guestActor } = await room.connect();
+    const { page: host } = hostActor;
+    const { page: guest } = guestActor;
     await expect(host.getByRole('button', { name: 'Open chat', exact: true })).toBeVisible();
 
     await guest.getByRole('button', { name: 'Open chat' }).click();
@@ -36,17 +37,12 @@ test('unread indicator shows for messages received while the chat is closed', as
 
     await expect(host.getByRole('button', { name: 'Open chat', exact: true })).toBeVisible();
     await expect(host.getByRole('button', { name: 'Open chat (unread messages)' })).toHaveCount(0);
-  } finally {
-    await cleanup();
-  }
-});
+  });
 
-test('only the message list scrolls when chat content exceeds the viewport', async ({
-  browser,
-}, testInfo) => {
-  const baseURL = requireBaseURL(testInfo.project.use.baseURL);
-  const { host, guest, cleanup } = await connectPeers(browser, baseURL);
-  try {
+  test('only the message list scrolls when chat content exceeds the viewport', async ({ room }) => {
+    const { host: hostActor, guest: guestActor } = await room.connect();
+    const { page: host } = hostActor;
+    const { page: guest } = guestActor;
     await host.getByRole('button', { name: 'Open chat' }).click();
     await guest.getByRole('button', { name: 'Open chat' }).click();
 
@@ -80,7 +76,5 @@ test('only the message list scrolls when chat content exceeds the viewport', asy
         return element.scrollHeight <= element.clientHeight + 1;
       }),
     ).toBe(true);
-  } finally {
-    await cleanup();
-  }
+  });
 });

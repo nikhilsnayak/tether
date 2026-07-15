@@ -15,6 +15,7 @@
     "@effect/vitest": "catalog:",
     "@tether/client-runtime": "workspace:*",
     "@tether/contracts": "workspace:*",
+    "@tether/test-support": "workspace:*",
     "@types/react": "~19.2.2",
     "@vitest/coverage-v8": "catalog:",
     "effect": "catalog:",

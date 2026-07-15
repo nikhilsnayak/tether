@@ -28,6 +28,7 @@
     "@tanstack/router-plugin": "catalog:",
     "@tether/client-runtime": "workspace:*",
     "@tether/contracts": "workspace:*",
+    "@tether/test-support": "workspace:*",
     "@tether/ui": "workspace:*",
     "@types/node": "catalog:",
     "@types/react": "catalog:",

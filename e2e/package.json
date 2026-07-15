@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "test": "playwright test",
+    "test:fast": "playwright test --project=fast-browser",
+    "test:gpu": "playwright test --project=gpu-e2e",
     "test:ui": "playwright test --ui",
     "report": "playwright show-report"
   },

@@ -1,46 +1,43 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './fixtures';
 
-import { connectPeers, expectPeerDeparted, requireBaseURL } from './helpers';
+test.describe('real room', { tag: '@gpu' }, () => {
+  test('peers confirm a matching safety code', async ({ room }) => {
+    const { host, guest } = await room.connect({
+      confirmSafety: false,
+      probeWebRtc: true,
+    });
+    const hostPage = host.page;
+    const guestPage = guest.page;
 
-test('peers confirm a matching safety code', async ({ browser }, testInfo) => {
-  const baseURL = requireBaseURL(testInfo.project.use.baseURL);
-  const { host, guest, cleanup } = await connectPeers(browser, baseURL, {
-    confirmSafety: false,
-    probeWebRtc: true,
-  });
+    const safetyCode = (page: Page) => page.getByLabel('Safety code');
+    const safetyCheck = (page: Page) => page.getByRole('region', { name: 'Safety check' });
 
-  const safetyCode = (page: Page) => page.getByLabel('Safety code');
-  const safetyCheck = (page: Page) => page.getByRole('region', { name: 'Safety check' });
-
-  try {
-    await expect(safetyCheck(host)).toBeVisible();
-    await expect(safetyCheck(guest)).toBeVisible();
+    await expect(safetyCheck(hostPage)).toBeVisible();
+    await expect(safetyCheck(guestPage)).toBeVisible();
     const [hostShowedEarly, guestShowedEarly] = await Promise.all([
-      host.evaluate(() => window.__tetherE2E.sasShownBeforeConnected),
-      guest.evaluate(() => window.__tetherE2E.sasShownBeforeConnected),
+      host.probe.sasShownBeforeConnected(),
+      guest.probe.sasShownBeforeConnected(),
     ]);
     expect(hostShowedEarly).toBe(false);
     expect(guestShowedEarly).toBe(false);
 
     const [fromHost, fromGuest] = await Promise.all([
-      safetyCode(host).textContent(),
-      safetyCode(guest).textContent(),
+      safetyCode(hostPage).textContent(),
+      safetyCode(guestPage).textContent(),
     ]);
     expect(fromHost).toMatch(/^\d{5}( \d{5}){4}$/);
     expect(fromHost).toBe(fromGuest);
 
-    await host.getByRole('button', { name: 'We see the same code' }).click();
-    await expect(safetyCheck(host)).toBeHidden();
+    await hostPage.getByRole('button', { name: 'We see the same code' }).click();
+    await expect(safetyCheck(hostPage)).toBeHidden();
     // The confirmed code stays visible as a badge.
-    await expect(safetyCode(host)).toHaveText(fromHost ?? '');
-    await expect(safetyCheck(guest)).toBeVisible();
+    await expect(safetyCode(hostPage)).toHaveText(fromHost ?? '');
+    await expect(safetyCheck(guestPage)).toBeVisible();
 
     // The mismatch escape hatch ends the call. The guest's departure returns the
     // host to the peer-departed waiting state (distinct hint from a fresh room).
-    await guest.getByRole('button', { name: "They don't match" }).click();
-    await expect(guest).toHaveURL('/');
-    await expectPeerDeparted(host);
-  } finally {
-    await cleanup();
-  }
+    await guestPage.getByRole('button', { name: "They don't match" }).click();
+    await expect(guestPage).toHaveURL('/');
+    await room.expectPeerDeparted(host);
+  });
 });

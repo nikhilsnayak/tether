@@ -304,26 +304,40 @@ bunx playwright install chromium
 cd ..
 ```
 
-Run the repository gates from the root:
+Run the fast unit-test loop from the root. The default test command does not launch Playwright:
+
+```sh
+bun run test
+# Equivalent explicit command:
+bun run test:unit
+```
+
+Run Playwright, a specific E2E lane, or the complete unit-and-browser gate:
+
+```sh
+bun run test:e2e
+bun run test:e2e:fast
+bun run test:e2e:gpu
+bun run test:all
+```
+
+Use the fast lane for non-GPU flows and the GPU lane for media and room flows.
+
+Run the remaining repository gates from the root:
 
 ```sh
 bun run lint
 bun run fmt:check
-bun run test
+bun run test:coverage
 bun run build
 ```
 
-Run the browser suite separately:
-
-```sh
-cd e2e
-bunx playwright test
-```
-
-`bun run test:coverage` produces coverage reports for the server, web, mobile, contracts, and shared
-runtime. The test suite covers admission races, capacity, authenticated signaling, connection
-recovery, safety-code agreement, room-event validation, avatar movement and interpolation,
-responsive media tiles, focus-safe controls, and full two-browser room flows.
+`bun run test:coverage` produces coverage reports only for workspaces with coverage scripts: the
+server, web, mobile, and shared client runtime. Contracts tests remain part of `test:unit` and CI,
+but the contracts package does not currently produce a coverage report. The test suite covers
+admission races, capacity, authenticated signaling, connection recovery, safety-code agreement,
+room-event validation, avatar movement and interpolation, responsive media tiles, focus-safe
+controls, and full two-browser room flows.
 
 ## Deliberate limits and next steps
 

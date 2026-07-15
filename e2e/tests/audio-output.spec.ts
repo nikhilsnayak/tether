@@ -1,16 +1,12 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures';
 
-import { admitGuest, createRoom, expectConnected, joinRoom, requireBaseURL } from './helpers';
-import { seededStorageState } from './storage-seed';
-
-test('audio output menu selects a device and toggles sound off', async ({ browser }, testInfo) => {
-  const baseURL = requireBaseURL(testInfo.project.use.baseURL);
-  const hostContext = await browser.newContext({ baseURL, storageState: seededStorageState });
-  const guestContext = await browser.newContext({ baseURL, storageState: seededStorageState });
-  const host = await hostContext.newPage();
-  const guest = await guestContext.newPage();
-  try {
-    const roomId = await createRoom(host);
+test.describe('real room', { tag: '@gpu' }, () => {
+  test('audio output menu selects a device and toggles sound off', async ({ room }) => {
+    const hostActor = await room.createActor();
+    const guestActor = await room.createActor();
+    const { page: host } = hostActor;
+    const { page: guest } = guestActor;
+    const roomId = await room.createRoom(hostActor);
     const remote = host.getByLabel('Remote audio');
     await expect(remote).toBeAttached();
     const remoteMuted = () => remote.evaluate((audio: HTMLAudioElement) => audio.muted);
@@ -38,15 +34,15 @@ test('audio output menu selects a device and toggles sound off', async ({ browse
     );
     await host.keyboard.press('Escape');
 
-    await joinRoom(guest, roomId);
+    await room.join(guestActor, roomId);
     await expect(host.getByRole('region', { name: 'Join request' })).toBeVisible();
     await expect.poll(remoteMuted).toBe(true);
     await expect(host.getByRole('button', { name: 'Audio output' })).toHaveClass(
       /text-destructive/,
     );
 
-    await admitGuest(host);
-    await Promise.all([expectConnected(host), expectConnected(guest)]);
+    await room.admit(hostActor);
+    await Promise.all([room.expectConnected(hostActor), room.expectConnected(guestActor)]);
     await Promise.all([
       host.getByRole('button', { name: 'We see the same code' }).click(),
       guest.getByRole('button', { name: 'We see the same code' }).click(),
@@ -61,7 +57,5 @@ test('audio output menu selects a device and toggles sound off', async ({ browse
     await expect.poll(remoteMuted).toBe(false);
 
     await host.keyboard.press('Escape');
-  } finally {
-    await Promise.all([hostContext.close(), guestContext.close()]);
-  }
+  });
 });
