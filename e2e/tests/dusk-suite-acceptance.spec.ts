@@ -1,4 +1,5 @@
 import { expect, test } from './fixtures';
+import { highQualityStorageState } from './storage-seed';
 
 test('missing WebGL2 stops entry before media is requested', { tag: '@gpu' }, async ({ page }) => {
   await page.addInitScript(() => {
@@ -30,25 +31,31 @@ test('missing WebGL2 stops entry before media is requested', { tag: '@gpu' }, as
   expect(await page.evaluate(() => Reflect.get(window, '__tetherMediaRequests'))).toBe(0);
 });
 
-test(
-  'Dusk Suite loads without third-party room assets',
-  { tag: '@gpu' },
-  async ({ page, room }) => {
-    const appOrigin = new URL(room.baseURL).origin;
-    const externalAssets: string[] = [];
-    page.on('request', (request) => {
-      const url = new URL(request.url());
-      if (url.origin !== appOrigin) externalAssets.push(url.href);
-    });
+test.describe('high-quality renderer', () => {
+  test.use({ storageState: highQualityStorageState });
 
-    await room.createRoom(room.actorFor(page));
-    await expect(page.getByLabel('Dusk Suite room scene').locator('canvas')).toBeVisible();
-    // The room keeps a live signaling connection open, so true network-idle
-    // never fires; a short settle window is enough to catch lazy-loaded assets.
-    await page.waitForTimeout(1_000);
-    expect(externalAssets).toEqual([]);
-  },
-);
+  test(
+    'Dusk Suite loads without third-party room assets',
+    { tag: '@gpu' },
+    async ({ page, room }) => {
+      const appOrigin = new URL(room.baseURL).origin;
+      const externalAssets: string[] = [];
+      page.on('request', (request) => {
+        const url = new URL(request.url());
+        if (url.origin !== appOrigin) externalAssets.push(url.href);
+      });
+
+      await room.createRoom(room.actorFor(page));
+      const scene = page.getByLabel('Dusk Suite room scene');
+      await expect(scene).toHaveAttribute('data-room-quality-tier', 'high');
+      await expect(scene.locator('canvas')).toBeVisible();
+      // The room keeps a live signaling connection open, so true network-idle
+      // never fires; a short settle window is enough to catch lazy-loaded assets.
+      await page.waitForTimeout(1_000);
+      expect(externalAssets).toEqual([]);
+    },
+  );
+});
 
 test('a guest waits at the exterior before knocking', { tag: '@gpu' }, async ({ page, room }) => {
   const host = room.actorFor(page);

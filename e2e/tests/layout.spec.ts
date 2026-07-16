@@ -1,4 +1,5 @@
 import { expect, test, type Page } from './fixtures';
+import { automaticQualityStorageState } from './storage-seed';
 
 const fitsViewport = (page: Page) =>
   page.evaluate(() => {
@@ -14,45 +15,49 @@ test('home page fits the viewport', async ({ page }) => {
   expect(await fitsViewport(page)).toBe(true);
 });
 
-test('room waiting screen fits the viewport', { tag: '@gpu' }, async ({ page, room }) => {
-  const actor = room.actorFor(page);
-  await room.createRoom(actor);
-  await expect(page.getByText('Share this room to invite someone.')).toBeVisible();
-  const scene = page.getByLabel('Dusk Suite room scene');
-  await expect(scene.locator('canvas')).toBeVisible();
-  const quality = page.getByRole('button', { name: 'Room quality' });
-  await quality.click();
-  await page.getByRole('menuitemradio', { name: 'Low quality' }).click();
-  await expect(quality).toHaveAttribute('data-quality-preference', 'low');
-  await expect(scene).toHaveAttribute('data-room-quality-tier', 'low');
-  expect(await page.evaluate(() => localStorage.getItem('tether.room.quality'))).toBe('low');
-  const controls = page.getByRole('toolbar', { name: 'Call controls' });
-  await expect(controls.getByRole('button')).toHaveCount(6);
-  await expect(controls.getByRole('button', { name: 'Leave call' })).toBeVisible();
-  await expect(page.getByRole('group', { name: 'Avatar controls' })).toBeHidden();
-  const controlHelp = page.getByRole('button', { name: 'Room controls help' });
-  await expect(controlHelp).toBeVisible();
-  await controlHelp.hover();
-  await expect(page.getByRole('heading', { name: 'Room controls' })).toBeVisible();
-  const headerBox = await page.locator('[data-room-call-header]').boundingBox();
-  const qualityBox = await page.locator('[data-room-quality-control]').boundingBox();
-  expect(headerBox).not.toBeNull();
-  expect(qualityBox).not.toBeNull();
-  if (headerBox !== null && qualityBox !== null) {
-    expect(qualityBox.y).toBeGreaterThanOrEqual(headerBox.y + headerBox.height);
-  }
-  expect(await fitsViewport(page)).toBe(true);
+test.describe('automatic room quality', () => {
+  test.use({ storageState: automaticQualityStorageState });
 
-  await page.reload();
-  await room.completeMediaSetup(actor, 'Invite someone');
-  await expect(page.getByRole('button', { name: 'Room quality' })).toHaveAttribute(
-    'data-quality-preference',
-    'low',
-  );
-  await expect(page.getByLabel('Dusk Suite room scene')).toHaveAttribute(
-    'data-room-quality-tier',
-    'low',
-  );
+  test('room waiting screen fits the viewport', { tag: '@gpu' }, async ({ page, room }) => {
+    const actor = room.actorFor(page);
+    await room.createRoom(actor);
+    await expect(page.getByText('Share this room to invite someone.')).toBeVisible();
+    const scene = page.getByLabel('Dusk Suite room scene');
+    await expect(scene.locator('canvas')).toBeVisible();
+    const quality = page.getByRole('button', { name: 'Room quality' });
+    await quality.click();
+    await page.getByRole('menuitemradio', { name: 'Low quality' }).click();
+    await expect(quality).toHaveAttribute('data-quality-preference', 'low');
+    await expect(scene).toHaveAttribute('data-room-quality-tier', 'low');
+    expect(await page.evaluate(() => localStorage.getItem('tether.room.quality'))).toBe('low');
+    const controls = page.getByRole('toolbar', { name: 'Call controls' });
+    await expect(controls.getByRole('button')).toHaveCount(6);
+    await expect(controls.getByRole('button', { name: 'Leave call' })).toBeVisible();
+    await expect(page.getByRole('group', { name: 'Avatar controls' })).toBeHidden();
+    const controlHelp = page.getByRole('button', { name: 'Room controls help' });
+    await expect(controlHelp).toBeVisible();
+    await controlHelp.hover();
+    await expect(page.getByRole('heading', { name: 'Room controls' })).toBeVisible();
+    const headerBox = await page.locator('[data-room-call-header]').boundingBox();
+    const qualityBox = await page.locator('[data-room-quality-control]').boundingBox();
+    expect(headerBox).not.toBeNull();
+    expect(qualityBox).not.toBeNull();
+    if (headerBox !== null && qualityBox !== null) {
+      expect(qualityBox.y).toBeGreaterThanOrEqual(headerBox.y + headerBox.height);
+    }
+    expect(await fitsViewport(page)).toBe(true);
+
+    await page.reload();
+    await room.completeMediaSetup(actor, 'Invite someone');
+    await expect(page.getByRole('button', { name: 'Room quality' })).toHaveAttribute(
+      'data-quality-preference',
+      'low',
+    );
+    await expect(page.getByLabel('Dusk Suite room scene')).toHaveAttribute(
+      'data-room-quality-tier',
+      'low',
+    );
+  });
 });
 
 test(
