@@ -182,7 +182,7 @@ export class RoomDriver {
   expectPeerDeparted(actor: RoomActor) {
     return Promise.all([
       expect(
-        actor.page.getByText('They left the call. You can wait here in case they rejoin.'),
+        actor.page.getByText('This room has ended. Create a new room to talk again.'),
       ).toBeVisible(),
       expect(actor.page.getByLabel('Dusk Suite room scene')).toHaveAttribute(
         'data-room-journey',

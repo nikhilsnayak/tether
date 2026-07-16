@@ -8,9 +8,12 @@ test.describe('real room', { tag: '@gpu' }, () => {
     const { page } = host;
     await room.expectDetached(host);
     await host.probe.failLatestPeerConnection();
-    await expect(page.getByText('Connection dropped', { exact: true }).first()).toBeVisible({
+    await expect(page.getByText('Connection lost', { exact: true }).first()).toBeVisible({
       timeout: 10_000,
     });
+    await expect(
+      page.getByText('The direct connection failed. Create a new room to reconnect.'),
+    ).toBeVisible();
 
     await page.getByRole('button', { name: 'Leave call' }).click();
     await expect(page).toHaveURL('/');

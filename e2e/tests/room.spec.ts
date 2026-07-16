@@ -156,6 +156,10 @@ test.describe('real room', { tag: '@gpu' }, () => {
 
       await Promise.all([room.expectDetached(host), room.expectDetached(guest)]);
       await Promise.all([room.expectZeroServerSockets(host), room.expectZeroServerSockets(guest)]);
+      await Promise.all([
+        expect(page.getByTestId('direct-indicator')).toBeVisible(),
+        expect(guest.page.getByTestId('direct-indicator')).toBeVisible(),
+      ]);
 
       await Promise.all([
         page.getByRole('button', { name: 'We see the same code' }).click(),
