@@ -38,6 +38,8 @@ describe('room-event codec', () => {
       cameraOn: false,
       microphoneOn: true,
     });
+    roundTrip({ version: 1, type: 'detach-probe' });
+    roundTrip({ version: 1, type: 'leave' });
   });
 
   it('accepts multibyte text at the documented chat code-point limit', () => {

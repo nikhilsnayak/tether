@@ -154,6 +154,9 @@ test.describe('real room', { tag: '@gpu' }, () => {
       await expectSameRoomCanvas(host);
       await expectSameRoomCanvas(guest);
 
+      await Promise.all([room.expectDetached(host), room.expectDetached(guest)]);
+      await Promise.all([room.expectZeroServerSockets(host), room.expectZeroServerSockets(guest)]);
+
       await Promise.all([
         page.getByRole('button', { name: 'We see the same code' }).click(),
         guest.page.getByRole('button', { name: 'We see the same code' }).click(),
@@ -212,33 +215,18 @@ test.describe('real room', { tag: '@gpu' }, () => {
     );
   });
 
-  test('a departed peer can be replaced after a full-room rejection', async ({ room }) => {
-    test.setTimeout(180_000);
+  test('a detached room code cannot admit a replacement after departure', async ({ room }) => {
     const { host, guest, roomId } = await room.connect();
-    let replacement = await room.createActor({ probeWebRtc: true });
-
-    await room.join(replacement, roomId);
-    await expect(replacement.page.getByText('Room is full', { exact: true }).first()).toBeVisible();
-    await expect
-      .poll(async () =>
-        (await replacement.probe.localStreamCount()) > 0
-          ? replacement.probe.allStreamsEnded()
-          : false,
-      )
-      .toBe(true);
-
-    await replacement.page.close();
-    replacement = await room.newPage(replacement);
+    await Promise.all([room.expectDetached(host), room.expectDetached(guest)]);
     await guest.page.getByRole('button', { name: 'Leave call' }).click();
     await room.expectPeerDeparted(host);
 
-    await room.join(replacement, roomId);
-    await room.admit(host);
-    await Promise.all([room.expectConnected(host), room.expectConnected(replacement)]);
-    await Promise.all([
-      expectLocalAndRemoteMedia(host.page),
-      expectLocalAndRemoteMedia(replacement.page),
-    ]);
+    const replacement = await room.createActor();
+    await replacement.page.goto(`/room/${roomId}`);
+    await replacement.page.getByRole('button', { name: 'Join in this browser' }).click();
+    await expect(
+      replacement.page.getByText('This room is no longer here', { exact: true }),
+    ).toBeVisible();
   });
 
   test('each peer controls only its own physical avatar', async ({ room }) => {

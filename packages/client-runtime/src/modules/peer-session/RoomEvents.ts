@@ -57,10 +57,22 @@ export const MediaStateRoomEvent = Schema.Struct({
   microphoneOn: Schema.Boolean,
 });
 
+export const DetachProbeRoomEvent = Schema.Struct({
+  version: Schema.Literal(ROOM_EVENT_VERSION),
+  type: Schema.Literal('detach-probe'),
+});
+
+export const LeaveRoomEvent = Schema.Struct({
+  version: Schema.Literal(ROOM_EVENT_VERSION),
+  type: Schema.Literal('leave'),
+});
+
 export const RoomEventSchema = Schema.Union([
   ChatMessageRoomEvent,
   AvatarPoseRoomEvent,
   MediaStateRoomEvent,
+  DetachProbeRoomEvent,
+  LeaveRoomEvent,
 ]);
 const RoomEventJsonSchema = Schema.fromJsonString(RoomEventSchema);
 const decodeRoomEventJson = Schema.decodeUnknownResult(RoomEventJsonSchema, {

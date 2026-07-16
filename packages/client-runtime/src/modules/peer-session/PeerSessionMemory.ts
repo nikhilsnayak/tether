@@ -64,6 +64,76 @@ const makeNegotiationMemory = () => {
   };
 };
 
+type DetachmentProbeExchange = 'none' | 'sent' | 'received' | 'exchanged';
+
+type DetachmentMemoryState =
+  | {
+      readonly _tag: 'Attached';
+      readonly probeExchange: DetachmentProbeExchange;
+      readonly readinessEpoch: number | null;
+    }
+  | { readonly _tag: 'Detached' };
+
+const makeDetachmentMemory = () => {
+  let state: DetachmentMemoryState = {
+    _tag: 'Attached',
+    probeExchange: 'none',
+    readinessEpoch: null,
+  };
+
+  return {
+    isDetached: () => state._tag === 'Detached',
+    markDetached: () => {
+      if (state._tag === 'Detached') return false;
+      state = { _tag: 'Detached' };
+      return true;
+    },
+    resetGeneration: () => {
+      if (state._tag === 'Detached') return;
+      state = { _tag: 'Attached', probeExchange: 'none', readinessEpoch: null };
+    },
+    needsProbe: () =>
+      state._tag === 'Attached' &&
+      (state.probeExchange === 'none' || state.probeExchange === 'received'),
+    markProbeSent: () => {
+      if (state._tag === 'Detached') return;
+      switch (state.probeExchange) {
+        case 'none':
+          state = { ...state, probeExchange: 'sent' };
+          return;
+        case 'received':
+          state = { ...state, probeExchange: 'exchanged' };
+          return;
+        case 'sent':
+        case 'exchanged':
+          return;
+      }
+    },
+    markProbeReceived: () => {
+      if (
+        state._tag === 'Detached' ||
+        state.probeExchange === 'received' ||
+        state.probeExchange === 'exchanged'
+      ) {
+        return false;
+      }
+      state = {
+        ...state,
+        probeExchange: state.probeExchange === 'sent' ? 'exchanged' : 'received',
+      };
+      return true;
+    },
+    isProbeExchanged: () => state._tag === 'Attached' && state.probeExchange === 'exchanged',
+    hasDeclaredReadiness: () => state._tag === 'Attached' && state.readinessEpoch !== null,
+    hasDeclaredReadinessFor: (epoch: number) =>
+      state._tag === 'Attached' && state.readinessEpoch === epoch,
+    markReadinessSent: (epoch: number) => {
+      if (state._tag === 'Detached') return;
+      state = { ...state, readinessEpoch: epoch };
+    },
+  };
+};
+
 type AvatarMemoryState =
   | { readonly _tag: 'Empty'; readonly counter: CounterState }
   | {
@@ -197,6 +267,7 @@ export const makePeerSessionMemory = (
   initialMediaState: MediaState | null = null,
 ) => ({
   chat: makeChatMemory(selfId),
+  detachment: makeDetachmentMemory(),
   negotiation: makeNegotiationMemory(),
   roomEvents: makeRoomEventMemory(initialMediaState),
 });

@@ -121,9 +121,9 @@ describe('translateRoomEventData', () => {
     });
   });
 
-  it('ignores detached events until the client detachment protocol is implemented', () => {
+  it('translates detached events into actor input', () => {
     assert.deepStrictEqual(translateRoomEventData(new DetachedEvent({})), {
-      input: null,
+      input: { _tag: 'Detached' },
       uiEvent: null,
       openedSession: null,
     });

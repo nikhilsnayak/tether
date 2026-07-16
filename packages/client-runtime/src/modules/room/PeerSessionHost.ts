@@ -13,7 +13,19 @@ import {
   type PeerId,
   type SessionToken,
 } from '@tether/contracts/modules/room';
-import { Cause, Deferred, Effect, Exit, Option, Queue, Ref, Scope, Stream } from 'effect';
+import {
+  Cause,
+  Context,
+  Deferred,
+  Effect,
+  Exit,
+  Layer,
+  Option,
+  Queue,
+  Ref,
+  Scope,
+  Stream,
+} from 'effect';
 
 import { AppSignalingClient } from '../../AppSignalingClient';
 import type { PeerSessionInput, PeerSessionLocalInputDispatch } from '../peer-session/ActorModel';
@@ -48,8 +60,22 @@ export interface PreparedMedia {
   readonly initialState?: MediaState;
 }
 
-/** Provides the private signaling RPC transport required by a peer session. */
-export const makePeerSessionSignalingLayer = (url: string) => AppSignalingClient.layer(url);
+export class PeerSessionSignalingTransport extends Context.Service<
+  PeerSessionSignalingTransport,
+  {
+    readonly acquire: Effect.Effect<AppSignalingClient['Service'], never, Scope.Scope>;
+  }
+>()('@tether/client-runtime/peer-session/PeerSessionSignalingTransport') {}
+
+/** Configures a fresh private signaling transport for each peer session. */
+export const makePeerSessionSignalingLayer = (url: string) =>
+  Layer.succeed(PeerSessionSignalingTransport, {
+    acquire: Effect.suspend(() =>
+      Layer.build(AppSignalingClient.layer(url)).pipe(
+        Effect.map((context) => Context.get(context, AppSignalingClient)),
+      ),
+    ),
+  });
 
 /**
  * Hosts the serialized peer-session actor and owns its session-level resources.
@@ -59,10 +85,12 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
   session: RoomSession,
   preparedMedia?: PreparedMedia,
 ) {
-  const client = yield* AppSignalingClient;
+  const transport = yield* PeerSessionSignalingTransport;
   const platform = yield* PeerSessionPlatform;
   const peerSessionEventSink = yield* PeerSessionEventSink;
   const sessionScope = yield* Scope.Scope;
+  const signalingScope = yield* Scope.fork(sessionScope);
+  const client = yield* transport.acquire.pipe(Scope.provide(signalingScope));
   const mediaScope = yield* Scope.fork(sessionScope);
   const actorScope = yield* Scope.fork(sessionScope);
 
@@ -80,6 +108,7 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
     readonly sessionToken: SessionToken;
   }>();
   const mailbox = yield* Queue.unbounded<PeerSessionInput>();
+  const detachedSignal = yield* Deferred.make<void>();
   const dispatchLocalInput: PeerSessionLocalInputDispatch = (input) => {
     Queue.offerUnsafe(mailbox, input);
   };
@@ -109,6 +138,26 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
           }),
         ),
       ),
+    sendReadyToDetach: (negotiationEpoch) =>
+      Deferred.await(openedSession).pipe(
+        Effect.flatMap(({ roomId, sessionToken }) =>
+          client.ReadyToDetach({
+            selfId: session.selfId,
+            roomId,
+            sessionToken,
+            negotiationEpoch,
+          }),
+        ),
+      ),
+  });
+
+  const actorEventSink = PeerSessionEventSink.of({
+    emit: (event) =>
+      event._tag === 'SessionDetached'
+        ? peerSessionEventSink
+            .emit(event)
+            .pipe(Effect.andThen(Deferred.succeed(detachedSignal, undefined)))
+        : peerSessionEventSink.emit(event),
   });
 
   const translateRoomEvent = Effect.fnUntraced(function* (event: RoomEvent) {
@@ -131,7 +180,16 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
     GOOGLE_STUN_SERVERS,
     dispatchLocalInput,
     preparedMedia?.initialState ?? null,
-  ).pipe(Effect.provideService(PeerSessionSignaling, signaling), Scope.provide(actorScope));
+  ).pipe(
+    Effect.provideService(PeerSessionSignaling, signaling),
+    Effect.provideService(PeerSessionEventSink, actorEventSink),
+    Scope.provide(actorScope),
+  );
+
+  yield* Deferred.await(detachedSignal).pipe(
+    Effect.andThen(Scope.close(signalingScope, Exit.void)),
+    Effect.forkScoped({ startImmediately: true }),
+  );
 
   const signalingExit = yield* Ref.make<Exit.Exit<void, unknown>>(Exit.void);
   yield* client.OpenRoomSession(session).pipe(
@@ -238,6 +296,10 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
 
   let leavePromise: Promise<void> | undefined;
   const leaveEffect = Effect.gen(function* () {
+    if (yield* Deferred.isDone(detachedSignal)) {
+      Queue.offerUnsafe(mailbox, { _tag: 'SendLeave' });
+      return;
+    }
     if (!(yield* Deferred.isDone(openedSession))) return;
     const { roomId, sessionToken } = yield* Deferred.await(openedSession);
     yield* client.LeaveRoom({ selfId: session.selfId, roomId, sessionToken });

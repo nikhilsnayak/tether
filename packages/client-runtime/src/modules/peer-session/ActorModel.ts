@@ -64,7 +64,8 @@ export type PeerSessionUiCommand =
       readonly message: string;
     }
   | { readonly _tag: 'SendAvatarPose'; readonly pose: AvatarPose }
-  | { readonly _tag: 'SendMediaState'; readonly mediaState: MediaState };
+  | { readonly _tag: 'SendMediaState'; readonly mediaState: MediaState }
+  | { readonly _tag: 'SendLeave' };
 
 /** Identifies the connection generation guarded by a negotiation deadline. */
 export type PeerSessionTimerInput =
@@ -86,6 +87,7 @@ export type PeerSessionRemoteInput =
   | { readonly _tag: 'RoomSessionOpened'; readonly peerId: PeerId | null }
   | { readonly _tag: 'PeerJoined'; readonly peerId: PeerId }
   | { readonly _tag: 'PeerLeft'; readonly peerId: PeerId }
+  | { readonly _tag: 'Detached' }
   | {
       readonly _tag: 'SignalReceived';
       readonly peerId: PeerId;

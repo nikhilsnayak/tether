@@ -21,22 +21,21 @@ test.describe('real room', { tag: '@gpu' }, () => {
     expect(iceServers).toEqual([{ urls: ['stun:stun.l.google.com:19302'] }]);
   });
 
-  test('candidate failures and signal bursts do not terminate the call', async ({ room }) => {
+  test('post-detachment signal bursts neither reconnect signaling nor terminate the call', async ({
+    room,
+  }) => {
     const burstSize = 100;
     const { host, guest } = await room.connect({ probeWebRtc: true });
+    await Promise.all([room.expectDetached(host), room.expectDetached(guest)]);
+    await Promise.all([room.expectZeroServerSockets(host), room.expectZeroServerSockets(guest)]);
     const baselineCandidateCalls = await guest.probe.addIceCandidateCalls();
-    await guest.probe.rejectNextIceCandidate();
     await host.probe.emitIceCandidateBurst(burstSize);
 
-    await expect.poll(() => guest.probe.rejectedIceCandidates()).toBe(1);
-    await expect
-      .poll(() => guest.probe.addIceCandidateCalls())
-      .toBeGreaterThan(baselineCandidateCalls);
+    await host.page.waitForTimeout(1_000);
+    expect(await guest.probe.addIceCandidateCalls()).toBe(baselineCandidateCalls);
+    await room.expectZeroServerSockets(host);
     await Promise.all([room.expectConnected(host), room.expectConnected(guest)]);
-    await sendMessage(host.page, guest.page, 'still connected after signal pressure');
-    const deliveredCandidateCalls =
-      (await guest.probe.addIceCandidateCalls()) - baselineCandidateCalls;
-    expect(deliveredCandidateCalls).toBeLessThan(burstSize);
+    await sendMessage(host.page, guest.page, 'still connected without signaling');
   });
 
   test('leaving a call and joining a new room starts with clean media', async ({ room }) => {

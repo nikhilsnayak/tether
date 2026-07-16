@@ -80,8 +80,6 @@ export const translateRoomEventData = (event: RoomEvent): RoomEventTranslation =
         uiEvent: { _tag: 'JoinRequestCancelled', peerId: event.peerId },
       };
     case '@tether/DetachedEvent':
-      // Placeholder until the client detachment protocol (plans/005) maps this
-      // to a Detached actor input.
-      return noTranslation;
+      return { ...noTranslation, input: { _tag: 'Detached' } };
   }
 };

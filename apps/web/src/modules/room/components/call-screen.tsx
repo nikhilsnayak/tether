@@ -136,6 +136,7 @@ export function CallScreen({
   return (
     <div
       className='pointer-events-none relative z-40 h-svh overflow-hidden'
+      data-detached={view.detached ? 'true' : 'false'}
       data-room-remote-camera={remoteCameraState}
       data-room-remote-microphone={remoteMicrophoneState}
     >
