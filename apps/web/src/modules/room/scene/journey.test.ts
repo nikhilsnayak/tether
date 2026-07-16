@@ -112,8 +112,6 @@ describe('roomTransition', () => {
 
 describe('doorTransition', () => {
   it.each([
-    ['waiting', 'connecting'],
-    ['waiting', 'together'],
     ['outside', 'connecting'],
     ['outside', 'together'],
   ] as const)('admits for %s → %s', (previous, next) => {
@@ -128,8 +126,16 @@ describe('doorTransition', () => {
     ['connecting', 'stalled'],
     ['connecting', 'connecting'],
     ['together', 'waiting'],
+    ['waiting', 'together'],
   ] as const)('stays closed for %s → %s', (previous, next) => {
     expect(doorTransition(previous, next, false)).toEqual({ kind: 'none', durationMs: 0 });
+  });
+
+  it('stays closed while the host starts a room from media setup', () => {
+    expect(doorTransition('waiting', 'connecting', false)).toEqual({
+      kind: 'none',
+      durationMs: 0,
+    });
   });
 
   it('does not animate admission with reduced motion', () => {

@@ -57,6 +57,12 @@ const successfulAdmission = (previous: RoomJourneyCue, next: RoomJourneyCue) =>
   (previous === 'waiting' || previous === 'outside') &&
   (next === 'connecting' || next === 'together');
 
+// `waiting -> connecting` also occurs while a host creates a room after the
+// media setup button is pressed. Only an avatar that was actually outside
+// should drive the physical door animation.
+const successfulDoorAdmission = (previous: RoomJourneyCue, next: RoomJourneyCue) =>
+  previous === 'outside' && (next === 'connecting' || next === 'together');
+
 export function roomTransition(
   previous: RoomJourneyCue,
   next: RoomJourneyCue,
@@ -92,7 +98,7 @@ export function doorTransition(
   next: RoomJourneyCue,
   reducedMotion: boolean,
 ): DoorTransition {
-  return !reducedMotion && successfulAdmission(previous, next)
+  return !reducedMotion && successfulDoorAdmission(previous, next)
     ? { kind: 'admit', durationMs: ADMISSION_DURATION_MS }
     : { kind: 'none', durationMs: 0 };
 }

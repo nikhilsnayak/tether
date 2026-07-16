@@ -1,3 +1,4 @@
+import { isPlatformError } from '@tether/client-runtime/modules/peer-session';
 import { Effect } from 'effect';
 import { useEffect, useRef, useState } from 'react';
 
@@ -43,7 +44,7 @@ export function useMediaPreflight() {
       setStatus('ready');
     } catch (cause) {
       if (requestGeneration !== requestGenerationRef.current) return;
-      setError(cause);
+      setError(isPlatformError(cause) ? cause.cause : cause);
       setStatus('failed');
     }
   };
