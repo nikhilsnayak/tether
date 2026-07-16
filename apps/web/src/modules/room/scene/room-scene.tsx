@@ -102,7 +102,9 @@ export function RoomScene({
       data-room-remote-avatar={presentation.remote}
       data-room-avatar-sync={roomEventsReady ? 'ready' : 'unavailable'}
       data-room-display='idle'
-      className='bg-card absolute inset-0 touch-none overflow-hidden'
+      // isolate traps the drei Html labels' large z-index inside the scene so
+      // they cannot paint over the sibling entry/call overlays.
+      className='bg-card absolute inset-0 isolate touch-none overflow-hidden'
       aria-label={`${template.name} room scene`}
     >
       <Canvas
