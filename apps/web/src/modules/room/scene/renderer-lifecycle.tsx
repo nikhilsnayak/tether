@@ -61,10 +61,10 @@ export function RendererStatusObserver({
     const surface = surfaceRef.current;
     if (surface === null) return;
 
-    const backend = (renderer as Renderer).backend as RendererBackendStatus;
-    surface.dataset.roomRendererBackend = backend.isWebGPUBackend
+    const backend = (renderer as Renderer).backend as RendererBackendStatus | undefined;
+    surface.dataset.roomRendererBackend = backend?.isWebGPUBackend
       ? 'webgpu'
-      : backend.isWebGLBackend
+      : backend?.isWebGLBackend
         ? 'webgl'
         : 'unknown';
     surface.dataset.roomRendererReady = 'true';
