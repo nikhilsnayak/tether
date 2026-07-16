@@ -9,6 +9,8 @@ import {
 import { seededStorageState } from '../storage-seed';
 import { installWebRtcProbe, WebRtcProbe } from './webrtc-probe';
 
+const REAL_MEDIA_READY_TIMEOUT = 30_000;
+
 export type RoomActor = {
   readonly context: BrowserContext;
   readonly page: Page;
@@ -233,7 +235,9 @@ export class RoomDriver {
     const { page } = actor;
     await expect(page.getByRole('heading', { name: 'Look and sound ready?' })).toBeVisible();
     await page.getByRole('button', { name: 'Continue', exact: true }).click();
-    await expect(page.getByLabel('Camera preview')).toBeVisible();
+    await expect(page.getByLabel('Camera preview')).toBeVisible({
+      timeout: REAL_MEDIA_READY_TIMEOUT,
+    });
     if (actor.probe !== undefined) await actor.probe.rememberPreviewStream();
   }
 

@@ -2,6 +2,7 @@ import { expect, test, type Page } from './fixtures';
 import type { RoomActor } from './support/room-driver';
 
 const CI = !!process.env.CI;
+const REAL_RENDER_MEDIA_TIMEOUT = 30_000;
 
 const ROOM_CANVAS_KEY = '__tetherE2ERoomCanvas';
 
@@ -53,7 +54,9 @@ const localTrackEnabled = (page: Page, kind: 'audio' | 'video') =>
 
 const expectLocalAndRemoteMedia = async (page: Page) => {
   await expect(page.getByLabel('Local video preview')).toBeVisible();
-  await expect(page.getByLabel('Other person video')).toBeVisible();
+  await expect(page.getByLabel('Other person video')).toBeVisible({
+    timeout: REAL_RENDER_MEDIA_TIMEOUT,
+  });
   await expect
     .poll(() =>
       page.getByLabel('Other person video').evaluate((video: HTMLVideoElement) => video.muted),
@@ -186,9 +189,11 @@ test.describe('real room', { tag: '@gpu' }, () => {
     );
     await expect(guestPage.getByLabel('Other person camera unavailable')).toBeVisible();
     await hostPage.getByRole('button', { name: 'Turn camera on' }).click();
+    await expect.poll(() => localTrackEnabled(hostPage, 'video')).toBe(true);
     await expect(guestPage.locator('[data-room-remote-camera]')).toHaveAttribute(
       'data-room-remote-camera',
       'on',
+      { timeout: REAL_RENDER_MEDIA_TIMEOUT },
     );
 
     await expect.poll(() => localTrackEnabled(hostPage, 'audio')).toBe(true);
@@ -199,14 +204,16 @@ test.describe('real room', { tag: '@gpu' }, () => {
       'off',
     );
     await hostPage.getByRole('button', { name: 'Unmute microphone' }).click();
+    await expect.poll(() => localTrackEnabled(hostPage, 'audio')).toBe(true);
     await expect(guestPage.locator('[data-room-remote-microphone]')).toHaveAttribute(
       'data-room-remote-microphone',
       'on',
+      { timeout: REAL_RENDER_MEDIA_TIMEOUT },
     );
   });
 
   test('a departed peer can be replaced after a full-room rejection', async ({ room }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(180_000);
     const { host, guest, roomId } = await room.connect();
     let replacement = await room.createActor({ probeWebRtc: true });
 
