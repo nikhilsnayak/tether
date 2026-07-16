@@ -3,13 +3,13 @@ import { peerSessionEventSinkLayer, startPeerSession } from '@tether/client-runt
 import { Layer } from 'effect';
 import { Atom } from 'effect/unstable/reactivity';
 
-import { appClientLayer } from '@/lib/app-client';
+import { peerSessionSignalingLayer } from '@/lib/app-client';
 
 import { nativeCryptoLayer, nativePeerSessionPlatformLayer } from './platform';
 
 const peerSessionRuntime = Atom.runtime(
   Layer.mergeAll(
-    appClientLayer,
+    peerSessionSignalingLayer,
     nativePeerSessionPlatformLayer,
     peerSessionEventSinkLayer,
     nativeCryptoLayer,

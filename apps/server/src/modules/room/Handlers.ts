@@ -1,13 +1,13 @@
-import { RoomRpcs } from '@tether/contracts/modules/room';
+import { RoomRpcs, RoomSignalingRpcs } from '@tether/contracts/modules/room';
 import { Effect, Stream } from 'effect';
 
 import { RoomService } from './RoomService';
 
-export const RoomHandlers = RoomRpcs.toLayer(
+export const RoomSignalingHandlers = RoomSignalingRpcs.toLayer(
   Effect.gen(function* () {
     const room = yield* RoomService;
 
-    return RoomRpcs.of({
+    return RoomSignalingRpcs.of({
       OpenRoomSession: Effect.fnUntraced(function* (payload) {
         const events = yield* payload.intent === 'host'
           ? room.host(payload.selfId, payload.roomTemplateId)
@@ -15,9 +15,6 @@ export const RoomHandlers = RoomRpcs.toLayer(
 
         return events.pipe(Stream.map((event) => ({ event })));
       }, Stream.unwrap),
-      GetRoomMetadata: Effect.fnUntraced(function* ({ roomId }) {
-        return yield* room.getRoomMetadata(roomId);
-      }),
       RespondToJoin: Effect.fnUntraced(function* ({
         roomId,
         selfId,
@@ -40,6 +37,18 @@ export const RoomHandlers = RoomRpcs.toLayer(
       }),
       LeaveRoom: Effect.fnUntraced(function* ({ roomId, selfId, sessionToken }) {
         yield* room.leave(roomId, selfId, sessionToken);
+      }),
+    });
+  }),
+);
+
+export const RoomHandlers = RoomRpcs.toLayer(
+  Effect.gen(function* () {
+    const room = yield* RoomService;
+
+    return RoomRpcs.of({
+      GetRoomMetadata: Effect.fnUntraced(function* ({ roomId }) {
+        return yield* room.getRoomMetadata(roomId);
       }),
     });
   }),

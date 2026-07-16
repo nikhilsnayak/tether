@@ -18,7 +18,7 @@ import {
 import { Effect, Layer, Queue, Scope, Stream } from 'effect';
 import { TestClock } from 'effect/testing';
 
-import { AppClient } from '../../../AppClient';
+import { AppSignalingClient } from '../../../AppSignalingClient';
 import { webCrypto } from '../../../test/WebCrypto';
 import type { PeerSessionInput } from '../ActorModel';
 import {
@@ -70,9 +70,9 @@ export const roomOpened: PeerSessionEvent = {
 };
 
 export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness')(function* (
-  openRoomSession: AppClient['Service']['OpenRoomSession'] = (() =>
-    Stream.empty) as AppClient['Service']['OpenRoomSession'],
-  sendSignal?: AppClient['Service']['SendSignal'],
+  openRoomSession: AppSignalingClient['Service']['OpenRoomSession'] = (() =>
+    Stream.empty) as AppSignalingClient['Service']['OpenRoomSession'],
+  sendSignal?: AppSignalingClient['Service']['SendSignal'],
   overrides?: Partial<PeerSessionPlatform['Service']>,
   respondToJoinError?: NoPendingJoin | PeerNotInRoom,
 ) {
@@ -178,7 +178,7 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
       Effect.sync(() => operations.push(`sendDataChannelMessage:${message}`)),
   };
   const platform = PeerSessionPlatform.of({ ...basePlatform, ...overrides });
-  const respondToJoin = ((payload: Parameters<AppClient['Service']['RespondToJoin']>[0]) =>
+  const respondToJoin = ((payload: Parameters<AppSignalingClient['Service']['RespondToJoin']>[0]) =>
     Effect.sync(() => {
       respondToJoinPayloads.push(payload);
       operations.push(`respondToJoin:${payload.decision}`);
@@ -186,7 +186,7 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
       Effect.andThen(
         respondToJoinError === undefined ? Effect.void : Effect.fail(respondToJoinError),
       ),
-    )) as AppClient['Service']['RespondToJoin'];
+    )) as AppSignalingClient['Service']['RespondToJoin'];
 
   const signaling = PeerSessionSignaling.of({
     sendSignal: (signal) => {
@@ -227,12 +227,8 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
     webCrypto,
     Layer.succeed(PeerSessionPlatform, platform),
     Layer.succeed(
-      AppClient,
-      AppClient.of({
-        GetRoomMetadata: (() =>
-          Effect.succeed({
-            roomTemplateId: DUSK_SUITE_TEMPLATE_ID,
-          })) as AppClient['Service']['GetRoomMetadata'],
+      AppSignalingClient,
+      AppSignalingClient.of({
         LeaveRoom: () =>
           Effect.sync(() => {
             operations.push('leaveRoom');

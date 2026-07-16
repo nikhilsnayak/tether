@@ -15,7 +15,7 @@ import {
 } from '@tether/contracts/modules/room';
 import { Cause, Deferred, Effect, Exit, Option, Queue, Ref, Scope, Stream } from 'effect';
 
-import { AppClient } from '../../AppClient';
+import { AppSignalingClient } from '../../AppSignalingClient';
 import type { PeerSessionInput, PeerSessionLocalInputDispatch } from '../peer-session/ActorModel';
 import type { MediaStreamHandle, RoomSession } from '../peer-session/Model';
 import { makePeerSessionActor } from '../peer-session/PeerSession';
@@ -48,6 +48,9 @@ export interface PreparedMedia {
   readonly initialState?: MediaState;
 }
 
+/** Provides the private signaling RPC transport required by a peer session. */
+export const makePeerSessionSignalingLayer = (url: string) => AppSignalingClient.layer(url);
+
 /**
  * Hosts the serialized peer-session actor and owns its session-level resources.
  * Connection state transitions remain inside {@link makePeerSessionActor}.
@@ -56,7 +59,7 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
   session: RoomSession,
   preparedMedia?: PreparedMedia,
 ) {
-  const client = yield* AppClient;
+  const client = yield* AppSignalingClient;
   const platform = yield* PeerSessionPlatform;
   const peerSessionEventSink = yield* PeerSessionEventSink;
   const sessionScope = yield* Scope.Scope;

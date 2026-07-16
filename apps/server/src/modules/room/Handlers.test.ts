@@ -187,7 +187,7 @@ describe('RoomHandlers', () => {
   it.effect('returns RoomNotFound for metadata lookup on an unknown room', () =>
     Effect.gen(function* () {
       const harness = yield* makeRoomRpcTestHarness();
-      const error = yield* harness.client
+      const error = yield* harness.metadataClient
         .GetRoomMetadata({ roomId: RoomId.make('abc-defg-hij') })
         .pipe(Effect.flip);
       assert.instanceOf(error, RoomNotFound);

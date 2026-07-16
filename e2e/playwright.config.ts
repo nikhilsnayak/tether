@@ -72,7 +72,7 @@ export default defineConfig({
       cwd: '../apps/web',
       gracefulShutdown: { signal: 'SIGTERM', timeout: 5_000 },
       env: {
-        VITE_SERVER_URL: `ws://localhost:8008/rpc`,
+        VITE_SERVER_URL: `http://localhost:8008`,
       },
       url: `http://localhost:5173`,
       reuseExistingServer: !CI,

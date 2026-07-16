@@ -9,13 +9,13 @@ export default defineConfig({
       exclude: [
         'src/**/test/**',
         'src/**/index.ts',
-        'src/AppClient.ts',
+        'src/AppSignalingClient.ts',
         // Type-only domain models and Effect service interfaces have no
         // executable behavior for V8 to measure.
         'src/**/Model.ts',
         'src/**/ActorModel.ts',
         'src/**/Services.ts',
-        // Wires AppClient, platform services, scopes, and the actor together;
+        // Wires AppSignalingClient, platform services, scopes, and the actor together;
         // protocol translation is covered independently by Translation.test.ts.
         'src/modules/room/PeerSessionHost.ts',
       ],

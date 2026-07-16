@@ -1,5 +1,9 @@
-import { AppClient } from '@tether/client-runtime';
+import { makePeerSessionSignalingLayer } from '@tether/client-runtime/modules/room';
 
-const serverUrl = process.env.EXPO_PUBLIC_SERVER_URL ?? 'wss://tether-server.nikhilsnayak.dev/rpc';
+export const serverUrl =
+  process.env.EXPO_PUBLIC_SERVER_URL ?? 'https://tether-server.nikhilsnayak.dev';
 
-export const appClientLayer = AppClient.layer(serverUrl);
+const signalingUrl = new URL('/rpc/signaling', serverUrl);
+signalingUrl.protocol = signalingUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+
+export const peerSessionSignalingLayer = makePeerSessionSignalingLayer(signalingUrl.href);
