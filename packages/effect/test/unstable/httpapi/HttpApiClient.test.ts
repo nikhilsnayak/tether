@@ -2,7 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { strictEqual } from "@effect/vitest/utils"
 import { Cause, Effect, Schema, Stream } from "effect"
 import { Sse } from "effect/unstable/encoding"
-import { HttpClient, HttpClientError, HttpClientResponse } from "effect/unstable/http"
+import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { HttpApi, HttpApiClient, HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi"
 
 describe("HttpApiClient", () => {
@@ -25,6 +25,25 @@ describe("HttpApiClient", () => {
         const stream = yield* client.test.events({})
         const first = yield* stream.pipe(Stream.take(1), Stream.runCollect)
         assert.deepStrictEqual(first, [{ event: "first", data: "one" }])
+      }))
+
+    it.effect("keeps StreamSse parser state isolated between responses", () =>
+      Effect.gen(function*() {
+        const bodies = [
+          "event: first\ndata: one\n\n",
+          "event: second\ndata: two\n\n"
+        ]
+        let index = 0
+        const client = yield* HttpApiClient.makeWith(StreamingApi, {
+          baseUrl: "http://test",
+          httpClient: clientFromResponse(() => new Response(textStream([bodies[index++]!]), { status: 200 }))
+        })
+
+        const first = yield* client.test.events({}).pipe(Effect.flatMap(Stream.runCollect))
+        const second = yield* client.test.events({}).pipe(Effect.flatMap(Stream.runCollect))
+
+        assert.deepStrictEqual(first, [{ event: "first", data: "one" }])
+        assert.deepStrictEqual(second, [{ event: "second", data: "two" }])
       }))
 
     it.effect("decodes StreamSse reserved failure events as full causes", () =>
@@ -52,6 +71,29 @@ describe("HttpApiClient", () => {
         if (exit._tag === "Failure") {
           assert.deepStrictEqual(exit.cause, expectedCause)
         }
+      }))
+
+    it.effect("emits StreamSse reserved names with non-Cause data as user events", () =>
+      Effect.gen(function*() {
+        const failureEvent = Sse.encoder.write({
+          _tag: "Event",
+          event: "effect/httpapi/stream/failure",
+          id: undefined,
+          data: "not-json"
+        })
+
+        const client = yield* HttpApiClient.makeWith(StreamingApi, {
+          baseUrl: "http://test",
+          httpClient: clientFromResponse(() => new Response(textStream([failureEvent]), { status: 200 }))
+        })
+
+        const stream = yield* client.test.events({})
+        const events = yield* Stream.runCollect(stream)
+
+        assert.deepStrictEqual(events, [{
+          event: "effect/httpapi/stream/failure",
+          data: "not-json"
+        }])
       }))
 
     it.effect("returns StreamUint8Array response bytes incrementally", () =>
@@ -362,7 +404,71 @@ describe("HttpApiClient", () => {
 
       strictEqual(builder.health(), "https://api.example.com/v1/health")
     })
+
+    it("stores __proto__ identifiers as own properties", () => {
+      const Api = HttpApi.make("Api").add(
+        HttpApiGroup.make("__proto__").add(
+          HttpApiEndpoint.get("__proto__", "/proto")
+        )
+      )
+      const builder = HttpApiClient.urlBuilder(Api)
+
+      assert.isTrue(Object.hasOwn(builder, "__proto__"))
+      assert.isTrue(Object.hasOwn(builder["__proto__"], "__proto__"))
+      strictEqual(builder["__proto__"]["__proto__"](), "/proto")
+    })
   })
+
+  it.effect("stores __proto__ client identifiers as own properties", () =>
+    Effect.gen(function*() {
+      const Api = HttpApi.make("Api").add(
+        HttpApiGroup.make("__proto__").add(
+          HttpApiEndpoint.get("__proto__", "/proto")
+        )
+      )
+      const httpClient = clientFromResponse(() => new Response(null, { status: 204 }))
+      const client = yield* HttpApiClient.makeWith(Api, { httpClient })
+      const groupClient = yield* HttpApiClient.group(Api, {
+        group: "__proto__",
+        httpClient
+      })
+
+      assert.isTrue(Object.hasOwn(client, "__proto__"))
+      assert.isTrue(Object.hasOwn(client["__proto__"], "__proto__"))
+      assert.strictEqual(typeof client["__proto__"]["__proto__"], "function")
+      assert.isTrue(Object.hasOwn(groupClient, "__proto__"))
+      assert.strictEqual(typeof groupClient["__proto__"], "function")
+    }))
+
+  it.effect("applies transformClient to endpoint clients exactly once", () =>
+    Effect.gen(function*() {
+      const Api = HttpApi.make("Api").add(
+        HttpApiGroup.make("test").add(HttpApiEndpoint.get("health", "/health"))
+      )
+      let transformations = 0
+      const httpClient = HttpClient.make((request, url) =>
+        Effect.sync(() => {
+          strictEqual(url.toString(), "https://api.example.com/health")
+          return HttpClientResponse.fromWeb(request, new Response(null, { status: 204 }))
+        })
+      )
+      const health = yield* HttpApiClient.endpoint(Api, {
+        group: "test",
+        endpoint: "health",
+        httpClient,
+        transformClient: (client) => {
+          transformations++
+          return client.pipe(
+            HttpClient.mapRequest(HttpClientRequest.prependUrl("https://api.example.com"))
+          )
+        }
+      })
+
+      yield* health({ responseMode: "response-only" })
+      yield* health({ responseMode: "response-only" })
+
+      strictEqual(transformations, 1)
+    }))
 
   it.effect("encodes path parameters when executing requests", () =>
     Effect.gen(function*() {

@@ -15,6 +15,7 @@ import * as Cause from "../../Cause.ts"
 import type * as Context from "../../Context.ts"
 import * as Effect from "../../Effect.ts"
 import { identity } from "../../Function.ts"
+import * as internalRecord from "../../internal/record.ts"
 import * as Option from "../../Option.ts"
 import * as Predicate from "../../Predicate.ts"
 import * as Schema from "../../Schema.ts"
@@ -519,10 +520,14 @@ export const makeWith = <ApiId extends string, Groups extends HttpApiGroup.Const
     ...options,
     onGroup({ group }) {
       if (group.topLevel) return
-      client[group.identifier] = {}
+      internalRecord.set(client, group.identifier, {})
     },
     onEndpoint({ endpoint, endpointFn, group }) {
-      ;(group.topLevel ? client : client[group.identifier])[endpoint.identifier] = endpointFn
+      internalRecord.set(
+        group.topLevel ? client : client[group.identifier],
+        endpoint.identifier,
+        endpointFn
+      )
     }
   }).pipe(Effect.as(client)) as any
 }
@@ -560,7 +565,7 @@ export const group = <
     ...options,
     predicate: ({ group }) => group.identifier === options.group,
     onEndpoint({ endpoint, endpointFn }) {
-      client[endpoint.identifier] = endpointFn
+      internalRecord.set(client, endpoint.identifier, endpointFn)
     }
   }).pipe(Effect.map(() => client)) as any
 }
@@ -597,7 +602,9 @@ export const endpoint = <
     readonly group: GroupIdentifier
     readonly endpoint: EndpointIdentifier
     readonly httpClient: HttpClient.HttpClient.With<E, R>
-    readonly transformClient?: ((client: HttpClient.HttpClient) => HttpClient.HttpClient) | undefined
+    readonly transformClient?:
+      | ((client: HttpClient.HttpClient.With<E, R>) => HttpClient.HttpClient.With<E, R>)
+      | undefined
     readonly transformResponse?:
       | ((effect: Effect.Effect<unknown, unknown, unknown>) => Effect.Effect<unknown, unknown, unknown>)
       | undefined
@@ -607,6 +614,9 @@ export const endpoint = <
   let client: any = undefined
   return makeClient(api, {
     ...options,
+    httpClient: options.transformClient
+      ? options.transformClient(options.httpClient)
+      : options.httpClient,
     predicate: ({ endpoint, group }) => group.identifier === options.group && endpoint.identifier === options.endpoint,
     onEndpoint({ endpointFn }) {
       client = endpointFn
@@ -652,7 +662,7 @@ export const urlBuilder = <Api extends HttpApi.Constraint>(api: Api, options?: {
   HttpApi.reflect(api as unknown as HttpApi.Top, {
     onGroup({ group }) {
       if (group.topLevel) return
-      builder[group.identifier] = {}
+      internalRecord.set(builder, group.identifier, {})
     },
     onEndpoint({ group, endpoint }) {
       const makeUrl = compilePath(endpoint.path)
@@ -678,7 +688,11 @@ export const urlBuilder = <Api extends HttpApi.Constraint>(api: Api, options?: {
         const url = query === "" ? path : `${path}?${query}`
         return options?.baseUrl === undefined ? url : new URL(url, options.baseUrl.toString()).toString()
       }
-      ;(group.topLevel ? builder : builder[group.identifier])[endpoint.identifier] = endpointBuilder
+      internalRecord.set(
+        group.topLevel ? builder : builder[group.identifier],
+        endpoint.identifier,
+        endpointBuilder
+      )
     }
   })
 
@@ -801,47 +815,60 @@ function getStreamSuccessSchemas(endpoint: HttpApiEndpoint.Top): Array<HttpApiSc
 }
 
 function streamToResponse(streamSchema: HttpApiSchema.StreamSchema) {
+  const sse = HttpApiSchema.isStreamUint8Array(streamSchema)
+    ? undefined
+    : {
+      declaration: streamSchema,
+      decoder: makeSseDecoder(streamSchema)
+    }
   return (response: HttpClientResponse.HttpClientResponse) =>
     Effect.map(Effect.context<never>(), (context) =>
       Stream.provideContext(
-        HttpApiSchema.isStreamUint8Array(streamSchema) ?
+        sse === undefined ?
           response.stream :
-          decodeSseStream(response.stream, streamSchema),
+          decodeSseStream(response.stream, sse.declaration, sse.decoder),
         context as Context.Context<unknown>
       ))
 }
 
-function decodeSseStream(
-  stream: Stream.Stream<Uint8Array, HttpClientError.HttpClientError>,
+function makeSseDecoder(
   declaration: HttpApiSchema.StreamSse<Sse.EventCodec, Schema.Constraint, unknown>
-): Stream.Stream<unknown, unknown, unknown> {
+) {
   const Event = Schema.Union([
-    declaration.events,
     Schema.Struct({
       event: Schema.Literal(reservedStreamFailureEvent),
       data: Schema.fromJsonString(Schema.toCodecJson(Schema.Cause(declaration.error, Schema.Defect())))
-    })
+    }),
+    declaration.events
   ])
+  return Sse.decodeSchema(Event)
+}
+
+function decodeSseStream(
+  stream: Stream.Stream<Uint8Array, HttpClientError.HttpClientError>,
+  declaration: HttpApiSchema.StreamSse<Sse.EventCodec, Schema.Constraint, unknown>,
+  decoder: ReturnType<typeof makeSseDecoder>
+): Stream.Stream<unknown, unknown, unknown> {
   const events = Stream.transformPull(
     stream.pipe(
       Stream.decodeText,
-      Stream.pipeThroughChannel(Sse.decodeSchema(Event))
+      Stream.pipeThroughChannel(decoder)
     ),
     (pull) =>
       Effect.sync(() => {
-        let failureCause: Cause.Cause<unknown> | undefined = undefined
+        let pendingFailureCause: Cause.Cause<unknown> | undefined = undefined
         return Effect.suspend(() => {
-          if (failureCause) {
-            return Effect.failCause(failureCause)
+          if (pendingFailureCause !== undefined) {
+            return Effect.failCause(pendingFailureCause)
           }
           return Effect.flatMap(pull, (events) => {
             for (let i = 0; i < events.length; i++) {
               const event = events[i]
-              if (event.event === reservedStreamFailureEvent) {
+              if (event.event === reservedStreamFailureEvent && Cause.isCause(event.data)) {
                 if (i === 0) {
                   return Effect.failCause(event.data)
                 }
-                failureCause = event.data
+                pendingFailureCause = event.data
                 events = events.slice(0, i) as any
                 break
               }
