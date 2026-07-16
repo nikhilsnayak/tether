@@ -13,14 +13,10 @@ import {
   type PeerId,
   type SessionToken,
 } from '@tether/contracts/modules/room';
-import { Cause, Deferred, Effect, Exit, Option, Queue, Scope, Stream } from 'effect';
+import { Cause, Deferred, Effect, Exit, Option, Queue, Ref, Scope, Stream } from 'effect';
 
 import { AppClient } from '../../AppClient';
-import type {
-  PeerSessionInput,
-  PeerSessionLocalInput,
-  PeerSessionLocalInputDispatch,
-} from '../peer-session/ActorModel';
+import type { PeerSessionInput, PeerSessionLocalInputDispatch } from '../peer-session/ActorModel';
 import type { MediaStreamHandle, RoomSession } from '../peer-session/Model';
 import { makePeerSessionActor } from '../peer-session/PeerSession';
 import { GOOGLE_STUN_SERVERS, isPlatformError, type PlatformError } from '../peer-session/Platform';
@@ -80,9 +76,9 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
     readonly roomId: RoomId;
     readonly sessionToken: SessionToken;
   }>();
-  const localInputQueue = yield* Queue.unbounded<PeerSessionLocalInput>();
+  const mailbox = yield* Queue.unbounded<PeerSessionInput>();
   const dispatchLocalInput: PeerSessionLocalInputDispatch = (input) => {
-    Queue.offerUnsafe(localInputQueue, input);
+    Queue.offerUnsafe(mailbox, input);
   };
 
   const signaling = PeerSessionSignaling.of({
@@ -123,14 +119,6 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
     return translation.input === null ? Option.none() : Option.some(translation.input);
   });
 
-  const roomInputStream = client.OpenRoomSession(session).pipe(
-    Stream.mapEffect(({ event }) => translateRoomEvent(event)),
-    Stream.flatMap((input) => (Option.isSome(input) ? Stream.succeed(input.value) : Stream.empty)),
-    Stream.map((input) => input as PeerSessionInput),
-  );
-
-  const localInputStream = Stream.fromQueue(localInputQueue);
-
   yield* peerSessionEventSink.emit({ _tag: 'SessionStarted' });
   yield* peerSessionEventSink.emit({ _tag: 'LocalStreamReady', stream: localStream });
 
@@ -142,24 +130,40 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
     preparedMedia?.initialState ?? null,
   ).pipe(Effect.provideService(PeerSessionSignaling, signaling), Scope.provide(actorScope));
 
-  const actorLoop = Stream.merge(roomInputStream, localInputStream, {
-    haltStrategy: 'left',
-  }).pipe(Stream.runForEach(actor.handleInput));
+  const signalingExit = yield* Ref.make<Exit.Exit<void, unknown>>(Exit.void);
+  yield* client.OpenRoomSession(session).pipe(
+    Stream.mapEffect(({ event }) => translateRoomEvent(event)),
+    Stream.flatMap((input) => (Option.isSome(input) ? Stream.succeed(input.value) : Stream.empty)),
+    Stream.runForEach((input) => Queue.offer(mailbox, input)),
+    Effect.onExit((exit) =>
+      Ref.set(signalingExit, exit).pipe(
+        Effect.andThen(Queue.offer(mailbox, { _tag: 'SignalingEnded' })),
+        Effect.ignore,
+      ),
+    ),
+    Effect.forkScoped({ startImmediately: true }),
+  );
+
+  const actorLoop = Stream.fromQueue(mailbox).pipe(
+    Stream.mapEffect(actor.handleInput),
+    Stream.takeUntil((outcome) => outcome === 'stop'),
+    Stream.runDrain,
+  );
 
   yield* actorLoop.pipe(
     Effect.ensuring(Scope.close(actorScope, Exit.void)),
-    Effect.ensuring(Queue.shutdown(localInputQueue)),
+    Effect.ensuring(Queue.shutdown(mailbox)),
     Effect.onExit(
       Effect.fnUntraced(function* (exit) {
         yield* Scope.close(mediaScope, Exit.void);
+        const causeExit = Exit.isSuccess(exit) ? yield* Ref.get(signalingExit) : exit;
 
-        if (Exit.isSuccess(exit)) {
-          yield* Effect.logInfo('Signaling stream ended');
+        if (Exit.isSuccess(causeExit)) {
           return yield* peerSessionEventSink.emit({ _tag: 'SignalingDisconnected' });
         }
 
-        if (!Cause.hasInterruptsOnly(exit.cause)) {
-          const maybeError = Cause.findErrorOption(exit.cause);
+        if (!Cause.hasInterruptsOnly(causeExit.cause)) {
+          const maybeError = Cause.findErrorOption(causeExit.cause);
 
           if (Option.isSome(maybeError)) {
             const error = maybeError.value;
@@ -221,7 +225,7 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
             }
           }
 
-          yield* Effect.logError('Peer session failed', exit.cause);
+          yield* Effect.logError('Peer session failed', causeExit.cause);
           return yield* peerSessionEventSink.emit({ _tag: 'SessionFailed' });
         }
       }),
@@ -238,17 +242,17 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
 
   return {
     sendMessage: (message) =>
-      Queue.offerUnsafe(localInputQueue, {
+      Queue.offerUnsafe(mailbox, {
         _tag: 'SendMessage',
         message,
       }),
     sendAvatarPose: (pose) =>
-      Queue.offerUnsafe(localInputQueue, {
+      Queue.offerUnsafe(mailbox, {
         _tag: 'SendAvatarPose',
         pose,
       }),
     sendMediaState: (mediaState) =>
-      Queue.offerUnsafe(localInputQueue, {
+      Queue.offerUnsafe(mailbox, {
         _tag: 'SendMediaState',
         mediaState,
       }),

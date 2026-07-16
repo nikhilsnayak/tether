@@ -20,6 +20,7 @@ import { TestClock } from 'effect/testing';
 
 import { AppClient } from '../../../AppClient';
 import { webCrypto } from '../../../test/WebCrypto';
+import type { PeerSessionInput } from '../ActorModel';
 import {
   type DataChannelHandle,
   type IceServer,
@@ -31,7 +32,7 @@ import {
   type RoomSession,
 } from '../Model';
 import { makePeerSessionActor } from '../PeerSession';
-import { ROOM_EVENTS_CHANNEL_LABEL } from '../RoomEvents';
+import { type AvatarPose, type MediaState, ROOM_EVENTS_CHANNEL_LABEL } from '../RoomEvents';
 import { PeerSessionEventSink, PeerSessionPlatform, PeerSessionSignaling } from '../Services';
 
 interface TestPeerConnection {
@@ -274,14 +275,11 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
     () => {},
   ).pipe(Effect.provide(dependencies));
 
-  const actor = (input: unknown): Effect.Effect<void, unknown, Scope.Scope> => {
-    if (
-      typeof input === 'object' &&
-      input !== null &&
-      '_tag' in input &&
-      input._tag === 'RoomEvent'
-    ) {
-      const event = (input as unknown as { readonly event: RoomEvent }).event;
+  const actor = (
+    input: PeerSessionInput | { readonly _tag: 'RoomEvent'; readonly event: RoomEvent },
+  ): Effect.Effect<unknown, unknown, Scope.Scope> => {
+    if (input._tag === 'RoomEvent') {
+      const { event } = input;
       switch (event._tag) {
         case '@tether/RoomSessionOpenedEvent':
           return Effect.gen(function* () {
@@ -343,7 +341,7 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
           });
       }
     }
-    return peerActor.handleInput(input as never) as Effect.Effect<void, unknown, Scope.Scope>;
+    return peerActor.handleInput(input);
   };
 
   const roomEvent = Effect.fn('PeerSessionTestHarness.roomEvent')((event: RoomEvent) =>
@@ -432,17 +430,11 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
   const sendChat = Effect.fn('PeerSessionTestHarness.sendChat')((message: string) =>
     actor({ _tag: 'SendMessage', message }),
   );
-  const sendPose = Effect.fn('PeerSessionTestHarness.sendPose')(
-    (pose: {
-      readonly x: number;
-      readonly z: number;
-      readonly yaw: number;
-      readonly action: 'idle' | 'walk' | 'run';
-    }) => actor({ _tag: 'SendAvatarPose', pose }),
+  const sendPose = Effect.fn('PeerSessionTestHarness.sendPose')((pose: AvatarPose) =>
+    actor({ _tag: 'SendAvatarPose', pose }),
   );
   const sendMediaState = Effect.fn('PeerSessionTestHarness.sendMediaState')(
-    (mediaState: { readonly cameraOn: boolean; readonly microphoneOn: boolean }) =>
-      actor({ _tag: 'SendMediaState', mediaState }),
+    (mediaState: MediaState) => actor({ _tag: 'SendMediaState', mediaState }),
   );
   const advance = Effect.fn('PeerSessionTestHarness.advance')(
     (duration: Parameters<typeof TestClock.adjust>[0]) => TestClock.adjust(duration),

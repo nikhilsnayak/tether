@@ -6,6 +6,7 @@ import type {
   PeerConnectionGeneration,
   PeerSessionActorState,
   PeerSessionInput,
+  PeerSessionInputOutcome,
   PeerSessionLocalInputDispatch,
 } from './ActorModel';
 import {
@@ -56,7 +57,7 @@ const requireDescription = (description: SessionDescription, type: 'offer' | 'an
  * ```text
  * INPUTS                              SERIALIZED PROCESSOR
  * room session open -> remote input --------+
- * platform callback -> PlatformEvent -------+--> merged stream --> actor
+ * platform callback -> PlatformEvent -------+--> mailbox --> actor
  * room UI commands -------------------------+
  *
  * ACTOR OUTPUTS
@@ -895,7 +896,9 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     yield* flushOrRetryAvatarPose(peerConnection, dataChannel);
   });
 
-  const handleInput = Effect.fnUntraced(function* (input: PeerSessionInput) {
+  const dispatchInput = Effect.fnUntraced(function* (
+    input: Exclude<PeerSessionInput, { readonly _tag: 'SignalingEnded' }>,
+  ) {
     switch (input._tag) {
       case 'RoomSessionOpened':
         return yield* handleRoomSessionOpened(input.peerId);
@@ -936,6 +939,15 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       case 'SendMediaState':
         return yield* handleUiSendMediaState(input.mediaState);
     }
+  });
+
+  const handleInput = Effect.fnUntraced(function* (input: PeerSessionInput) {
+    if (input._tag === 'SignalingEnded') {
+      yield* Effect.logInfo('Signaling stream ended');
+      return 'stop' satisfies PeerSessionInputOutcome;
+    }
+    yield* dispatchInput(input);
+    return 'continue' satisfies PeerSessionInputOutcome;
   });
 
   return { handleInput };

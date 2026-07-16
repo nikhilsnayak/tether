@@ -91,4 +91,13 @@ export type PeerSessionRemoteInput =
       readonly signal: PeerSessionSignal;
     };
 
-export type PeerSessionInput = PeerSessionRemoteInput | PeerSessionLocalInput;
+/** Enqueued by the signaling pump as its final act; the actor decides what it means. */
+export type PeerSessionSignalingEnded = { readonly _tag: 'SignalingEnded' };
+
+export type PeerSessionInput =
+  | PeerSessionRemoteInput
+  | PeerSessionLocalInput
+  | PeerSessionSignalingEnded;
+
+/** 'stop' ends the host drain loop; 'continue' keeps it running. */
+export type PeerSessionInputOutcome = 'continue' | 'stop';

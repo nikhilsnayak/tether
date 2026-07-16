@@ -28,6 +28,29 @@ import {
 } from './test/PeerSessionTestHarness';
 
 describe('startPeerSession', () => {
+  it.effect('stops when signaling ends', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makePeerSessionTestHarness();
+
+        assert.strictEqual(yield* fixture.actor({ _tag: 'SignalingEnded' }), 'stop');
+      }),
+    ),
+  );
+
+  it.effect('continues after an ordinary input', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makePeerSessionTestHarness();
+
+        assert.strictEqual(
+          yield* fixture.actor({ _tag: 'RoomSessionOpened', peerId: null }),
+          'continue',
+        );
+      }),
+    ),
+  );
+
   it.effect('uses the Google public STUN server for peer connection acquisition', () =>
     Effect.scoped(
       Effect.gen(function* () {
