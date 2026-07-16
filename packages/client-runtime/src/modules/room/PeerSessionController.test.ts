@@ -13,6 +13,8 @@ const peerId = PeerId.make('bbbbbbbbbbbb');
 const pose = { x: 1, z: 2, yaw: 0, action: 'walk' } as const;
 const mediaState = { cameraOn: true, microphoneOn: false } as const;
 
+const flushNotifications = Effect.promise(() => Promise.resolve());
+
 const makeSession = (queued = true) => {
   const calls: Array<unknown> = [];
   const session: PeerSession = {
@@ -109,6 +111,7 @@ describe('PeerSessionController', () => {
       yield* binding.activate(first.session).pipe(Scope.provide(scope));
       const error = yield* binding.activate(second.session).pipe(Effect.flip, Scope.provide(scope));
       assert.instanceOf(error, PeerSessionControllerAlreadyActive);
+      yield* flushNotifications;
       assert.deepStrictEqual(snapshots, [true]);
       assert.strictEqual(binding.controller.sendMessage('still first'), 'queued');
       assert.deepStrictEqual(first.calls, [['sendMessage', 'still first']]);
@@ -118,7 +121,7 @@ describe('PeerSessionController', () => {
     }),
   );
 
-  it.effect('publishes activation and scope-bound deactivation synchronously', () =>
+  it.effect('updates the snapshot synchronously and notifies on a microtask', () =>
     Effect.gen(function* () {
       const scope = yield* Scope.make();
       const binding = makePeerSessionControllerBinding();
@@ -126,10 +129,30 @@ describe('PeerSessionController', () => {
       binding.subscribe(() => snapshots.push(binding.getSnapshot()));
 
       yield* binding.activate(makeSession().session).pipe(Scope.provide(scope));
+      assert.isTrue(binding.getSnapshot());
+      assert.deepStrictEqual(snapshots, []);
+      yield* flushNotifications;
       assert.deepStrictEqual(snapshots, [true]);
 
       yield* Scope.close(scope, Exit.void);
+      assert.isFalse(binding.getSnapshot());
+      yield* flushNotifications;
       assert.deepStrictEqual(snapshots, [true, false]);
+    }),
+  );
+
+  it.effect('coalesces publishes within one microtask into a single notification', () =>
+    Effect.gen(function* () {
+      const scope = yield* Scope.make();
+      const binding = makePeerSessionControllerBinding();
+      const snapshots: Array<boolean> = [];
+      binding.subscribe(() => snapshots.push(binding.getSnapshot()));
+
+      yield* binding.activate(makeSession().session).pipe(Scope.provide(scope));
+      yield* Scope.close(scope, Exit.void);
+      yield* flushNotifications;
+
+      assert.deepStrictEqual(snapshots, [false]);
     }),
   );
 
@@ -144,6 +167,7 @@ describe('PeerSessionController', () => {
       unsubscribe();
       yield* binding.activate(makeSession().session).pipe(Scope.provide(scope));
       yield* Scope.close(scope, Exit.void);
+      yield* flushNotifications;
 
       assert.deepStrictEqual(snapshots, []);
     }),
@@ -158,11 +182,15 @@ describe('PeerSessionController', () => {
 
       const firstScope = yield* Scope.make();
       yield* binding.activate(makeSession().session).pipe(Scope.provide(firstScope));
+      yield* flushNotifications;
       yield* Scope.close(firstScope, Exit.void);
+      yield* flushNotifications;
 
       const secondScope = yield* Scope.make();
       yield* binding.activate(makeSession().session).pipe(Scope.provide(secondScope));
+      yield* flushNotifications;
       yield* Scope.close(secondScope, Exit.void);
+      yield* flushNotifications;
 
       assert.strictEqual(binding.controller, controller);
       assert.deepStrictEqual(snapshots, [true, false, true, false]);

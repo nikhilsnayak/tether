@@ -36,10 +36,19 @@ export interface PeerSessionControllerBinding {
 export const makePeerSessionControllerBinding = (): PeerSessionControllerBinding => {
   let activeSession: PeerSession | null = null;
   const listeners = new Set<() => void>();
+  let publishScheduled = false;
 
+  // Activation can run inside a React render (suspense evaluates the session
+  // atom while rendering), so the snapshot mutates synchronously but listener
+  // notification is deferred to a microtask.
   const publish = () => {
-    const currentListeners = Array.from(listeners);
-    for (const listener of currentListeners) listener();
+    if (publishScheduled) return;
+    publishScheduled = true;
+    void Promise.resolve().then(() => {
+      publishScheduled = false;
+      const currentListeners = Array.from(listeners);
+      for (const listener of currentListeners) listener();
+    });
   };
 
   const getSnapshot = () => activeSession !== null;
