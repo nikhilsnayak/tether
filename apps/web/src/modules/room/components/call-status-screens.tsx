@@ -186,7 +186,7 @@ export function SessionAcquisitionErrorScreen({
       pillLabel='Failed'
       icon={<AlertTriangle className='size-9' />}
       iconClassName='bg-destructive/15 text-destructive'
-      label='Could not join'
+      label='Could not start the session'
       hint={message}
       action={
         <Button variant='secondary' onClick={onRestartMediaSetup}>
