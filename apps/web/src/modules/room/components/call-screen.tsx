@@ -92,6 +92,9 @@ export function CallScreen({
     journey !== 'departed' &&
     journey !== 'ended' &&
     (journey !== 'together' || !remoteVideoAvailable);
+  // Terminal journeys own a full-screen modal and outside owns its own card, so
+  // the live call dock only belongs while actually in the room.
+  const showCallDock = journey !== 'outside' && journey !== 'departed' && journey !== 'ended';
   const remoteCameraState = mediaStateAttribute(view.remoteMediaState?.cameraOn ?? null);
   const remoteMicrophoneState = mediaStateAttribute(view.remoteMediaState?.microphoneOn ?? null);
 
@@ -296,7 +299,7 @@ export function CallScreen({
           </section>
         )}
       </div>
-      {journey !== 'outside' && (
+      {showCallDock && (
         <div className='pointer-events-auto'>
           <CallControlsToolbar
             micOn={micOn}

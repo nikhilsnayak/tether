@@ -14,7 +14,11 @@ export const avatarPresentation = (
   intent: RoomSession['intent'],
   journey: RoomJourneyCue,
 ): AvatarPresentation => {
-  const localLocation = intent === 'join' && journey === 'outside' ? 'outside' : 'inside';
+  // A guest is only ever inside once admitted; 'outside' (awaiting/declined
+  // knock) and 'ended' (denied, expired, or a terminated call) both keep them
+  // out, so a declined knock never drives the avatar into the room.
+  const guestOutside = journey === 'outside' || journey === 'ended';
+  const localLocation = intent === 'join' && guestOutside ? 'outside' : 'inside';
   if (journey === 'together') return { local: 'present', localLocation, remote: 'present' };
   if (journey === 'reconnecting') {
     return { local: 'present', localLocation, remote: 'reconnecting' };

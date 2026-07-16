@@ -11,6 +11,7 @@ describe('avatar presentation', () => {
     ['join', 'reconnecting', 'inside', 'reconnecting'],
     ['join', 'departed', 'inside', 'absent'],
     ['host', 'ended', 'inside', 'absent'],
+    ['join', 'ended', 'outside', 'absent'],
   ] as const)('%s / %s places local %s and remote %s', (intent, journey, localLocation, remote) => {
     expect(avatarPresentation(intent, journey)).toEqual({
       local: 'present',

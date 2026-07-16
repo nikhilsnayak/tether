@@ -62,6 +62,7 @@ export function RoomScene({
   const activeJourney = journey ?? 'waiting';
   const [spatialJourney, setSpatialJourney] = useState(activeJourney);
   const presentation = avatarPresentation(sessionIntent, spatialJourney);
+  const cameraOutside = presentation.localLocation === 'outside';
   const controlsEnabled =
     presentation.localLocation === 'inside' &&
     activeJourney !== 'ended' &&
@@ -117,7 +118,7 @@ export function RoomScene({
           const framing = selectCameraFraming(
             size.width,
             size.height,
-            activeJourney === 'outside',
+            cameraOutside,
             template.camera,
           );
           camera.position.set(...framing.position);
@@ -138,7 +139,7 @@ export function RoomScene({
           poseRef={localPoseRef}
           reducedMotion={reducedMotion}
           surfaceRef={surfaceRef}
-          journey={spatialJourney}
+          outside={cameraOutside}
           recenterSignal={recenterSignal}
         />
         <LocalAvatarController
