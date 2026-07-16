@@ -48,7 +48,8 @@ export function DisclaimerGate({ children }: { readonly children: ReactNode }) {
         <div className='text-muted-foreground space-y-4 text-sm leading-6'>
           <p>Tether is an experimental project, provided as-is and without warranty of any kind.</p>
           <p>
-            Calls are peer-to-peer and encrypted. The operator cannot see call content and keeps no
+            The server coordinates admission and connection setup, then disconnects after a call
+            becomes direct. Call content is peer-to-peer and encrypted, and the operator keeps no
             call history.
           </p>
           <p>

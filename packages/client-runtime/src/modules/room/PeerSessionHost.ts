@@ -49,7 +49,7 @@ export interface PeerSession {
   readonly sendMediaState: (mediaState: MediaState) => boolean;
   /** Host admits or rejects a knocking joiner. */
   readonly respondToJoin: (peerId: PeerId, decision: 'allow' | 'deny') => Promise<void>;
-  /** Explicitly releases room membership before the client tears down its transport. */
+  /** Notifies the peer directly after detachment; otherwise releases server membership. */
   readonly leave: () => Promise<void>;
 }
 
@@ -67,7 +67,7 @@ export class PeerSessionSignalingTransport extends Context.Service<
   }
 >()('@tether/client-runtime/peer-session/PeerSessionSignalingTransport') {}
 
-/** Configures a fresh private signaling transport for each peer session. */
+/** Configures a fresh signaling transport that each peer session owns and can close. */
 export const makePeerSessionSignalingLayer = (url: string) =>
   Layer.succeed(PeerSessionSignalingTransport, {
     acquire: Effect.suspend(() =>
@@ -79,7 +79,9 @@ export const makePeerSessionSignalingLayer = (url: string) =>
 
 /**
  * Hosts the serialized peer-session actor and owns its session-level resources.
- * Connection state transitions remain inside {@link makePeerSessionActor}.
+ * Signaling has a child scope that closes on detachment while actor, media, and
+ * WebRTC resources remain owned by the parent session scope. Connection state
+ * transitions remain inside {@link makePeerSessionActor}.
  */
 export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSession')(function* (
   session: RoomSession,

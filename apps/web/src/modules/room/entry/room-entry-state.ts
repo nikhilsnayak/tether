@@ -15,7 +15,7 @@ export function roomEntryReducer(state: RoomEntryState, event: RoomEntryEvent): 
     case 'MediaPrepared':
       // Prepared media is a linear resource claimed exactly once. A second
       // preparation must not silently replace the first; the dispatch site
-      // releases the rejected selection once Plan 012 adds that capability.
+      // releases any selection that loses this transition race.
       return state._tag === 'MediaSetup'
         ? { _tag: 'SessionRequested', preparedMedia: event.preparedMedia }
         : state;

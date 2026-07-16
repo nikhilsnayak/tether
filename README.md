@@ -7,11 +7,11 @@
 <p align="center">
   A private, account-free room for two people.
   <br />
-  Meet as avatars in a shared space while video, audio, and chat stay direct between peers.
+  Talk, chat, and share a small spatial room over a direct peer-to-peer connection.
 </p>
 
 <p align="center">
-  <a href="https://tether.nikhilsnayak.dev"><strong>Enter Tether</strong></a>
+  <a href="https://tether.nikhilsnayak.dev"><strong>Open Tether</strong></a>
   ·
   <a href="https://github.com/nikhilsnayak/tether/issues">Report an issue</a>
 </p>
@@ -21,148 +21,126 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-f06a32" alt="MIT license" /></a>
 </p>
 
-> [!NOTE]
-> Tether is an experimental production beta. Web and desktop provide the full spatial-room
-> experience. The Android development build uses the same room, admission, WebRTC, and chat
-> foundations with a native call interface; it does not currently render or control the 3D room.
+Tether is an experimental two-person calling app. A host creates a short-lived room, shares the
+link, and decides whether to admit the person who knocks. Once the WebRTC connection is ready, the
+call detaches from Tether's signaling server and continues directly between the two devices.
 
-## What Tether is
+Web and desktop place both people in a lightweight 3D room. The native app provides the same
+admission, calling, and chat flow with a conventional call interface.
 
-Tether is a private social room, not a conference grid. A host creates one short-lived room and
-shares its code with one other person. The guest arrives outside a closed door and must knock.
-Only after the host allows them does the door open, the peer connection begin, and both people
-appear inside the same room.
+## What is available today
 
-On web and desktop, each caller owns a visible avatar and moves only that avatar. Video is still
-available, but it lives in two draggable utility tiles instead of replacing the people or taking
-over the room. The wall display is deliberately idle groundwork for future shared activities.
+- **Private rooms for two.** There are no accounts, contact lists, scheduled meetings, recordings,
+  or stored messages.
+- **Host-approved entry.** A guest waits outside until the host accepts or declines the knock.
+- **Direct audio, video, and room events.** Media, chat, avatar poses, and camera/microphone state
+  travel over WebRTC.
+- **Detached signaling.** After both peers confirm the current connection is usable, each client
+  closes its signaling WebSocket. The web app shows a quiet `Direct` indicator at that point.
+- **A shared spatial room on web and desktop.** Each person controls an avatar while camera feeds
+  remain in movable utility tiles.
+- **Connection safety codes.** Both people can compare a code derived from the negotiated DTLS
+  fingerprints to check that they see the same connection.
 
-There are no accounts, contact lists, meetings, recordings, or stored messages. The signaling
-server coordinates admission and connection setup; live media and room activity use WebRTC
-between the two callers.
+## How a call works
 
-## Current experience
-
-- **A real admission threshold.** A guest waits outside the same closed room until the host
-  explicitly allows or denies the knock. Denial, reconnecting, and transport negotiation do not
-  open the door.
-- **Two peer-owned avatars.** Both callers have lightweight procedural bodies in Dusk Suite. Each
-  browser controls its own position and observes the other peer's synchronized pose. Movement is
-  bounded by the room and avatars behave as soft obstacles to one another.
-- **Third-person room controls.** Use WASD or the arrow keys to move and turn, drag to orbit, scroll
-  or pinch to zoom, and press R to recenter. Touch browsers receive accessible on-screen controls.
-- **Video as a utility, not an identity.** Local and remote camera feeds remain separate draggable
-  tiles. Turning a camera off changes its tile to a placeholder but leaves the corresponding avatar
-  in the room.
-- **Direct room events.** Chat, avatar poses, and explicit camera/microphone state share one bounded,
-  ordered WebRTC data channel. Pose traffic is rate-limited so it cannot build an unbounded queue.
-- **Host-controlled rooms for two.** Multiple people may knock, but the host can admit only one
-  guest. Pending and withdrawn requests are cleaned up automatically.
-- **Verifiable safety codes.** Both callers can compare a code derived from the negotiated DTLS
-  fingerprints to detect signaling-path fingerprint substitution.
-- **Resilient peer sessions.** Tether rejects stale signaling, recovers failed negotiations, freezes
-  remote spatial state during reconnect, and keeps media independent from room-event channel loss.
-- **Local rendering quality.** Each web/desktop caller can choose a quality tier, with automatic
-  quality reduction when sustained frame rate drops.
-
-## Platform status
-
-| Platform | Current experience                                                                                                 |
-| -------- | ------------------------------------------------------------------------------------------------------------------ |
-| Web      | Full Dusk Suite, two avatars, movement, draggable video tiles, chat, admission, and media controls                 |
-| Desktop  | Electron shell around the web experience, Linux packaging, and `tether://` room links                              |
-| Android  | Expo development build with native admission, WebRTC media, chat, and Android App Links; no 3D avatar gameplay yet |
-
-## Privacy, security, and limits
-
-Tether separates coordination from call content:
-
-- The server relays room membership, admission, SDP, and ICE signaling. It does not receive decoded
-  camera, microphone, chat, avatar-pose, or media-state content.
-- Audio, video, chat, avatar poses, and media state are encrypted by WebRTC and travel between the
-  two callers.
-- Rooms, pending knocks, and signaling state live in server memory and disappear when members leave
-  or the server restarts. There is no account, message, or call-history database.
-- Private session tokens authorize admission decisions, signaling, and departure after a caller
-  opens a room session.
-- The server validates RPC payloads, rate-limits signaling per member, and caps live rooms.
-- A guest's display name is an unverified, ephemeral claim shown to the host during admission.
-
-The safety code helps only when both callers compare it over a separate trusted channel, such as
-reading it aloud. It cannot protect a compromised browser, device, or client build.
-
-Tether currently uses Google's public STUN service and has no TURN relay. Calls succeed only when
-the two networks permit a direct WebRTC path. Signaling is single-process and in-memory, so active
-rooms end on server restart and multiple server replicas require shared state or deterministic room
-affinity.
-
-Tether is provided as-is without a warranty or uptime commitment. See
-[Terms & Acceptable Use](https://tether.nikhilsnayak.dev/terms). To report abuse, email
-[nikhilsnayak3473@gmail.com](mailto:nikhilsnayak3473@gmail.com) or
-[open an issue](https://github.com/nikhilsnayak/tether/issues). Include the room code and an
-approximate time; because Tether stores no call history, enforcement is necessarily forward-looking.
-
-## How it works
-
-```mermaid
-flowchart LR
-    H[Host] <-->|Effect RPC over WebSocket<br/>admission and signaling| S[Signaling server]
-    G[Guest] <-->|Effect RPC over WebSocket<br/>admission and signaling| S
-    H <-->|Encrypted WebRTC<br/>media + room events| G
-```
-
-The signaling server never decides where an avatar is or transports call content. After admission,
-each client owns its local media and avatar state. A serialized peer-session actor negotiates the
-connection and carries three types of room events over `room-events-v1`:
-
-```mermaid
-flowchart LR
-    I[Keyboard / touch input] --> A[Local avatar simulation]
-    A -->|capped pose snapshots| D[WebRTC room-events-v1]
-    C[Chat UI] --> D
-    M[Camera / microphone controls] --> D
-    D --> R[Remote interpolation and UI state]
-```
-
-Admission remains a server-authorized transition before WebRTC setup:
+The server is involved in finding and admitting a peer, then in exchanging the information WebRTC
+needs to connect. It is not kept in the path for the rest of a successful call.
 
 ```mermaid
 sequenceDiagram
-    participant H as Host inside room
-    participant S as Signaling server
-    participant G as Guest outside door
+    participant H as Host
+    participant S as Tether server
+    participant G as Guest
 
-    H->>S: Create ephemeral room
-    S-->>H: Room code + private session token
-    G->>S: Knock with room code and display name
-    S-->>H: Join requested
-    H->>S: Allow or deny
-    alt allowed and room still available
-        S-->>G: Admitted + private session token
-        S-->>H: Peer joined
-        H->>G: WebRTC offer and ICE through signaling relay
-        G->>H: WebRTC answer and ICE through signaling relay
-        G->>H: Encrypted media and room events directly
-    else denied, withdrawn, timed out, or room filled
-        S-->>G: Join rejected
-    end
+    H->>S: Create room
+    G->>S: Knock
+    H->>S: Accept or decline
+    H<<->>S: SDP and ICE over signaling WebSocket
+    G<<->>S: SDP and ICE over signaling WebSocket
+    H<<->>G: Encrypted WebRTC media and room events
+    H->>S: Ready to detach
+    G->>S: Ready to detach
+    S-->>H: Detached
+    S-->>G: Detached
+    Note over H,G: Both clients close their signaling WebSockets
+    H<<->>G: Call continues directly
 ```
 
-The Bun server exposes Effect RPC over WebSocket. Its in-memory room registry is serialized through
-one `SynchronizedRef`, and every host, admitted member, and pending guest owns an event queue. The
-pending guest's queue is reused at admission so immediate signaling cannot be lost during the
-waiting-to-connected transition.
+The server exposes two RPC transports:
 
-On the client, server events, WebRTC callbacks, timers, data-channel messages, and UI commands enter
-one React-free, platform-neutral peer-session actor. Web, desktop, and mobile provide thin platform
-adapters around that runtime.
+- `/rpc` uses HTTP for ordinary request/response work such as room metadata.
+- `/rpc/signaling` uses WebSocket for ordered admission and WebRTC signaling events. Each peer
+  session owns this connection and closes it after detachment.
 
-Every room carries an ephemeral template ID. Web and desktop resolve it against a bundled registry
-and render Dusk Suite locally using React Three Fiber and Three.js. Geometry, lighting, camera
-tuning, walkable bounds, role spawns, and avatars are procedural; no model or environment asset is
-fetched at runtime.
+On the client, WebRTC callbacks, server events, timers, data-channel messages, and UI commands are
+serialized through a platform-neutral peer-session actor. Web, desktop, and mobile supply their own
+media and WebRTC adapters around that runtime.
 
-## Quick start
+The `room-events-v1` data channel carries bounded, schema-validated events for chat, avatar poses,
+media state, detachment coordination, and departure. Pose updates are rate-limited so they cannot
+build an unbounded queue.
+
+## The room experience
+
+On web and desktop, callers meet as two procedural avatars in the Dusk Suite. Each browser owns its
+local avatar and receives the other person's pose over the data channel. Movement stays within the
+room, and the avatars act as soft obstacles to each other.
+
+Video remains separate from the avatars in two draggable tiles. Turning a camera off changes the
+tile to a placeholder without removing the avatar. The wall display is currently idle and reserved
+for a future shared activity.
+
+| Input         | Action              |
+| ------------- | ------------------- |
+| W / Up        | Walk forward        |
+| S / Down      | Walk backward       |
+| A / Left      | Turn left           |
+| D / Right     | Turn right          |
+| R             | Recenter the camera |
+| Pointer drag  | Orbit the camera    |
+| Wheel / pinch | Zoom                |
+
+Touch browsers also receive on-screen movement controls. Rendering quality can be selected
+manually or left on automatic, which lowers quality after a sustained frame-rate drop.
+
+## Platform status
+
+| Platform | Status                                                                                      |
+| -------- | ------------------------------------------------------------------------------------------- |
+| Web      | Full spatial room, admission, audio/video, chat, safety codes, and media controls           |
+| Desktop  | Electron shell around the web app, Linux `.deb` packaging, and `tether://` room links       |
+| Mobile   | Expo development build with native admission, audio/video, chat, and deep links; no 3D room |
+
+## Privacy and current limits
+
+Tether keeps call content separate from coordination:
+
+- The server handles room membership, admission, SDP, ICE, and detachment readiness.
+- Audio, video, chat, avatar poses, and media state are encrypted by WebRTC and sent between peers.
+- Rooms, pending knocks, and signaling state live only in server memory. There is no account,
+  message, recording, or call-history database.
+- Private session tokens authorize admission decisions, signaling, and departure.
+- RPC payloads are schema-validated. The server rate-limits signaling and caps live rooms.
+- A guest's display name is an unverified, temporary claim shown during admission.
+
+Detachment is intentionally one-way. After a call becomes direct, the room cannot admit a
+replacement peer and the server cannot reconnect the call if the peer-to-peer connection later
+fails. Either person leaving is communicated over the existing data channel.
+
+The safety code is useful only when both people compare it over a separate trusted channel, such as
+reading it aloud. It does not protect a compromised browser, device, or client build.
+
+Tether currently uses Google's public STUN service and does not provide a TURN relay. Calls work
+only when both networks permit a direct WebRTC path. Before detachment, signaling is single-process
+and in-memory; a server restart ends rooms that are still connecting.
+
+The service is provided as-is, without an uptime commitment. See
+[Terms & Acceptable Use](https://tether.nikhilsnayak.dev/terms). To report abuse, email
+[nikhilsnayak3473@gmail.com](mailto:nikhilsnayak3473@gmail.com) or
+[open an issue](https://github.com/nikhilsnayak/tether/issues).
+
+## Run locally
 
 ### Requirements
 
@@ -177,25 +155,12 @@ cp apps/web/.env.example apps/web/.env
 bun run dev --filter=server --filter=web
 ```
 
-Open `http://localhost:5173` in two tabs or browsers. Create a room and complete media setup in the
-first, then open its invite in the second and knock. The guest stays outside until the host allows
-the request. Localhost counts as a secure browser context for media and graphics APIs.
+Open `http://localhost:5173` in two tabs or browsers. Create a room in the first, open its invite in
+the second, and knock. Localhost is treated as a secure context for browser media and graphics APIs.
 
-Once inside on web/desktop:
-
-| Input         | Action              |
-| ------------- | ------------------- |
-| W / Up        | Walk forward        |
-| S / Down      | Walk backward       |
-| A / Left      | Turn left           |
-| D / Right     | Turn right          |
-| R             | Recenter the camera |
-| Pointer drag  | Orbit the camera    |
-| Wheel / pinch | Zoom                |
+No database, object storage, or additional local service is required.
 
 ## Configuration
-
-The local setup needs no database, object storage, or additional service.
 
 ### Server
 
@@ -204,24 +169,21 @@ The local setup needs no database, object storage, or additional service.
 | `HOST`   | `0.0.0.0` | HTTP server bind address       |
 | `PORT`   | `8008`    | HTTP and WebSocket server port |
 
-ICE discovery is fixed to `stun:stun.l.google.com:19302`. There is currently no configurable TURN
-service or server-side ICE list.
+ICE discovery currently uses `stun:stun.l.google.com:19302`. The ICE server list is not yet
+configurable.
 
-### Web
+### Web and desktop
 
-| Variable          | Default                   | Purpose                           |
-| ----------------- | ------------------------- | --------------------------------- |
-| `VITE_SERVER_URL` | `ws://localhost:8008/rpc` | Signaling RPC WebSocket URL       |
-| `VITE_WEB_URL`    | current web origin        | Base URL for shareable room links |
+| Variable          | Default                        | Purpose                             |
+| ----------------- | ------------------------------ | ----------------------------------- |
+| `VITE_SERVER_URL` | `http://localhost:8008` on web | HTTP(S) origin of the Tether server |
+| `VITE_WEB_URL`    | Current web origin             | Base URL used for room invitations  |
 
-Production deployments require HTTPS and a matching `wss://` signaling URL. The room requires
-WebGL2; Three.js uses WebGPU when available and falls back to WebGL2. Unsupported browsers stop at a
-compatibility screen before media setup.
+Clients derive HTTP `/rpc` and WebSocket `/rpc/signaling` endpoints from `VITE_SERVER_URL`.
+Production therefore uses an `https://` server origin; the client derives `wss://` for signaling.
 
-### Desktop
-
-Desktop reuses the web renderer and accepts the same build variables. Its checked-in example points
-at the hosted deployment and can be overridden in `apps/desktop/.env`.
+Desktop reuses the web renderer. Its checked-in example points to the hosted service and can be
+overridden in `apps/desktop/.env`.
 
 ```sh
 cd apps/desktop
@@ -229,16 +191,16 @@ cp .env.example .env
 bun run dev
 ```
 
-`bun run package` creates a Linux `.deb`. Installed builds handle `tether://room/<id>` deep links.
+`bun run package` creates a Linux `.deb`. Installed builds handle `tether://room/<id>` links.
 
-### Android
+### Mobile
 
-| Variable                 | Default                                    | Purpose                        |
-| ------------------------ | ------------------------------------------ | ------------------------------ |
-| `EXPO_PUBLIC_SERVER_URL` | `wss://tether-server.nikhilsnayak.dev/rpc` | Signaling RPC WebSocket URL    |
-| `EXPO_PUBLIC_WEB_URL`    | `https://tether.nikhilsnayak.dev`          | Web origin for shareable links |
+| Variable                 | Default                                  | Purpose                              |
+| ------------------------ | ---------------------------------------- | ------------------------------------ |
+| `EXPO_PUBLIC_SERVER_URL` | `https://tether-server.nikhilsnayak.dev` | HTTP(S) origin of the Tether server  |
+| `EXPO_PUBLIC_WEB_URL`    | `https://tether.nikhilsnayak.dev`        | Web origin used for room invitations |
 
-The app uses `react-native-webrtc`, so it requires an Expo development build rather than Expo Go:
+The app uses `react-native-webrtc`, so it needs an Expo development build rather than Expo Go:
 
 ```sh
 cd apps/mobile
@@ -249,54 +211,59 @@ bun run dev
 
 Android App Links use
 [`apps/web/public/.well-known/assetlinks.json`](apps/web/public/.well-known/assetlinks.json), which
-must contain the SHA-256 fingerprint of the Android signing certificate.
+must contain the SHA-256 fingerprint of the signing certificate.
 
-## Repository structure
+## Repository layout
 
 Tether is a Bun workspace managed with Turborepo.
 
 ```text
 apps/
-  server/          In-memory admission coordinator and Effect RPC signaling relay
-  web/             Spatial room, browser WebRTC adapter, and call interface
-  desktop/         Electron shell, Linux packaging, and tether:// deep links
-  mobile/          Expo native call client using react-native-webrtc
+  server/          In-memory admission coordinator and signaling server
+  web/             Spatial room, browser WebRTC adapter, and web interface
+  desktop/         Electron shell, Linux packaging, and protocol links
+  mobile/          Expo call client using react-native-webrtc
 packages/
-  contracts/       Shared Effect Schema wire models and RPC contracts
-  client-runtime/  React-free room and peer-session actors
+  contracts/       Shared Effect Schema models and RPC contracts
+  client-runtime/  Platform-neutral room and peer-session actors
   ui/              Shared React components and design tokens
+  test-support/    Shared peer-session platform contract tests
 e2e/               Playwright tests for complete two-browser flows
 ```
 
-Important boundaries:
+The main module boundaries are:
 
-- [`apps/server/src/modules/room`](apps/server/src/modules/room) — room registry, membership,
-  admission, event delivery, and authenticated signaling.
-- [`packages/contracts/src/modules/room`](packages/contracts/src/modules/room) — shared RPC and event
-  schemas.
-- [`packages/client-runtime/src/modules/room`](packages/client-runtime/src/modules/room) —
-  platform-neutral room orchestration and presentation state.
+- [`apps/server/src/modules/room`](apps/server/src/modules/room) — membership, admission,
+  signaling, detachment, and event delivery.
+- [`packages/contracts/src/modules/room`](packages/contracts/src/modules/room) — client/server RPC
+  and event schemas.
+- [`packages/client-runtime/src/modules/room`](packages/client-runtime/src/modules/room) — room
+  orchestration and presentation state.
 - [`packages/client-runtime/src/modules/peer-session`](packages/client-runtime/src/modules/peer-session)
-  — WebRTC negotiation, reconnection, safety codes, and room-event transport.
-- [`apps/web/src/modules/room`](apps/web/src/modules/room) — Dusk Suite gameplay, browser media, and
-  call UI.
+  — WebRTC negotiation, recovery, safety codes, detachment, and room events.
+- [`apps/web/src/modules/room`](apps/web/src/modules/room) — browser media, call UI, and the Dusk
+  Suite.
 - [`apps/mobile/src/modules/room`](apps/mobile/src/modules/room) — native media adapter and call UI.
 
 ### Technology
 
-- Effect 4 and Effect RPC
-- TypeScript 6
-- Bun and Turborepo
-- React 19, Vite, and TanStack Router
-- React Three Fiber and Three.js WebGPU rendering
-- Electron
-- Expo, React Native, and `react-native-webrtc`
-- Tailwind CSS 4 and Motion
-- Vitest, Playwright, oxlint, and oxfmt
+Effect 4 and Effect RPC · TypeScript 6 · Bun · Turborepo · React 19 · Vite · TanStack Router ·
+React Three Fiber · Three.js · Electron · Expo · React Native · Tailwind CSS 4 · Vitest ·
+Playwright · oxlint · oxfmt
 
 ## Development and verification
 
-Install Chromium once before running browser tests:
+The common repository checks run from the root:
+
+```sh
+bun run test:unit
+bun run lint
+bun run fmt:check
+bun run test:coverage
+bun run build
+```
+
+Install Chromium once before browser tests:
 
 ```sh
 cd e2e
@@ -304,57 +271,24 @@ bunx playwright install chromium
 cd ..
 ```
 
-Run the fast unit-test loop from the root. The default test command does not launch Playwright:
+Then run the relevant Playwright lane:
 
 ```sh
-bun run test
-# Equivalent explicit command:
-bun run test:unit
-```
-
-Run Playwright, a specific E2E lane, or the complete unit-and-browser gate:
-
-```sh
-bun run test:e2e
 bun run test:e2e:fast
 bun run test:e2e:real-render:smoke
 bun run test:e2e:gpu
-bun run test:all
 ```
 
-Use the fast lane for flows that never enter a rendered room. The real-render smoke lane contains
-three blocking pull-request contracts: high-quality renderer startup, reduced-motion frame
-behavior, and the complete two-peer room journey. The full GPU lane runs every real-render room and
-media flow on main pushes and manual dispatches.
+The fast lane covers flows that do not enter the rendered room. Real-render lanes mount the
+production React Three Fiber canvas and frame loop. The browser suite covers admission, media,
+chat, safety-code agreement, connection recovery, physical signaling-socket closure, direct-call
+departure, and complete two-peer room journeys.
 
-Both real-render lanes mount the production React Three Fiber Canvas and continuous frame loop;
-neither is a mock or stub lane.
+## Deliberate scope
 
-Run the remaining repository gates from the root:
-
-```sh
-bun run lint
-bun run fmt:check
-bun run test:coverage
-bun run build
-```
-
-`bun run test:coverage` produces coverage reports only for workspaces with coverage scripts: the
-server, web, mobile, and shared client runtime. Contracts tests remain part of `test:unit` and CI,
-but the contracts package does not currently produce a coverage report. The test suite covers
-admission races, capacity, authenticated signaling, connection recovery, safety-code agreement,
-room-event validation, avatar movement and interpolation, responsive media tiles, focus-safe
-controls, and full two-browser room flows.
-
-## Deliberate limits and next steps
-
-The current room is intentionally small: two people, one procedural template, ground-plane
-movement, no accounts, and no persistent content. It does not yet include avatar customization,
-emotes, positional audio, object interaction, native 3D rendering, multi-person rooms, or a TURN
-relay.
-
-The wall display is reserved for the next major direction: peer-negotiated watch-along media that
-belongs to the room without turning either participant into a video surface.
+The current product is limited to two people, one procedural room, ground-plane movement, and
+ephemeral content. It does not yet include TURN relaying, accounts, persistent rooms, avatar
+customization, positional audio, object interaction, native 3D rendering, or multi-person calls.
 
 ## License
 

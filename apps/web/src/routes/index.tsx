@@ -52,7 +52,7 @@ function HomePage() {
                 between two machines.
               </h1>
               <p className='text-muted-foreground max-w-sm pt-1 text-sm leading-6'>
-                Press to generate a room code, hand it to one person. Nothing in between.
+                Create a room, share its code with one person, and approve them when they knock.
               </p>
             </div>
             <button

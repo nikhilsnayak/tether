@@ -24,8 +24,9 @@ export function SafetyCodeCard({
           {code}
         </p>
         <p className='text-muted-foreground text-sm'>
-          Read this code aloud to each other. It proves that no one, not even the server, can see
-          this call. Trust the call only if you both see the same code.
+          Compare this code over a trusted channel, such as reading it aloud. A match checks that
+          the server did not substitute either connection fingerprint. Continue only if you both see
+          the same code.
         </p>
         <div className='grid grid-cols-2 gap-2'>
           <Button size='sm' variant='destructive' onClick={onLeave}>

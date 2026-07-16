@@ -9,7 +9,7 @@ export const Route = createFileRoute('/terms')({
 
 const ABUSE_EMAIL = 'nikhilsnayak3473@gmail.com';
 const ISSUES_URL = 'https://github.com/nikhilsnayak/tether/issues';
-const LAST_UPDATED = '7 July 2026';
+const LAST_UPDATED = '17 July 2026';
 
 function PanelLabel({ children }: { readonly children: string }) {
   return (
@@ -77,13 +77,21 @@ function TermsPage() {
 
           <Section index='02' title='How it handles data'>
             <p>
-              The server relays only signaling: room membership, SDP, and ICE messages. Audio,
-              video, and chat are peer-to-peer and encrypted; they travel directly between callers
-              and never reach the operator.
+              The server coordinates room creation, admission, and WebRTC setup. This includes room
+              membership, display names supplied by guests, session tokens, SDP, ICE messages, and
+              each peer&apos;s readiness to detach. It does not receive the audio, video, chat,
+              avatar poses, or media-state events sent during a call.
             </p>
             <p>
-              Rooms and signaling state are held in memory and discarded when callers leave. There
-              are no accounts, no call history, and no message database.
+              Audio, video, and room events are encrypted by WebRTC and travel between callers.
+              After both peers confirm the direct connection, their signaling WebSockets close and
+              the call continues without the Tether server. A detached room cannot admit another
+              caller or use the server to recover a failed peer connection.
+            </p>
+            <p>
+              Room, admission, and signaling state are held in server memory and discarded when the
+              associated sessions close. There are no accounts, recordings, call histories, or
+              message databases.
             </p>
           </Section>
 
