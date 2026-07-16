@@ -83,6 +83,14 @@ export function CallScreen({
     journey === 'together' && !remoteVideoAvailable
       ? 'Their camera is unavailable.'
       : presentation.hint;
+  // Terminal journeys own a dedicated modal below; the transient status card
+  // would otherwise contradict it (e.g. "wait in case they rejoin" under "call
+  // has ended").
+  const showStatusCard =
+    journey !== 'outside' &&
+    journey !== 'departed' &&
+    journey !== 'ended' &&
+    (journey !== 'together' || !remoteVideoAvailable);
   const remoteCameraState = mediaStateAttribute(view.remoteMediaState?.cameraOn ?? null);
   const remoteMicrophoneState = mediaStateAttribute(view.remoteMediaState?.microphoneOn ?? null);
 
@@ -133,7 +141,7 @@ export function CallScreen({
         muted={!speakerOn}
         pendingJoinPeerIds={view.pendingJoinRequests.map((request) => request.peerId)}
       />
-      {journey === 'outside' ? (
+      {journey === 'outside' && (
         <section
           aria-label={displayLabel}
           className='border-border bg-background/85 pointer-events-auto absolute bottom-6 left-6 z-10 w-[min(24rem,calc(100%-2rem))] space-y-3 rounded-xl border p-5 text-left shadow-2xl backdrop-blur-sm max-sm:left-1/2 max-sm:-translate-x-1/2'
@@ -144,16 +152,15 @@ export function CallScreen({
             Leave room
           </Button>
         </section>
-      ) : (
-        (journey !== 'together' || !remoteVideoAvailable) && (
-          <div
-            aria-label={displayLabel}
-            className='border-border/70 bg-background/75 pointer-events-none absolute top-[32%] left-1/2 grid w-[min(48vw,32rem)] -translate-x-1/2 justify-items-center gap-2 rounded-xl border px-4 py-3 text-center shadow-2xl backdrop-blur-md max-sm:top-[30%] max-sm:w-[78vw]'
-          >
-            <p className='font-mono text-xs tracking-[0.2em] uppercase'>{displayLabel}</p>
-            <p className='text-muted-foreground text-xs'>{displayHint}</p>
-          </div>
-        )
+      )}
+      {showStatusCard && (
+        <div
+          aria-label={displayLabel}
+          className='border-border/70 bg-background/75 pointer-events-none absolute top-[32%] left-1/2 grid w-[min(48vw,32rem)] -translate-x-1/2 justify-items-center gap-2 rounded-xl border px-4 py-3 text-center shadow-2xl backdrop-blur-md max-sm:top-[30%] max-sm:w-[78vw]'
+        >
+          <p className='font-mono text-xs tracking-[0.2em] uppercase'>{displayLabel}</p>
+          <p className='text-muted-foreground text-xs'>{displayHint}</p>
+        </div>
       )}
       <div className='pointer-events-none absolute inset-0'>
         <div
