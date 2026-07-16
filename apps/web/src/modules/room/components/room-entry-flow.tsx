@@ -27,6 +27,10 @@ export function RoomEntryFlow({
   readonly onLeave: () => void;
 }) {
   const [state, dispatch] = useReducer(roomEntryReducer, initialRoomEntryState);
+  // session.selfId is stable for the page, so it can never trigger the error
+  // boundary's auto-reset. A monotonic attempt counter gives each retry a fresh
+  // reset key, so the boundary clears even if a retry keeps the subtree mounted.
+  const attempt = useRef(0);
 
   const prepareMedia = (preparedMedia: PreparedMediaSelection) => {
     // The reducer rejects a duplicate without disposing, and nobody else would
@@ -52,8 +56,12 @@ export function RoomEntryFlow({
         <SessionRequestedStage
           session={session}
           preparedMedia={state.preparedMedia}
+          resetKey={attempt.current}
           onLeaveRoom={onLeave}
-          onRestartMediaSetup={() => dispatch({ _tag: 'RestartMediaSetup' })}
+          onRestartMediaSetup={() => {
+            attempt.current += 1;
+            dispatch({ _tag: 'RestartMediaSetup' });
+          }}
         />
       )}
     </RoomExperience>
@@ -67,11 +75,13 @@ export function RoomEntryFlow({
 function SessionRequestedStage({
   session,
   preparedMedia,
+  resetKey,
   onLeaveRoom,
   onRestartMediaSetup,
 }: {
   readonly session: RoomSession;
   readonly preparedMedia: PreparedMediaSelection;
+  readonly resetKey: number;
   readonly onLeaveRoom: () => void;
   readonly onRestartMediaSetup: () => void;
 }) {
@@ -104,7 +114,7 @@ function SessionRequestedStage({
       errorComponent={({ error }) => (
         <SessionAcquisitionErrorScreen error={error} onRestartMediaSetup={restart} />
       )}
-      getResetKey={() => session.selfId}
+      getResetKey={() => String(resetKey)}
     >
       <Suspense fallback={<CallLoadingScreen />}>
         <PeerSessionLayer
