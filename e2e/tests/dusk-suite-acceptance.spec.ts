@@ -36,7 +36,7 @@ test.describe('high-quality renderer', () => {
 
   test(
     'Dusk Suite loads without third-party room assets',
-    { tag: '@gpu' },
+    { tag: ['@gpu', '@real-render-smoke'] },
     async ({ page, room }) => {
       const appOrigin = new URL(room.baseURL).origin;
       const externalAssets: string[] = [];

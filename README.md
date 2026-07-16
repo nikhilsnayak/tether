@@ -317,11 +317,18 @@ Run Playwright, a specific E2E lane, or the complete unit-and-browser gate:
 ```sh
 bun run test:e2e
 bun run test:e2e:fast
+bun run test:e2e:real-render:smoke
 bun run test:e2e:gpu
 bun run test:all
 ```
 
-Use the fast lane for non-GPU flows and the GPU lane for media and room flows.
+Use the fast lane for flows that never enter a rendered room. The real-render smoke lane contains
+three blocking pull-request contracts: high-quality renderer startup, reduced-motion frame
+behavior, and the complete two-peer room journey. The full GPU lane runs every real-render room and
+media flow on main pushes and manual dispatches.
+
+Both real-render lanes mount the production React Three Fiber Canvas and continuous frame loop;
+neither is a mock or stub lane.
 
 Run the remaining repository gates from the root:
 

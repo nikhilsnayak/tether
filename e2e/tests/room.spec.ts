@@ -106,67 +106,71 @@ const lowQualityMedianFps = async (page: Page) => {
 };
 
 test.describe('real room', { tag: '@gpu' }, () => {
-  test('host and guest complete a real room journey', async ({ page, room }) => {
-    test.setTimeout(90_000);
-    const host = await room.actorFor(page, { probeWebRtc: true });
-    const guest = await room.createActor({ probeWebRtc: true });
-    // Capture each Canvas at media setup, before the transfer that requests a
-    // session, so the post-connection identity check spans that transition.
-    const roomId = await room.createRoom(host, rememberRoomCanvas);
+  test(
+    'host and guest complete a real room journey',
+    { tag: '@real-render-smoke' },
+    async ({ page, room }) => {
+      test.setTimeout(90_000);
+      const host = await room.actorFor(page, { probeWebRtc: true });
+      const guest = await room.createActor({ probeWebRtc: true });
+      // Capture each Canvas at media setup, before the transfer that requests a
+      // session, so the post-connection identity check spans that transition.
+      const roomId = await room.createRoom(host, rememberRoomCanvas);
 
-    await room.join(guest, roomId, 'Guest', rememberRoomCanvas);
-    await expect(page.getByRole('region', { name: 'Join request' })).toBeVisible();
-    await room.admit(host);
-    await Promise.all([room.expectConnected(host), room.expectConnected(guest)]);
-    await Promise.all([
-      expect(page.getByLabel('Dusk Suite room scene')).toHaveAttribute(
-        'data-room-journey',
-        'together',
-      ),
-      // GitHub's SwiftShader runner cannot reliably advance two concurrent R3F
-      // frame loops, so the guest's spatial transition never completes there.
-      // Everything else in this test (connection, media, chat, leave) does not
-      // depend on the guest's render loop and still runs in CI.
-      ...(CI
-        ? []
-        : [
-            expect(guest.page.getByLabel('Dusk Suite room scene')).toHaveAttribute(
-              'data-room-location',
-              'inside',
-            ),
-          ]),
-      expectLocalAndRemoteMedia(page),
-      expectLocalAndRemoteMedia(guest.page),
-      room.expectPreparedMediaTransferred(host),
-      room.expectPreparedMediaTransferred(guest),
-    ]);
-    await expect.poll(() => guest.probe.latestDataChannelLabel()).toBe('room-events-v1');
-    await Promise.all([room.expectRendererReady(host), room.expectRendererReady(guest)]);
+      await room.join(guest, roomId, 'Guest', rememberRoomCanvas);
+      await expect(page.getByRole('region', { name: 'Join request' })).toBeVisible();
+      await room.admit(host);
+      await Promise.all([room.expectConnected(host), room.expectConnected(guest)]);
+      await Promise.all([
+        expect(page.getByLabel('Dusk Suite room scene')).toHaveAttribute(
+          'data-room-journey',
+          'together',
+        ),
+        // GitHub's SwiftShader runner cannot reliably advance two concurrent R3F
+        // frame loops, so the guest's spatial transition never completes there.
+        // Everything else in this test (connection, media, chat, leave) does not
+        // depend on the guest's render loop and still runs in CI.
+        ...(CI
+          ? []
+          : [
+              expect(guest.page.getByLabel('Dusk Suite room scene')).toHaveAttribute(
+                'data-room-location',
+                'inside',
+              ),
+            ]),
+        expectLocalAndRemoteMedia(page),
+        expectLocalAndRemoteMedia(guest.page),
+        room.expectPreparedMediaTransferred(host),
+        room.expectPreparedMediaTransferred(guest),
+      ]);
+      await expect.poll(() => guest.probe.latestDataChannelLabel()).toBe('room-events-v1');
+      await Promise.all([room.expectRendererReady(host), room.expectRendererReady(guest)]);
 
-    // The scene must be the exact same Canvas the actor saw at media setup: one
-    // renderer survived the media-setup -> session transition, no remount.
-    await expectSameRoomCanvas(host);
-    await expectSameRoomCanvas(guest);
+      // The scene must be the exact same Canvas the actor saw at media setup: one
+      // renderer survived the media-setup -> session transition, no remount.
+      await expectSameRoomCanvas(host);
+      await expectSameRoomCanvas(guest);
 
-    await Promise.all([
-      page.getByRole('button', { name: 'We see the same code' }).click(),
-      guest.page.getByRole('button', { name: 'We see the same code' }).click(),
-    ]);
-    await Promise.all([
-      page.getByRole('button', { name: 'Open chat' }).click(),
-      guest.page.getByRole('button', { name: 'Open chat' }).click(),
-    ]);
-    const message = 'Hello across the real data channel';
-    await sendMessage(page, message);
-    await expect(
-      guest.page.getByRole('list', { name: 'Chat messages' }).getByText(message),
-    ).toBeVisible();
-    await guest.page.getByRole('button', { name: 'Close' }).click();
+      await Promise.all([
+        page.getByRole('button', { name: 'We see the same code' }).click(),
+        guest.page.getByRole('button', { name: 'We see the same code' }).click(),
+      ]);
+      await Promise.all([
+        page.getByRole('button', { name: 'Open chat' }).click(),
+        guest.page.getByRole('button', { name: 'Open chat' }).click(),
+      ]);
+      const message = 'Hello across the real data channel';
+      await sendMessage(page, message);
+      await expect(
+        guest.page.getByRole('list', { name: 'Chat messages' }).getByText(message),
+      ).toBeVisible();
+      await guest.page.getByRole('button', { name: 'Close' }).click();
 
-    await guest.page.getByRole('button', { name: 'Leave call' }).click();
-    await expect(guest.page).toHaveURL('/');
-    await room.expectPeerDeparted(host);
-  });
+      await guest.page.getByRole('button', { name: 'Leave call' }).click();
+      await expect(guest.page).toHaveURL('/');
+      await room.expectPeerDeparted(host);
+    },
+  );
 
   test('local media controls synchronize remote state', async ({ room }) => {
     const { host, guest } = await room.connect();

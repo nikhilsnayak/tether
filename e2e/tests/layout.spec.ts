@@ -62,7 +62,7 @@ test.describe('automatic room quality', () => {
 
 test(
   'reduced motion keeps the full 3D room without camera travel',
-  { tag: '@gpu' },
+  { tag: ['@gpu', '@real-render-smoke'] },
   async ({ page, room }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await room.createRoom(room.actorFor(page));
