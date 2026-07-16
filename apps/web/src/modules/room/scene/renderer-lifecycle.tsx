@@ -1,6 +1,11 @@
 import { useFrame, useThree } from '@react-three/fiber/webgpu';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type RefObject } from 'react';
 import type { Renderer } from 'three/webgpu';
+
+type RendererBackendStatus = {
+  readonly isWebGLBackend?: boolean;
+  readonly isWebGPUBackend?: boolean;
+};
 
 export function FramePerformanceMonitor({
   onSample,
@@ -40,5 +45,31 @@ export function ContextLossGuard({
       }
     };
   }, [renderer, updateContextLost]);
+  return null;
+}
+
+export function RendererStatusObserver({
+  surfaceRef,
+}: {
+  readonly surfaceRef: RefObject<HTMLDivElement | null>;
+}) {
+  const { renderer } = useThree();
+  const published = useRef(false);
+
+  useFrame(() => {
+    if (published.current) return;
+    const surface = surfaceRef.current;
+    if (surface === null) return;
+
+    const backend = (renderer as Renderer).backend as RendererBackendStatus | undefined;
+    surface.dataset.roomRendererBackend = backend?.isWebGPUBackend
+      ? 'webgpu'
+      : backend?.isWebGLBackend
+        ? 'webgl'
+        : 'unknown';
+    surface.dataset.roomRendererReady = 'true';
+    published.current = true;
+  });
+
   return null;
 }

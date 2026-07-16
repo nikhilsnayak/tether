@@ -27,7 +27,11 @@ import {
 } from './config';
 import type { RoomJourneyCue } from './journey';
 import { ParticipantAvatar } from './participant-avatar';
-import { ContextLossGuard, FramePerformanceMonitor } from './renderer-lifecycle';
+import {
+  ContextLossGuard,
+  FramePerformanceMonitor,
+  RendererStatusObserver,
+} from './renderer-lifecycle';
 import { RoomTransitionController } from './room-transition-controller';
 import { ThirdPersonCamera } from './third-person-camera';
 
@@ -194,6 +198,7 @@ export function RoomScene({
             reducedMotion={reducedMotion}
             journey={journey}
           />
+          <RendererStatusObserver surfaceRef={surfaceRef} />
         </Suspense>
       </Canvas>
       {presentation.localLocation === 'inside' && (

@@ -24,7 +24,8 @@ export default defineConfig({
   use: {
     baseURL: `http://localhost:5173`,
     screenshot: 'only-on-failure',
-    trace: 'retain-on-failure',
+    trace: 'on-first-retry',
+    video: 'off',
     storageState: seededStorageState,
   },
   projects: [
@@ -42,9 +43,9 @@ export default defineConfig({
     {
       name: 'gpu-e2e',
       grep: /@gpu/,
-      // Real WebRTC + WebGPU specs running serially for ~10 minutes contend for
-      // CPU/GPU on a single machine even locally, so tolerate retries there too.
-      retries: 2,
+      // Production-low quality reduces local graphics contention. CI keeps one
+      // diagnostic retry so intermittent failures produce a trace.
+      retries: CI ? 1 : 0,
       timeout: 90_000,
       workers: 1,
       use: {
