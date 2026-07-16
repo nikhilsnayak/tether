@@ -13,7 +13,7 @@ import { Badge } from '@tether/ui/components/badge';
 import { Button } from '@tether/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@tether/ui/components/tooltip';
 import { cn } from '@tether/ui/lib/utils';
-import { ShieldCheck } from 'lucide-react';
+import { LogOut, ShieldCheck } from 'lucide-react';
 import { useRef, useState } from 'react';
 
 import { LogoMark, Wordmark } from '@/components/logo';
@@ -25,6 +25,7 @@ import { mediaStreamValue } from '../peer-session/platform';
 import type { InitialMediaSettings } from '../preflight/media';
 import { roomJourneyLabel } from '../scene/journey';
 import { SPEAKER_OFF } from './audio-output-control';
+import { CallControlButton, MediaToggleControls } from './call-controls';
 import { CallControlsToolbar } from './call-controls-toolbar';
 import { JoinRequestOverlay } from './join-request-overlay';
 import { DraggableMediaTile, RemoteVideo, SelfVideo } from './media-stage';
@@ -148,9 +149,22 @@ export function CallScreen({
         >
           <p className='font-mono text-xs tracking-[0.2em] uppercase'>{displayLabel}</p>
           <p className='text-muted-foreground text-sm'>{displayHint}</p>
-          <Button variant='secondary' onClick={handleLeave}>
-            Leave room
-          </Button>
+          <div className='flex items-center gap-2'>
+            <MediaToggleControls
+              micOn={micOn}
+              cameraOn={cameraOn}
+              onMicToggle={handleMicToggle}
+              onCameraToggle={handleCameraToggle}
+            />
+            <CallControlButton
+              label='Leave room'
+              caption='leave'
+              tone='neutral'
+              onClick={handleLeave}
+            >
+              <LogOut />
+            </CallControlButton>
+          </div>
         </section>
       )}
       {showStatusCard && (
