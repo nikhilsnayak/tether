@@ -154,7 +154,8 @@ export function CallErrorScreen({
   readonly error: unknown;
   readonly reset: () => void;
 }) {
-  const message = error instanceof Error ? error.message : 'Unknown peer-session failure';
+  const message =
+    error instanceof Error && error.message ? error.message : 'Unknown peer-session failure';
   return (
     <CallStatusScreen
       indicatorClassName='bg-destructive'
@@ -179,7 +180,10 @@ export function SessionAcquisitionErrorScreen({
   readonly error: unknown;
   readonly onRestartMediaSetup: () => void;
 }) {
-  const message = error instanceof Error ? error.message : 'Could not start the session';
+  // Tagged errors with an empty schema carry a blank message, so fall back
+  // whenever there is no text rather than only on non-Error values.
+  const message =
+    error instanceof Error && error.message ? error.message : 'Could not start the session';
   return (
     <CallStatusScreen
       indicatorClassName='bg-destructive'
