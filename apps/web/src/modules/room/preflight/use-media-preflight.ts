@@ -68,6 +68,7 @@ export function useMediaPreflight() {
         },
       },
       settings,
+      release: preparedMedia.cancel,
     };
   };
 

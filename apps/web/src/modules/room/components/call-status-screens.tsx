@@ -23,7 +23,7 @@ function CallStatusScreen({
   readonly action?: ReactNode;
 }) {
   return (
-    <div className='relative z-40 grid content-center justify-items-center gap-6 px-6 text-center'>
+    <div className='relative z-40 grid min-h-svh content-center justify-items-center gap-6 px-6 text-center'>
       <div className='absolute top-4 right-4 left-4 flex items-center gap-3'>
         <Wordmark className='max-sm:hidden' />
         <LogoMark className='size-5 sm:hidden' />
@@ -154,7 +154,8 @@ export function CallErrorScreen({
   readonly error: unknown;
   readonly reset: () => void;
 }) {
-  const message = error instanceof Error ? error.message : 'Unknown peer-session failure';
+  const message =
+    error instanceof Error && error.message ? error.message : 'Unknown peer-session failure';
   return (
     <CallStatusScreen
       indicatorClassName='bg-destructive'
@@ -166,6 +167,34 @@ export function CallErrorScreen({
       action={
         <Button variant='secondary' onClick={reset}>
           Try again
+        </Button>
+      }
+    />
+  );
+}
+
+export function SessionAcquisitionErrorScreen({
+  error,
+  onRestartMediaSetup,
+}: {
+  readonly error: unknown;
+  readonly onRestartMediaSetup: () => void;
+}) {
+  // Tagged errors with an empty schema carry a blank message, so fall back
+  // whenever there is no text rather than only on non-Error values.
+  const message =
+    error instanceof Error && error.message ? error.message : 'Could not start the session';
+  return (
+    <CallStatusScreen
+      indicatorClassName='bg-destructive'
+      pillLabel='Failed'
+      icon={<AlertTriangle className='size-9' />}
+      iconClassName='bg-destructive/15 text-destructive'
+      label='Could not start the session'
+      hint={message}
+      action={
+        <Button variant='secondary' onClick={onRestartMediaSetup}>
+          Check media and try again
         </Button>
       }
     />

@@ -6,7 +6,6 @@ import { MathUtils, Vector3 } from 'three';
 import type { RoomTemplate } from '../templates/registry';
 import { cameraContainmentScale } from './camera-containment';
 import { clampLook, selectCameraFraming } from './config';
-import type { RoomJourneyCue } from './journey';
 
 const WORLD_UP = new Vector3(0, 1, 0);
 const CAMERA_VERTICAL_BOUNDS = { minY: 0.8, maxY: 4.2 } as const;
@@ -16,16 +15,14 @@ export function ThirdPersonCamera({
   poseRef,
   reducedMotion,
   surfaceRef,
-  journey,
-  mode,
+  outside,
   recenterSignal,
 }: {
   readonly template: RoomTemplate;
   readonly poseRef: RefObject<AvatarPose>;
   readonly reducedMotion: boolean;
   readonly surfaceRef: RefObject<HTMLDivElement | null>;
-  readonly journey?: RoomJourneyCue;
-  readonly mode: 'preview' | 'call';
+  readonly outside: boolean;
   readonly recenterSignal: RefObject<number>;
 }) {
   const { camera, size } = useThree();
@@ -136,13 +133,8 @@ export function ThirdPersonCamera({
       previousRecenterSignal.current = recenterSignal.current;
     }
 
-    const framing = selectCameraFraming(
-      size.width,
-      size.height,
-      journey === 'outside',
-      template.camera,
-    );
-    if (mode === 'preview' || journey === 'outside') {
+    const framing = selectCameraFraming(size.width, size.height, outside, template.camera);
+    if (outside) {
       // Outside the room the guest may only glance around within tight bounds so
       // they cannot rotate the view to peek inside before being admitted.
       orbit.current = clampLook(orbit.current.yaw, orbit.current.pitch, template.camera.look);

@@ -13,25 +13,24 @@ import { Badge } from '@tether/ui/components/badge';
 import { Button } from '@tether/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@tether/ui/components/tooltip';
 import { cn } from '@tether/ui/lib/utils';
-import { ShieldCheck } from 'lucide-react';
+import { LogOut, ShieldCheck } from 'lucide-react';
 import { useRef, useState } from 'react';
 
 import { LogoMark, Wordmark } from '@/components/logo';
 
-import { usePeerConnection } from '../hooks/use-peer-connection';
 import { useRemoteVideoAvailability } from '../hooks/use-remote-video-availability';
+import { useRoomQualityPreference } from '../hooks/use-room-quality-preference';
 import { useScreenWakeLock } from '../hooks/use-screen-wake-lock';
 import { mediaStreamValue } from '../peer-session/platform';
-import type { PreparedMediaSelection } from '../preflight/media';
-import { isQualityPreference, QUALITY_STORAGE_KEY, type QualityPreference } from '../scene/config';
-import { roomJourneyCue, roomJourneyLabel } from '../scene/journey';
-import { RoomScene } from '../scene/room-scene';
-import type { RoomTemplate } from '../templates/registry';
+import type { InitialMediaSettings } from '../preflight/media';
+import { roomJourneyLabel } from '../scene/journey';
 import { SPEAKER_OFF } from './audio-output-control';
+import { CallControlButton, MediaToggleControls } from './call-controls';
 import { CallControlsToolbar } from './call-controls-toolbar';
 import { JoinRequestOverlay } from './join-request-overlay';
 import { DraggableMediaTile, RemoteVideo, SelfVideo } from './media-stage';
 import { RemoteAudio } from './remote-audio';
+import { useRoomExperience } from './room-experience-context';
 import { RoomInvite } from './room-invite';
 import { SafetyCodeCard } from './safety-code-card';
 
@@ -50,38 +49,29 @@ const mediaStateAttribute = (enabled: boolean | null) => {
   return enabled ? 'on' : 'off';
 };
 
-const readQualityPreference = (): QualityPreference => {
-  const stored = localStorage.getItem(QUALITY_STORAGE_KEY);
-  return isQualityPreference(stored) ? stored : 'auto';
-};
-
 export function CallScreen({
   session,
-  template,
-  preparedMedia,
+  initialMediaSettings,
   onLeaveRoom,
 }: {
   readonly session: RoomSession;
-  readonly template: RoomTemplate;
-  readonly preparedMedia: PreparedMediaSelection;
+  readonly initialMediaSettings: InitialMediaSettings;
   readonly onLeaveRoom: () => void;
 }) {
-  const { leave, respondToJoin, sendAvatarPose, sendMediaState, sendMessage } = usePeerConnection({
-    session,
-    preparedMedia: preparedMedia.media,
-  });
   useScreenWakeLock();
+  const { binding, journey } = useRoomExperience();
+  const { qualityPreference, setQualityPreference } = useRoomQualityPreference();
+  const controller = binding.controller;
   const view = useAtomValue(peerSessionViewAtom);
   const localStreamHandle = useAtomValue(peerLocalStreamAtom);
   const remoteStreamHandle = useAtomValue(peerRemoteStreamAtom);
   const localStream = localStreamHandle === null ? null : mediaStreamValue(localStreamHandle);
   const remoteStream = remoteStreamHandle === null ? null : mediaStreamValue(remoteStreamHandle);
   const remoteVideoAvailable = useRemoteVideoAvailability(remoteStream);
-  const [micOn, setMicOn] = useState(preparedMedia.settings.microphone);
-  const [cameraOn, setCameraOn] = useState(preparedMedia.settings.camera);
+  const [micOn, setMicOn] = useState(initialMediaSettings.microphone);
+  const [cameraOn, setCameraOn] = useState(initialMediaSettings.camera);
   const [sinkId, setSinkId] = useState('');
   const [speakerOn, setSpeakerOn] = useState(true);
-  const [qualityPreference, setQualityPreference] = useState(readQualityPreference);
   const [confirmedSas, setConfirmedSas] = useState<string | null>(null);
   const [handlingJoinPeerIds, setHandlingJoinPeerIds] = useState<ReadonlySet<PeerId>>(new Set());
   const selfPreviewBoundaryRef = useRef<HTMLDivElement>(null);
@@ -89,29 +79,39 @@ export function CallScreen({
   const pendingJoin =
     view.pendingJoinRequests.find((request) => !handlingJoinPeerIds.has(request.peerId)) ?? null;
   const sasConfirmed = view.sas !== null && confirmedSas === view.sas;
-  const journey = roomJourneyCue(session.intent, view.status);
   const displayLabel = roomJourneyLabel(journey);
   const displayHint =
     journey === 'together' && !remoteVideoAvailable
       ? 'Their camera is unavailable.'
       : presentation.hint;
+  // Terminal journeys own a dedicated modal below; the transient status card
+  // would otherwise contradict it (e.g. "wait in case they rejoin" under "call
+  // has ended").
+  const showStatusCard =
+    journey !== 'outside' &&
+    journey !== 'departed' &&
+    journey !== 'ended' &&
+    (journey !== 'together' || !remoteVideoAvailable);
+  // Terminal journeys own a full-screen modal and outside owns its own card, so
+  // the live call dock only belongs while actually in the room.
+  const showCallDock = journey !== 'outside' && journey !== 'departed' && journey !== 'ended';
   const remoteCameraState = mediaStateAttribute(view.remoteMediaState?.cameraOn ?? null);
   const remoteMicrophoneState = mediaStateAttribute(view.remoteMediaState?.microphoneOn ?? null);
 
   const handleLeave = () => {
-    void leave().then(onLeaveRoom, onLeaveRoom);
+    void controller.leave().then(onLeaveRoom, onLeaveRoom);
   };
   const handleMicToggle = () => {
     const enabled = !micOn;
     for (const track of localStream?.getAudioTracks() ?? []) track.enabled = enabled;
     setMicOn(enabled);
-    sendMediaState({ cameraOn, microphoneOn: enabled });
+    controller.sendMediaState({ cameraOn, microphoneOn: enabled });
   };
   const handleCameraToggle = () => {
     const enabled = !cameraOn;
     for (const track of localStream?.getVideoTracks() ?? []) track.enabled = enabled;
     setCameraOn(enabled);
-    sendMediaState({ cameraOn: enabled, microphoneOn: micOn });
+    controller.sendMediaState({ cameraOn: enabled, microphoneOn: micOn });
   };
   const handleAudioOutputChange = (value: string) => {
     if (value === SPEAKER_OFF) {
@@ -120,11 +120,6 @@ export function CallScreen({
     }
     setSpeakerOn(true);
     setSinkId(value);
-  };
-  const handleQualityChange = (preference: QualityPreference) => {
-    setQualityPreference(preference);
-    if (preference === 'auto') localStorage.removeItem(QUALITY_STORAGE_KEY);
-    else localStorage.setItem(QUALITY_STORAGE_KEY, preference);
   };
   const handleJoinDecision = (peerId: PeerId, decision: 'allow' | 'deny') => {
     setHandlingJoinPeerIds((current) => new Set(current).add(peerId));
@@ -135,53 +130,54 @@ export function CallScreen({
         return next;
       });
     };
-    void respondToJoin(peerId, decision).then(clearHandling, clearHandling);
+    void controller.respondToJoin(peerId, decision).then(clearHandling, clearHandling);
   };
 
   return (
     <div
-      className='relative z-40 h-svh overflow-hidden'
+      className='pointer-events-none relative z-40 h-svh overflow-hidden'
       data-room-remote-camera={remoteCameraState}
       data-room-remote-microphone={remoteMicrophoneState}
     >
-      <RoomScene
-        template={template}
-        admissionPending={pendingJoin !== null}
-        journey={journey}
-        mode='call'
-        sessionIntent={session.intent}
-        remoteAvatarPose={view.remoteAvatarPose}
-        roomEventsReady={view.roomEventsReady}
-        sendAvatarPose={sendAvatarPose}
-        qualityPreference={qualityPreference}
-      />
       <RemoteAudio
         stream={remoteStream}
         sinkId={sinkId}
         muted={!speakerOn}
         pendingJoinPeerIds={view.pendingJoinRequests.map((request) => request.peerId)}
       />
-      {journey === 'outside' ? (
+      {journey === 'outside' && (
         <section
           aria-label={displayLabel}
-          className='border-border bg-background/85 absolute bottom-6 left-6 z-10 w-[min(24rem,calc(100%-2rem))] space-y-3 rounded-xl border p-5 text-left shadow-2xl backdrop-blur-sm max-sm:left-1/2 max-sm:-translate-x-1/2'
+          className='border-border bg-background/85 pointer-events-auto absolute bottom-6 left-6 z-10 w-[min(24rem,calc(100%-2rem))] space-y-3 rounded-xl border p-5 text-left shadow-2xl backdrop-blur-sm max-sm:left-1/2 max-sm:-translate-x-1/2'
         >
           <p className='font-mono text-xs tracking-[0.2em] uppercase'>{displayLabel}</p>
           <p className='text-muted-foreground text-sm'>{displayHint}</p>
-          <Button variant='secondary' onClick={handleLeave}>
-            Leave room
-          </Button>
-        </section>
-      ) : (
-        (journey !== 'together' || !remoteVideoAvailable) && (
-          <div
-            aria-label={displayLabel}
-            className='border-border/70 bg-background/75 pointer-events-none absolute top-[32%] left-1/2 grid w-[min(48vw,32rem)] -translate-x-1/2 justify-items-center gap-2 rounded-xl border px-4 py-3 text-center shadow-2xl backdrop-blur-md max-sm:top-[30%] max-sm:w-[78vw]'
-          >
-            <p className='font-mono text-xs tracking-[0.2em] uppercase'>{displayLabel}</p>
-            <p className='text-muted-foreground text-xs'>{displayHint}</p>
+          <div className='flex items-center gap-2'>
+            <MediaToggleControls
+              micOn={micOn}
+              cameraOn={cameraOn}
+              onMicToggle={handleMicToggle}
+              onCameraToggle={handleCameraToggle}
+            />
+            <CallControlButton
+              label='Leave room'
+              caption='leave'
+              tone='neutral'
+              onClick={handleLeave}
+            >
+              <LogOut />
+            </CallControlButton>
           </div>
-        )
+        </section>
+      )}
+      {showStatusCard && (
+        <div
+          aria-label={displayLabel}
+          className='border-border/70 bg-background/75 pointer-events-none absolute top-[32%] left-1/2 grid w-[min(48vw,32rem)] -translate-x-1/2 justify-items-center gap-2 rounded-xl border px-4 py-3 text-center shadow-2xl backdrop-blur-md max-sm:top-[30%] max-sm:w-[78vw]'
+        >
+          <p className='font-mono text-xs tracking-[0.2em] uppercase'>{displayLabel}</p>
+          <p className='text-muted-foreground text-xs'>{displayHint}</p>
+        </div>
       )}
       <div className='pointer-events-none absolute inset-0'>
         <div
@@ -214,7 +210,7 @@ export function CallScreen({
                   render={
                     <Badge
                       variant='secondary'
-                      className='gap-1.5 font-mono text-[10px] tracking-widest'
+                      className='pointer-events-auto gap-1.5 font-mono text-[10px] tracking-widest'
                       render={
                         <button
                           aria-label='Safety code'
@@ -303,20 +299,22 @@ export function CallScreen({
           </section>
         )}
       </div>
-      {journey !== 'outside' && (
-        <CallControlsToolbar
-          micOn={micOn}
-          cameraOn={cameraOn}
-          sinkId={sinkId}
-          speakerOn={speakerOn}
-          qualityPreference={qualityPreference}
-          onMicToggle={handleMicToggle}
-          onCameraToggle={handleCameraToggle}
-          onAudioOutputChange={handleAudioOutputChange}
-          onQualityChange={handleQualityChange}
-          onSendMessage={sendMessage}
-          onLeave={handleLeave}
-        />
+      {showCallDock && (
+        <div className='pointer-events-auto'>
+          <CallControlsToolbar
+            micOn={micOn}
+            cameraOn={cameraOn}
+            sinkId={sinkId}
+            speakerOn={speakerOn}
+            qualityPreference={qualityPreference}
+            onMicToggle={handleMicToggle}
+            onCameraToggle={handleCameraToggle}
+            onAudioOutputChange={handleAudioOutputChange}
+            onQualityChange={setQualityPreference}
+            onSendMessage={(message) => controller.sendMessage(message) === 'queued'}
+            onLeave={handleLeave}
+          />
+        </div>
       )}
     </div>
   );

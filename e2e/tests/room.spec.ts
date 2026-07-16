@@ -1,6 +1,30 @@
 import { expect, test, type Page } from './fixtures';
+import type { RoomActor } from './support/room-driver';
 
 const CI = !!process.env.CI;
+
+const ROOM_CANVAS_KEY = '__tetherE2ERoomCanvas';
+
+const roomCanvas = (actor: RoomActor) =>
+  actor.page.getByLabel('Dusk Suite room scene').locator('canvas');
+
+// Pin the live Canvas DOM object in the page realm so a later phase can prove it
+// is the same node, not a fast replacement carrying identical attributes.
+const rememberRoomCanvas = async (actor: RoomActor) => {
+  const canvas = roomCanvas(actor);
+  await expect(canvas).toHaveCount(1);
+  await expect(canvas).toBeVisible();
+  await canvas.evaluate((node, key) => Reflect.set(window, key, node), ROOM_CANVAS_KEY);
+};
+
+const expectSameRoomCanvas = async (actor: RoomActor) => {
+  const canvas = roomCanvas(actor);
+  await expect(canvas).toHaveCount(1);
+  await expect(canvas).toBeVisible();
+  expect(
+    await canvas.evaluate((node, key) => node === Reflect.get(window, key), ROOM_CANVAS_KEY),
+  ).toBe(true);
+};
 
 const sendMessage = async (page: Page, message: string) => {
   const input = page.getByRole('textbox', { name: 'Message' });
@@ -86,9 +110,11 @@ test.describe('real room', { tag: '@gpu' }, () => {
     test.setTimeout(90_000);
     const host = await room.actorFor(page, { probeWebRtc: true });
     const guest = await room.createActor({ probeWebRtc: true });
-    const roomId = await room.createRoom(host);
+    // Capture each Canvas at media setup, before the transfer that requests a
+    // session, so the post-connection identity check spans that transition.
+    const roomId = await room.createRoom(host, rememberRoomCanvas);
 
-    await room.join(guest, roomId);
+    await room.join(guest, roomId, 'Guest', rememberRoomCanvas);
     await expect(page.getByRole('region', { name: 'Join request' })).toBeVisible();
     await room.admit(host);
     await Promise.all([room.expectConnected(host), room.expectConnected(guest)]);
@@ -115,6 +141,11 @@ test.describe('real room', { tag: '@gpu' }, () => {
       room.expectPreparedMediaTransferred(guest),
     ]);
     await expect.poll(() => guest.probe.latestDataChannelLabel()).toBe('room-events-v1');
+
+    // The scene must be the exact same Canvas the actor saw at media setup: one
+    // renderer survived the media-setup -> session transition, no remount.
+    await expectSameRoomCanvas(host);
+    await expectSameRoomCanvas(guest);
 
     await Promise.all([
       page.getByRole('button', { name: 'We see the same code' }).click(),

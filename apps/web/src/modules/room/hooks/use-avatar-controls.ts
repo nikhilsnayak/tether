@@ -20,15 +20,14 @@ const shouldIgnoreKeyboardTarget = (target: EventTarget | null): boolean =>
   target instanceof Element &&
   target.closest('input, textarea, select, [contenteditable="true"], [role="dialog"]') !== null;
 
-export function useAvatarControls(enabled: boolean, listen: boolean) {
+export function useAvatarControls(enabled: boolean) {
   const heldKeys = useHeldKeys();
   const [heldControls, setHeldControls] = useState<ReadonlySet<AvatarControl>>(new Set());
   const recenterSignal = useRef(0);
-  const shortcutsEnabled = enabled && listen;
   const keyboardIgnored =
     typeof document !== 'undefined' && shouldIgnoreKeyboardTarget(document.activeElement);
-  const activeKeys = shortcutsEnabled && !keyboardIgnored ? new Set(heldKeys) : new Set<string>();
-  const input: AvatarInputIntent = shortcutsEnabled
+  const activeKeys = enabled && !keyboardIgnored ? new Set(heldKeys) : new Set<string>();
+  const input: AvatarInputIntent = enabled
     ? {
         forward:
           Number(heldControls.has('forward') || activeKeys.has('W') || activeKeys.has('ArrowUp')) -
@@ -63,7 +62,7 @@ export function useAvatarControls(enabled: boolean, listen: boolean) {
       },
     })),
     {
-      enabled: shortcutsEnabled,
+      enabled,
       ignoreInputs: false,
       preventDefault: false,
       stopPropagation: false,
@@ -77,7 +76,7 @@ export function useAvatarControls(enabled: boolean, listen: boolean) {
       recenter();
     },
     {
-      enabled: shortcutsEnabled,
+      enabled,
       ignoreInputs: false,
       preventDefault: false,
       requireReset: true,

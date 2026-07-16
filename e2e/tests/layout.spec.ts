@@ -44,7 +44,7 @@ test('room waiting screen fits the viewport', { tag: '@gpu' }, async ({ page, ro
   expect(await fitsViewport(page)).toBe(true);
 
   await page.reload();
-  await room.completeMediaSetup(actor, 'Create room');
+  await room.completeMediaSetup(actor, 'Invite someone');
   await expect(page.getByRole('button', { name: 'Room quality' })).toHaveAttribute(
     'data-quality-preference',
     'low',

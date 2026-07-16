@@ -4,7 +4,6 @@ import type {
   RoomSession,
   SequencedAvatarPose,
 } from '@tether/client-runtime/modules/peer-session';
-import { cn } from '@tether/ui/lib/utils';
 import { Suspense, useRef, useState } from 'react';
 
 import { useReducedMotionPreference } from '@/hooks/use-reduced-motion-preference';
@@ -12,20 +11,18 @@ import { useReducedMotionPreference } from '@/hooks/use-reduced-motion-preferenc
 import { AvatarControls } from '../components/avatar-controls';
 import { RoomControlHelp } from '../components/room-control-help';
 import { useAvatarControls } from '../hooks/use-avatar-controls';
+import { useRoomQualityPreference } from '../hooks/use-room-quality-preference';
 import type { RoomTemplate } from '../templates/registry';
 import { LocalAvatarController, RemoteAvatarController } from './avatar-controllers';
 import { avatarSpawn } from './avatar-motion';
 import { avatarPresentation } from './avatar-presentation';
 import {
   initialAdaptiveQualityState,
-  isQualityPreference,
   QUALITY_CONFIGS,
-  QUALITY_STORAGE_KEY,
   ROOM_RENDERER_SETTINGS,
   renderingQualitySettings,
   sampleAdaptiveQuality,
   selectCameraFraming,
-  type QualityPreference,
   resolveQualityTier,
 } from './config';
 import type { RoomJourneyCue } from './journey';
@@ -34,35 +31,24 @@ import { ContextLossGuard, FramePerformanceMonitor } from './renderer-lifecycle'
 import { RoomTransitionController } from './room-transition-controller';
 import { ThirdPersonCamera } from './third-person-camera';
 
-const readQualityPreference = (): QualityPreference => {
-  if (typeof localStorage === 'undefined') return 'auto';
-  const stored = localStorage.getItem(QUALITY_STORAGE_KEY);
-  return isQualityPreference(stored) ? stored : 'auto';
-};
-
 export function RoomScene({
   template,
   journey,
-  admissionPending = false,
-  mode = 'preview',
-  sessionIntent = 'host',
-  remoteAvatarPose = null,
-  roomEventsReady = false,
-  sendAvatarPose = () => false,
-  qualityPreference: controlledQualityPreference,
+  admissionPending,
+  sessionIntent,
+  remoteAvatarPose,
+  roomEventsReady,
+  sendAvatarPose,
 }: {
   readonly template: RoomTemplate;
-  readonly journey?: RoomJourneyCue;
-  readonly admissionPending?: boolean;
-  readonly mode?: 'preview' | 'call';
-  readonly sessionIntent?: RoomSession['intent'];
-  readonly remoteAvatarPose?: SequencedAvatarPose | null;
-  readonly roomEventsReady?: boolean;
-  readonly sendAvatarPose?: (pose: AvatarPose) => boolean;
-  readonly qualityPreference?: QualityPreference;
+  readonly journey: RoomJourneyCue;
+  readonly admissionPending: boolean;
+  readonly sessionIntent: RoomSession['intent'];
+  readonly remoteAvatarPose: SequencedAvatarPose | null;
+  readonly roomEventsReady: boolean;
+  readonly sendAvatarPose: (pose: AvatarPose) => boolean;
 }) {
-  const [localQualityPreference, setLocalQualityPreference] = useState(readQualityPreference);
-  const qualityPreference = controlledQualityPreference ?? localQualityPreference;
+  const { qualityPreference } = useRoomQualityPreference();
   const deviceDpr = typeof devicePixelRatio === 'number' ? devicePixelRatio : 1;
   const [adaptiveQuality, setAdaptiveQuality] = useState(() =>
     initialAdaptiveQualityState(deviceDpr),
@@ -76,15 +62,12 @@ export function RoomScene({
   const activeJourney = journey ?? 'waiting';
   const [spatialJourney, setSpatialJourney] = useState(activeJourney);
   const presentation = avatarPresentation(sessionIntent, spatialJourney);
+  const cameraOutside = presentation.localLocation === 'outside';
   const controlsEnabled =
-    mode === 'call' &&
     presentation.localLocation === 'inside' &&
     activeJourney !== 'ended' &&
     activeJourney !== 'departed';
-  const { input, recenter, recenterSignal, setControlHeld } = useAvatarControls(
-    controlsEnabled,
-    mode === 'call',
-  );
+  const { input, recenter, recenterSignal, setControlHeld } = useAvatarControls(controlsEnabled);
   const qualityTier =
     qualityPreference === 'auto'
       ? adaptiveQuality.tier
@@ -93,19 +76,10 @@ export function RoomScene({
   const rendering = renderingQualitySettings(quality);
   const SceneEnvironment = template.scene;
 
-  const updateQuality = (preference: QualityPreference) => {
-    setLocalQualityPreference(preference);
-    if (preference === 'auto') localStorage.removeItem(QUALITY_STORAGE_KEY);
-    else localStorage.setItem(QUALITY_STORAGE_KEY, preference);
-  };
-
   if (contextLost) {
     return (
       <div
-        className={cn(
-          'bg-card grid place-items-center p-6 text-center',
-          mode === 'call' ? 'absolute inset-0' : 'relative aspect-video border',
-        )}
+        className='bg-card absolute inset-0 grid place-items-center p-6 text-center'
         role='alert'
       >
         <div className='space-y-1'>
@@ -125,14 +99,13 @@ export function RoomScene({
       data-room-quality-tier={qualityTier}
       data-room-admission={admissionPending ? 'pending' : 'idle'}
       data-room-reduced-motion={reducedMotion}
-      data-room-local-avatar={mode === 'call' ? presentation.local : 'absent'}
-      data-room-remote-avatar={mode === 'call' ? presentation.remote : 'absent'}
+      data-room-local-avatar={presentation.local}
+      data-room-remote-avatar={presentation.remote}
       data-room-avatar-sync={roomEventsReady ? 'ready' : 'unavailable'}
       data-room-display='idle'
-      className={cn(
-        'bg-card touch-none overflow-hidden',
-        mode === 'call' ? 'absolute inset-0' : 'relative aspect-video border',
-      )}
+      // isolate traps the drei Html labels' large z-index inside the scene so
+      // they cannot paint over the sibling entry/call overlays.
+      className='bg-card absolute inset-0 isolate touch-none overflow-hidden'
       aria-label={`${template.name} room scene`}
     >
       <Canvas
@@ -145,7 +118,7 @@ export function RoomScene({
           const framing = selectCameraFraming(
             size.width,
             size.height,
-            activeJourney === 'outside',
+            cameraOutside,
             template.camera,
           );
           camera.position.set(...framing.position);
@@ -166,48 +139,43 @@ export function RoomScene({
           poseRef={localPoseRef}
           reducedMotion={reducedMotion}
           surfaceRef={surfaceRef}
-          journey={spatialJourney}
-          mode={mode}
+          outside={cameraOutside}
           recenterSignal={recenterSignal}
         />
-        {mode === 'call' && (
-          <>
-            <LocalAvatarController
-              poseRef={localPoseRef}
-              input={input}
-              gameplay={template.gameplay}
-              intent={sessionIntent}
-              location={presentation.localLocation}
-              enabled={controlsEnabled}
-              sendAvatarPose={sendAvatarPose}
-              surfaceRef={surfaceRef}
-              blockerRef={remotePoseRef}
-              blockerActive={presentation.remote !== 'absent'}
-            />
-            <RemoteAvatarController
-              poseRef={remotePoseRef}
-              incoming={remoteAvatarPose}
-              ready={roomEventsReady}
-              presence={presentation.remote}
-              gameplay={template.gameplay}
-              remoteIntent={remoteIntent}
-              reducedMotion={reducedMotion}
-              surfaceRef={surfaceRef}
-            />
-            <ParticipantAvatar
-              poseRef={localPoseRef}
-              participant='local'
-              reducedMotion={reducedMotion}
-            />
-            {presentation.remote !== 'absent' && (
-              <ParticipantAvatar
-                poseRef={remotePoseRef}
-                participant='remote'
-                reducedMotion={reducedMotion}
-                reconnecting={presentation.remote === 'reconnecting'}
-              />
-            )}
-          </>
+        <LocalAvatarController
+          poseRef={localPoseRef}
+          input={input}
+          gameplay={template.gameplay}
+          intent={sessionIntent}
+          location={presentation.localLocation}
+          enabled={controlsEnabled}
+          sendAvatarPose={sendAvatarPose}
+          surfaceRef={surfaceRef}
+          blockerRef={remotePoseRef}
+          blockerActive={presentation.remote !== 'absent'}
+        />
+        <RemoteAvatarController
+          poseRef={remotePoseRef}
+          incoming={remoteAvatarPose}
+          ready={roomEventsReady}
+          presence={presentation.remote}
+          gameplay={template.gameplay}
+          remoteIntent={remoteIntent}
+          reducedMotion={reducedMotion}
+          surfaceRef={surfaceRef}
+        />
+        <ParticipantAvatar
+          poseRef={localPoseRef}
+          participant='local'
+          reducedMotion={reducedMotion}
+        />
+        {presentation.remote !== 'absent' && (
+          <ParticipantAvatar
+            poseRef={remotePoseRef}
+            participant='remote'
+            reducedMotion={reducedMotion}
+            reconnecting={presentation.remote === 'reconnecting'}
+          />
         )}
         <FramePerformanceMonitor
           onSample={(fps) => {
@@ -228,44 +196,14 @@ export function RoomScene({
           />
         </Suspense>
       </Canvas>
-      {mode === 'call' && presentation.localLocation === 'inside' && (
+      {presentation.localLocation === 'inside' && (
         <AvatarControls
           disabled={!controlsEnabled}
           onHeldChange={setControlHeld}
           onRecenter={recenter}
         />
       )}
-      {mode === 'preview' && (
-        <div
-          data-room-scene-ignore-gesture
-          data-room-quality-control
-          className='absolute right-3 bottom-3 z-10 flex items-center gap-2'
-        >
-          <label className='sr-only' htmlFor='room-quality'>
-            Room quality
-          </label>
-          <select
-            id='room-quality'
-            value={qualityPreference}
-            onChange={(event) => updateQuality(event.target.value as QualityPreference)}
-            className='border-border bg-background/85 text-foreground h-8 border px-2 text-xs backdrop-blur'
-          >
-            <option value='auto'>Auto quality</option>
-            <option value='high'>High quality</option>
-            <option value='medium'>Medium quality</option>
-            <option value='low'>Low quality</option>
-          </select>
-        </div>
-      )}
-      {mode === 'preview' && (
-        <p
-          data-room-scene-ignore-gesture
-          className='text-muted-foreground bg-background/70 absolute bottom-3 left-3 px-2 py-1 text-[11px]'
-        >
-          Drag to look around
-        </p>
-      )}
-      {mode === 'call' && presentation.localLocation === 'inside' && <RoomControlHelp />}
+      {presentation.localLocation === 'inside' && <RoomControlHelp />}
     </div>
   );
 }

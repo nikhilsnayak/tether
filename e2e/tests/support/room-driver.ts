@@ -17,6 +17,10 @@ export type RoomActor = {
 
 export type ProbedRoomActor = RoomActor & { readonly probe: WebRtcProbe };
 
+// Runs while an actor sits at the media-setup threshold, before the transfer
+// click that requests a session. Lets a test observe the pre-session scene.
+type ThresholdHook = (actor: RoomActor) => Promise<void>;
+
 type ActorOptions = {
   readonly probeWebRtc?: boolean;
   readonly storageState?: BrowserContextOptions['storageState'];
@@ -74,8 +78,9 @@ export class RoomDriver {
     }
   }
 
-  async completeMediaSetup(actor: RoomActor, actionLabel: string) {
+  async completeMediaSetup(actor: RoomActor, actionLabel: string, atThreshold?: ThresholdHook) {
     await this.prepareMediaSetup(actor);
+    await atThreshold?.(actor);
     await actor.page.getByRole('button', { name: actionLabel, exact: true }).click();
   }
 
@@ -118,12 +123,12 @@ export class RoomDriver {
     };
   }
 
-  async createRoom(actor: RoomActor) {
+  async createRoom(actor: RoomActor, atThreshold?: ThresholdHook) {
     const { page } = actor;
     await page.goto('/');
     await page.getByRole('button', { name: 'Call' }).click();
     await expect(page).toHaveURL(/\/host$/);
-    await this.startHostingRoom(actor);
+    await this.startHostingRoom(actor, atThreshold);
     const inviteLink = page.getByRole('textbox', { name: 'Room invite link' });
     await expect(inviteLink).toBeVisible({ timeout: 20_000 });
     const url = await inviteLink.inputValue();
@@ -183,8 +188,9 @@ export class RoomDriver {
     return actor.page.getByRole('button', { name: 'Let in', exact: true }).click();
   }
 
-  async join(actor: RoomActor, roomId: string, displayName = 'Guest') {
+  async join(actor: RoomActor, roomId: string, displayName = 'Guest', atThreshold?: ThresholdHook) {
     await this.prepareGuestAtThreshold(actor, roomId, displayName);
+    await atThreshold?.(actor);
     await actor.page.getByRole('button', { name: 'Knock on door', exact: true }).click();
   }
 
@@ -219,7 +225,7 @@ export class RoomDriver {
     if (actor.probe !== undefined) await actor.probe.rememberPreviewStream();
   }
 
-  startHostingRoom(actor: RoomActor) {
-    return this.completeMediaSetup(actor, 'Create room');
+  startHostingRoom(actor: RoomActor, atThreshold?: ThresholdHook) {
+    return this.completeMediaSetup(actor, 'Invite someone', atThreshold);
   }
 }
