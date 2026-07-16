@@ -27,7 +27,7 @@
     "prepare": "effect-language-service patch"
   },
   "dependencies": {
-    "@effect/language-service": "0.86.4",
+    "@effect/language-service": "0.87.0",
     "@types/bun": "catalog:",
     "oxfmt": "^0.59.0",
     "oxlint": "^1.74.0",
