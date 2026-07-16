@@ -4,6 +4,9 @@ import { isQualityPreference, QUALITY_STORAGE_KEY, type QualityPreference } from
 
 const listeners = new Set<() => void>();
 
+// Notifies synchronously: unlike PeerSessionControllerBinding (whose activate
+// resolves during render, so it defers to a microtask), this store is only
+// written from event handlers and the storage event, never during render.
 const publish = () => {
   const currentListeners = Array.from(listeners);
   for (const listener of currentListeners) listener();
