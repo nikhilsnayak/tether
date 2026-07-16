@@ -22,10 +22,12 @@ import { makeTokenBucket } from '@/lib/TokenBucket';
 
 import { sendToMembers } from './Broadcast';
 import {
+  DETACHMENT_DEADLINE,
   JOIN_REQUEST_TIMEOUT,
   SIGNAL_BUCKET_CAPACITY,
   SIGNAL_BUCKET_REFILL_EVERY,
 } from './Constants';
+import { RoomMembership } from './Membership';
 import type { AdmitResult, BroadcastRoomEvent, JoinOutcome, RespondAction } from './Model';
 import { RoomRegistry } from './Registry';
 
@@ -34,6 +36,7 @@ export class RoomAdmission extends Context.Service<RoomAdmission>()(
   {
     make: Effect.gen(function* () {
       const registry = yield* RoomRegistry;
+      const membership = yield* RoomMembership;
       const crypto = yield* Crypto.Crypto;
       const randomSessionToken = crypto.randomUUIDv4.pipe(Effect.orDie);
       const makeSignalBucket = makeTokenBucket({
@@ -76,7 +79,7 @@ export class RoomAdmission extends Context.Service<RoomAdmission>()(
           Effect.fnUntraced(function* (registry) {
             const context = registry.get(roomId);
 
-            if (context === undefined || context.members.length === 0) {
+            if (context === undefined || context.members.length === 0 || context.detached) {
               return { _tag: 'not-found' } as JoinOutcome;
             }
             if (
@@ -157,7 +160,13 @@ export class RoomAdmission extends Context.Service<RoomAdmission>()(
             const signalBucket = yield* makeSignalBucket;
             context.members = [
               ...context.members,
-              { peerId, sessionToken: newToken, signalBucket, events: pendingEntry.events },
+              {
+                peerId,
+                sessionToken: newToken,
+                signalBucket,
+                events: pendingEntry.events,
+                detachReadyEpoch: null,
+              },
             ];
             yield* sendToMembers(context, new PeerJoinedEvent({ peerId }), peerId);
             yield* Effect.logInfo('Room session opened').pipe(
@@ -183,6 +192,10 @@ export class RoomAdmission extends Context.Service<RoomAdmission>()(
         if (action._tag === 'no-pending') return yield* new NoPendingJoin({ roomId, peerId });
         if (action._tag === 'deny') return yield* Deferred.fail(action.deferred, new JoinDenied());
         yield* Deferred.succeed(action.deferred, action.result);
+        yield* Effect.sleep(DETACHMENT_DEADLINE).pipe(
+          Effect.andThen(membership.expireUndetachedRoom(roomId, action.result.sessionToken)),
+          Effect.forkDetach,
+        );
       });
 
       return { openJoin, removePending, respondToJoin };

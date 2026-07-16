@@ -62,16 +62,25 @@ export class RoomService extends Context.Service<RoomService>()('@tether/RoomSer
       yield* membership.removeMember(roomId, selfId, sessionToken);
     });
 
-    return { host, getRoomMetadata, join, respondToJoin, sendSignal: signaling.sendSignal, leave };
+    return {
+      host,
+      getRoomMetadata,
+      join,
+      respondToJoin,
+      readyToDetach: signaling.readyToDetach,
+      sendSignal: signaling.sendSignal,
+      leave,
+    };
   }),
 }) {
   // Leaves Crypto.Crypto as an open requirement; the composition root and tests
   // provide the platform implementation (see lib/ServerCrypto).
   static readonly layer = Layer.effect(this, this.make).pipe(
     Layer.provide(
-      Layer.mergeAll(RoomMembership.layer, RoomAdmission.layer, RoomSignaling.layer).pipe(
-        Layer.provide(RoomRegistry.layer),
-      ),
+      Layer.mergeAll(
+        RoomAdmission.layer.pipe(Layer.provideMerge(RoomMembership.layer)),
+        RoomSignaling.layer,
+      ).pipe(Layer.provide(RoomRegistry.layer)),
     ),
   );
 }

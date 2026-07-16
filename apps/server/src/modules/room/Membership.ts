@@ -79,10 +79,16 @@ export class RoomMembership extends Context.Service<RoomMembership>()(
             }
 
             context.members = context.members.filter((entry) => entry.peerId !== selfId);
-            yield* sendToMembers(context, new PeerLeftEvent({ peerId: selfId }));
-            yield* Effect.logInfo('Room session closed').pipe(
-              Effect.annotateLogs('occupancy', context.members.length),
-            );
+            if (context.detached) {
+              yield* Effect.logInfo('Detached room member removed').pipe(
+                Effect.annotateLogs('occupancy', context.members.length),
+              );
+            } else {
+              yield* sendToMembers(context, new PeerLeftEvent({ peerId: selfId }));
+              yield* Effect.logInfo('Room session closed').pipe(
+                Effect.annotateLogs('occupancy', context.members.length),
+              );
+            }
 
             if (context.members.length === 0) {
               state.delete(roomId);
@@ -131,10 +137,18 @@ export class RoomMembership extends Context.Service<RoomMembership>()(
                   const brandedSessionToken = SessionToken.make(sessionToken);
                   state.set(roomId, {
                     members: [
-                      { peerId: selfId, sessionToken: brandedSessionToken, signalBucket, events },
+                      {
+                        peerId: selfId,
+                        sessionToken: brandedSessionToken,
+                        signalBucket,
+                        events,
+                        detachReadyEpoch: null,
+                      },
                     ],
                     pending: [],
                     roomTemplateId,
+                    latestOfferEpoch: null,
+                    detached: false,
                   });
                   const eventStream = Stream.fromArray<RoomEvent>([
                     new RoomSessionOpenedEvent({
@@ -172,14 +186,48 @@ export class RoomMembership extends Context.Service<RoomMembership>()(
       });
 
       const getRoomMetadata = Effect.fnUntraced(function* (roomId: RoomId) {
-        const roomTemplateId = yield* registry.modify((state) =>
-          Effect.succeed(state.get(roomId)?.roomTemplateId),
-        );
+        const roomTemplateId = yield* registry.modify((state) => {
+          const context = state.get(roomId);
+          return Effect.succeed(
+            context === undefined || context.detached ? undefined : context.roomTemplateId,
+          );
+        });
         if (roomTemplateId === undefined) return yield* new RoomNotFound({ roomId });
         return { roomTemplateId };
       });
 
-      return { openHost, getRoomMetadata, removeMember };
+      const expireUndetachedRoom = Effect.fnUntraced(function* (
+        roomId: RoomId,
+        admittedSessionToken: string,
+      ) {
+        const expired = yield* registry.modify(
+          Effect.fnUntraced(function* (state) {
+            const context = state.get(roomId);
+            if (
+              context === undefined ||
+              context.detached ||
+              !context.members.some((entry) => entry.sessionToken === admittedSessionToken)
+            ) {
+              return null;
+            }
+            state.delete(roomId);
+            yield* Effect.logWarning('Room expired before detachment');
+            return {
+              queues: context.members.map((entry) => entry.events),
+              pending: context.pending,
+            };
+          }),
+        );
+        if (expired === null) return;
+        yield* Effect.forEach(expired.queues, (queue) => Queue.shutdown(queue), { discard: true });
+        yield* Effect.forEach(
+          expired.pending,
+          (entry) => Deferred.fail(entry.deferred, new JoinDenied()),
+          { discard: true },
+        );
+      });
+
+      return { expireUndetachedRoom, openHost, getRoomMetadata, removeMember };
     }),
   },
 ) {

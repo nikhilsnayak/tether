@@ -18,6 +18,8 @@ export type Member = {
   readonly sessionToken: SessionToken;
   readonly signalBucket: TokenBucket;
   readonly events: Queue.Queue<BroadcastRoomEvent>;
+  /** negotiationEpoch this member declared ReadyToDetach for; null until then. */
+  readonly detachReadyEpoch: number | null;
 };
 
 export type AdmitResult = {
@@ -38,6 +40,10 @@ export type RoomContext = {
   members: Member[];
   pending: PendingJoin[];
   readonly roomTemplateId: RoomTemplateId;
+  /** Highest offer epoch the server has relayed; readiness must match it. */
+  latestOfferEpoch: number | null;
+  /** Set atomically when the second matching readiness arrives. */
+  detached: boolean;
 };
 
 export type RegistryState = Map<RoomId, RoomContext>;
