@@ -237,6 +237,7 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
           Effect.sync(() => {
             operations.push('leaveRoom');
           }),
+        ReadyToDetach: () => Effect.void,
         RespondToJoin: respondToJoin,
         OpenRoomSession: openRoomSession,
         SendSignal: (payload) => {
@@ -339,6 +340,8 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
             events.push(output);
             yield* Queue.offer(eventQueue, output);
           });
+        case '@tether/DetachedEvent':
+          return Effect.void;
       }
     }
     return peerActor.handleInput(input);

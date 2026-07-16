@@ -12,7 +12,7 @@ import {
 } from './Errors';
 import { RoomEvent } from './Events';
 import { DisplayName, PeerId, RoomId, RoomTemplateId, SessionToken } from './Identity';
-import { Signal } from './Signals';
+import { NegotiationEpoch, Signal } from './Signals';
 
 // A host mints a fresh room; a joiner must name the room and itself. Modelling
 // this as a discriminated union makes the requirement structural — the wire
@@ -67,6 +67,15 @@ export const SendSignalPayload = Schema.Struct({
 });
 
 export const SendSignalError = PeerNotInRoom;
+
+export const ReadyToDetachPayload = Schema.Struct({
+  selfId: PeerId,
+  roomId: RoomId,
+  sessionToken: SessionToken,
+  negotiationEpoch: NegotiationEpoch,
+});
+
+export const ReadyToDetachError = PeerNotInRoom;
 
 export const LeaveRoomPayload = Schema.Struct({
   selfId: PeerId,

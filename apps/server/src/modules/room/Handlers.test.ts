@@ -95,6 +95,19 @@ describe('RoomHandlers', () => {
     }),
   );
 
+  it.effect('accepts detachment readiness before detachment is implemented', () =>
+    Effect.gen(function* () {
+      const harness = yield* makeRoomRpcTestHarness();
+
+      yield* harness.client.ReadyToDetach({
+        roomId: RoomId.make('abc-defg-hij'),
+        selfId: alice,
+        sessionToken: SessionToken.make('session-token'),
+        negotiationEpoch: 0,
+      });
+    }),
+  );
+
   it.effect('does not relay signals from a peer outside the room', () =>
     Effect.gen(function* () {
       const harness = yield* makeRoomRpcTestHarness();

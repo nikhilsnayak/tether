@@ -4,6 +4,7 @@ import {
   GetRoomMetadataPayload,
   GetRoomMetadataSuccess,
   OpenRoomSessionPayload,
+  ReadyToDetachPayload,
   RespondToJoinPayload,
   SendSignalPayload,
 } from './index';
@@ -27,6 +28,14 @@ describe('room RPC schemas', () => {
       }),
     );
     assert.isTrue(succeeds(SendSignalPayload, sendSignalPayload('session-token')));
+    assert.isTrue(
+      succeeds(ReadyToDetachPayload, {
+        selfId: 'abcdefghijkl',
+        roomId: 'abc-defg-hij',
+        sessionToken: 'session-token',
+        negotiationEpoch: 0,
+      }),
+    );
     assert.isTrue(succeeds(GetRoomMetadataPayload, { roomId: 'abc-defg-hij' }));
     assert.isTrue(succeeds(GetRoomMetadataSuccess, { roomTemplateId: 'future-room' }));
     assert.isTrue(
@@ -72,5 +81,16 @@ describe('room RPC schemas', () => {
         decision: 'maybe',
       }),
     );
+  });
+
+  it('rejects invalid detachment negotiation epochs', () => {
+    const payload = {
+      selfId: 'abcdefghijkl',
+      roomId: 'abc-defg-hij',
+      sessionToken: 'session-token',
+    };
+
+    assert.isFalse(succeeds(ReadyToDetachPayload, { ...payload, negotiationEpoch: -1 }));
+    assert.isFalse(succeeds(ReadyToDetachPayload, { ...payload, negotiationEpoch: 1.5 }));
   });
 });

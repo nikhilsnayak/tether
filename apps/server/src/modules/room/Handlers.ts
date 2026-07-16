@@ -30,6 +30,10 @@ export const RoomHandlers = RoomRpcs.toLayer(
       SendSignal: Effect.fnUntraced(function* ({ roomId, selfId, sessionToken, signal }) {
         yield* room.sendSignal(roomId, selfId, sessionToken, signal);
       }),
+      ReadyToDetach: Effect.fnUntraced(function* () {
+        // Implemented by the detachment commit (plans/003); accepted and ignored until then.
+        yield* Effect.logInfo('ReadyToDetach received before detachment is implemented');
+      }),
       LeaveRoom: Effect.fnUntraced(function* ({ roomId, selfId, sessionToken }) {
         yield* room.leave(roomId, selfId, sessionToken);
       }),

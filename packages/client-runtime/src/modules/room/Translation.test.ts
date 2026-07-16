@@ -1,6 +1,7 @@
 import { assert, describe, it } from '@effect/vitest';
 import {
   DUSK_SUITE_TEMPLATE_ID,
+  DetachedEvent,
   DisplayName,
   IceCandidateSignal,
   JoinCancelledEvent,
@@ -117,6 +118,14 @@ describe('translateRoomEventData', () => {
     assert.deepStrictEqual(translateRoomEventData(new JoinCancelledEvent({ peerId })).uiEvent, {
       _tag: 'JoinRequestCancelled',
       peerId,
+    });
+  });
+
+  it('ignores detached events until the client detachment protocol is implemented', () => {
+    assert.deepStrictEqual(translateRoomEventData(new DetachedEvent({})), {
+      input: null,
+      uiEvent: null,
+      openedSession: null,
     });
   });
 });
