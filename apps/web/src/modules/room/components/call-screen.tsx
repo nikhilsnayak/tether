@@ -75,7 +75,7 @@ export function CallScreen({
   const [confirmedSas, setConfirmedSas] = useState<string | null>(null);
   const [handlingJoinPeerIds, setHandlingJoinPeerIds] = useState<ReadonlySet<PeerId>>(new Set());
   const selfPreviewBoundaryRef = useRef<HTMLDivElement>(null);
-  const presentation = peerSessionStatusPresentation(view.status);
+  const presentation = peerSessionStatusPresentation(view.status, view.detached);
   const pendingJoin =
     view.pendingJoinRequests.find((request) => !handlingJoinPeerIds.has(request.peerId)) ?? null;
   const sasConfirmed = view.sas !== null && confirmedSas === view.sas;
@@ -136,6 +136,7 @@ export function CallScreen({
   return (
     <div
       className='pointer-events-none relative z-40 h-svh overflow-hidden'
+      data-detached={view.detached ? 'true' : 'false'}
       data-room-remote-camera={remoteCameraState}
       data-room-remote-microphone={remoteMicrophoneState}
     >
@@ -201,6 +202,14 @@ export function CallScreen({
                 {presentation.label}
               </span>
             </div>
+            {presentation.direct && (
+              <span
+                className='border-primary/40 bg-background/70 text-primary rounded-md border px-2 py-1 font-mono text-[10px] tracking-[0.2em] uppercase backdrop-blur-sm'
+                data-testid='direct-indicator'
+              >
+                Direct
+              </span>
+            )}
           </div>
           <div className='flex shrink-0 flex-col items-end gap-1.5'>
             {session.intent === 'host' && <RoomInvite />}

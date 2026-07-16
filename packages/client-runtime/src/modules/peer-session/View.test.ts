@@ -13,6 +13,7 @@ const connectedView: PeerSessionView = {
   status: 'connected',
   messages: [],
   roomEventsReady: true,
+  detached: false,
   remoteAvatarPose: null,
   remoteMediaState: null,
   sas: '11111 22222 33333 44444 55555',
@@ -22,6 +23,7 @@ const connectedView: PeerSessionView = {
 };
 const peerId = PeerId.make('pppppppppppp');
 const unavailableRoomEvents = {
+  detached: false,
   remoteAvatarPose: null,
   remoteMediaState: null,
 } as const;
@@ -134,6 +136,12 @@ describe('reducePeerSessionView', () => {
       reducePeerSessionView(connectedView, { _tag: 'SessionStarted' }),
       initialPeerSessionView,
     );
+  });
+
+  it('projects detachment and resets it for a new session', () => {
+    const detached = reducePeerSessionView(connectedView, { _tag: 'SessionDetached' });
+    assert.isTrue(detached.detached);
+    assert.isFalse(reducePeerSessionView(detached, { _tag: 'SessionStarted' }).detached);
   });
 
   it('projects a server-capacity rejection', () => {

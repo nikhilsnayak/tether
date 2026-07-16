@@ -81,5 +81,6 @@ export class PeerSessionSignaling extends Context.Service<
   PeerSessionSignaling,
   {
     readonly sendSignal: (signal: PeerSessionSignal) => Effect.Effect<void, unknown>;
+    readonly sendReadyToDetach: (negotiationEpoch: number) => Effect.Effect<void, unknown>;
   }
 >()('@tether/client-runtime/peer-session/PeerSessionSignaling') {}

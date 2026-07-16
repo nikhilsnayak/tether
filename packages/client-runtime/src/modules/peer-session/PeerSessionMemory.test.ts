@@ -24,6 +24,45 @@ describe('PeerSessionMemory', () => {
     assert.deepStrictEqual(memory.negotiation.acceptRemoteOffer(0), { _tag: 'Accepted' });
   });
 
+  it('models detachment as generation-aware protocol state', () => {
+    const memory = makePeerSessionMemory('self');
+
+    assert.isFalse(memory.detachment.isDetached());
+    assert.isTrue(memory.detachment.needsProbe());
+    assert.isFalse(memory.detachment.isProbeExchanged());
+    assert.isFalse(memory.detachment.hasDeclaredReadiness());
+    assert.isTrue(memory.detachment.markProbeReceived());
+    assert.isFalse(memory.detachment.markProbeReceived());
+    assert.isTrue(memory.detachment.needsProbe());
+
+    memory.detachment.markProbeSent();
+    assert.isFalse(memory.detachment.needsProbe());
+    assert.isTrue(memory.detachment.isProbeExchanged());
+    memory.detachment.markReadinessSent(3);
+    assert.isTrue(memory.detachment.hasDeclaredReadiness());
+    assert.isTrue(memory.detachment.hasDeclaredReadinessFor(3));
+    assert.isFalse(memory.detachment.hasDeclaredReadinessFor(4));
+
+    memory.detachment.resetGeneration();
+    assert.isTrue(memory.detachment.needsProbe());
+    assert.isFalse(memory.detachment.isProbeExchanged());
+    assert.isFalse(memory.detachment.hasDeclaredReadiness());
+
+    memory.detachment.markProbeSent();
+    memory.detachment.markProbeSent();
+    assert.isTrue(memory.detachment.markProbeReceived());
+    assert.isFalse(memory.detachment.markProbeReceived());
+    assert.isTrue(memory.detachment.isProbeExchanged());
+    assert.isTrue(memory.detachment.markDetached());
+    assert.isFalse(memory.detachment.markDetached());
+    memory.detachment.resetGeneration();
+    memory.detachment.markProbeSent();
+    memory.detachment.markReadinessSent(4);
+    assert.isFalse(memory.detachment.needsProbe());
+    assert.isFalse(memory.detachment.isProbeExchanged());
+    assert.isFalse(memory.detachment.hasDeclaredReadiness());
+  });
+
   it('resets per-generation delivery state while retaining local snapshots', () => {
     const memory = makePeerSessionMemory('self');
     const pose = { x: 1, z: 2, yaw: 0.5, action: 'walk' } as const;

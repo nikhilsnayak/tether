@@ -1,6 +1,7 @@
 import { assert, describe, it } from '@effect/vitest';
 import {
   DUSK_SUITE_TEMPLATE_ID,
+  DetachedEvent,
   DisplayName,
   JoinDenied,
   JoinRequestedEvent,
@@ -95,6 +96,40 @@ describe('RoomHandlers', () => {
     }),
   );
 
+  it.effect('commits detachment when both authenticated peers are ready', () =>
+    Effect.gen(function* () {
+      const harness = yield* makeRoomRpcTestHarness();
+      const { roomId, aliceToken, bobToken, aliceFiber, bobFiber } = yield* harness.connect({
+        hostTake: 5,
+        joinerTake: 3,
+      });
+      const signal = new SessionDescriptionSignal({
+        negotiationEpoch: 0,
+        type: 'offer',
+        sdp: 'detachment-offer',
+      });
+
+      yield* harness.client.SendSignal({ roomId, selfId: bob, sessionToken: bobToken, signal });
+      yield* harness.client.ReadyToDetach({
+        roomId,
+        selfId: alice,
+        sessionToken: aliceToken,
+        negotiationEpoch: 0,
+      });
+      yield* harness.client.ReadyToDetach({
+        roomId,
+        selfId: bob,
+        sessionToken: bobToken,
+        negotiationEpoch: 0,
+      });
+
+      assert.deepStrictEqual((yield* Fiber.join(aliceFiber)).at(-1), {
+        event: new DetachedEvent({}),
+      });
+      yield* Fiber.join(bobFiber);
+    }),
+  );
+
   it.effect('does not relay signals from a peer outside the room', () =>
     Effect.gen(function* () {
       const harness = yield* makeRoomRpcTestHarness();
@@ -152,7 +187,7 @@ describe('RoomHandlers', () => {
   it.effect('returns RoomNotFound for metadata lookup on an unknown room', () =>
     Effect.gen(function* () {
       const harness = yield* makeRoomRpcTestHarness();
-      const error = yield* harness.client
+      const error = yield* harness.metadataClient
         .GetRoomMetadata({ roomId: RoomId.make('abc-defg-hij') })
         .pipe(Effect.flip);
       assert.instanceOf(error, RoomNotFound);

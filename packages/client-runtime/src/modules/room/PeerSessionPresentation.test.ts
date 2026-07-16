@@ -24,10 +24,11 @@ const statuses: ReadonlyArray<PeerSessionView['status']> = [
 describe('PeerSessionPresentation', () => {
   it('provides complete display content for every status', () => {
     for (const status of statuses) {
-      const presentation = peerSessionStatusPresentation(status);
+      const presentation = peerSessionStatusPresentation(status, false);
 
       assert.isNotEmpty(presentation.label);
       assert.isNotEmpty(presentation.hint);
+      assert.isFalse(presentation.direct);
     }
   });
 
@@ -50,11 +51,42 @@ describe('PeerSessionPresentation', () => {
   });
 
   it('presents server capacity without room-specific guidance', () => {
-    assert.deepStrictEqual(peerSessionStatusPresentation('server-at-capacity'), {
+    assert.deepStrictEqual(peerSessionStatusPresentation('server-at-capacity', false), {
       tone: 'destructive',
       pulse: false,
       label: 'Service is busy',
       hint: 'Tether has reached its current call capacity. Try again shortly.',
+      direct: false,
+    });
+  });
+
+  it('presents a connected detached call as direct', () => {
+    assert.deepStrictEqual(peerSessionStatusPresentation('connected', true), {
+      tone: 'success',
+      pulse: false,
+      label: 'Connected',
+      hint: 'Direct connection. The call no longer uses the Tether server.',
+      direct: true,
+    });
+  });
+
+  it('does not promise recovery after a detached transport failure', () => {
+    assert.deepStrictEqual(peerSessionStatusPresentation('transport-lost', true), {
+      tone: 'warning',
+      pulse: false,
+      label: 'Connection lost',
+      hint: 'The direct connection failed. Create a new room to reconnect.',
+      direct: false,
+    });
+  });
+
+  it('does not promise rejoining after a detached peer departure', () => {
+    assert.deepStrictEqual(peerSessionStatusPresentation('peer-departed', true), {
+      tone: 'warning',
+      pulse: false,
+      label: 'They left the call',
+      hint: 'This room has ended. Create a new room to talk again.',
+      direct: false,
     });
   });
 });

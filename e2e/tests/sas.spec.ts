@@ -33,9 +33,10 @@ test.describe('real room', { tag: '@gpu' }, () => {
     // The confirmed code stays visible as a badge.
     await expect(safetyCode(hostPage)).toHaveText(fromHost ?? '');
     await expect(safetyCheck(guestPage)).toBeVisible();
+    await Promise.all([room.expectDetached(host), room.expectDetached(guest)]);
 
     // The mismatch escape hatch ends the call. The guest's departure returns the
-    // host to the peer-departed waiting state (distinct hint from a fresh room).
+    // host to the ended detached-room state (distinct hint from a fresh room).
     await guestPage.getByRole('button', { name: "They don't match" }).click();
     await expect(guestPage).toHaveURL('/');
     await room.expectPeerDeparted(host);

@@ -1,16 +1,21 @@
 import { expect, test } from './fixtures';
 
 test.describe('real room', { tag: '@gpu' }, () => {
-  test('a dropped connection surfaces the failed screen and returns to setup', async ({ room }) => {
-    const { host } = await room.connect();
+  test('a post-detachment connection failure ends the call and returns to setup', async ({
+    room,
+  }) => {
+    const { host } = await room.connect({ probeWebRtc: true });
     const { page } = host;
-    await host.context.setOffline(true);
-    await expect(page.getByText('Session failed', { exact: true }).first()).toBeVisible({
-      timeout: 25_000,
+    await room.expectDetached(host);
+    await host.probe.failLatestPeerConnection();
+    await expect(page.getByText('Connection lost', { exact: true }).first()).toBeVisible({
+      timeout: 10_000,
     });
+    await expect(
+      page.getByText('The direct connection failed. Create a new room to reconnect.'),
+    ).toBeVisible();
 
-    await host.context.setOffline(false);
-    await page.getByRole('button', { name: 'Back to room setup' }).click();
+    await page.getByRole('button', { name: 'Leave call' }).click();
     await expect(page).toHaveURL('/');
   });
 });

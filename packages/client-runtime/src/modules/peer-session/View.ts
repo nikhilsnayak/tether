@@ -6,6 +6,7 @@ export const initialPeerSessionView: PeerSessionView = {
   status: 'connecting',
   messages: [],
   roomEventsReady: false,
+  detached: false,
   remoteAvatarPose: null,
   remoteMediaState: null,
   sas: null,
@@ -42,6 +43,8 @@ export const reducePeerSessionView = (
       return { ...view, messages: [...view.messages, event.message] };
     case 'SasReady':
       return { ...view, sas: event.code };
+    case 'SessionDetached':
+      return { ...view, detached: true };
     case 'SignalingDisconnected':
       return {
         ...view,

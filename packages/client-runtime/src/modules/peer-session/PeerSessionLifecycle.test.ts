@@ -13,7 +13,7 @@ import {
 import { Deferred, Effect, Exit, Queue, Scope, Stream } from 'effect';
 import { TestClock } from 'effect/testing';
 
-import { AppClient } from '../../AppClient';
+import { AppSignalingClient } from '../../AppSignalingClient';
 import { startPeerSession, type PreparedMedia } from '../room/PeerSessionHost';
 import { type MediaStreamHandle } from './Model';
 import { PlatformError } from './Platform';
@@ -28,6 +28,67 @@ import {
 } from './test/PeerSessionTestHarness';
 
 describe('startPeerSession', () => {
+  it.effect('stops when signaling ends', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makePeerSessionTestHarness();
+
+        assert.strictEqual(yield* fixture.actor({ _tag: 'SignalingEnded' }), 'stop');
+      }),
+    ),
+  );
+
+  it.effect('continues after an ordinary input', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makePeerSessionTestHarness();
+
+        assert.strictEqual(
+          yield* fixture.actor({ _tag: 'RoomSessionOpened', peerId: null }),
+          'continue',
+        );
+      }),
+    ),
+  );
+
+  it.effect('accepts ICE gathering completion for the active generation', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makePeerSessionTestHarness();
+        yield* fixture.openRoom(bob);
+        const eventCount = fixture.events.length;
+
+        assert.strictEqual(yield* fixture.gatheringComplete(), 'continue');
+        assert.lengthOf(fixture.events, eventCount);
+      }),
+    ),
+  );
+
+  it.effect('ignores ICE gathering completion before a peer is known', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makePeerSessionTestHarness();
+
+        assert.strictEqual(yield* fixture.gatheringComplete(), 'continue');
+        assert.deepStrictEqual(fixture.events, []);
+      }),
+    ),
+  );
+
+  it.effect('ignores ICE gathering completion from a stale generation', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makePeerSessionTestHarness();
+        yield* fixture.openRoom(bob);
+        yield* fixture.connectionFailed();
+        const eventCount = fixture.events.length;
+
+        assert.strictEqual(yield* fixture.gatheringComplete(fixture.peerConnection), 'continue');
+        assert.lengthOf(fixture.events, eventCount);
+      }),
+    ),
+  );
+
   it.effect('uses the Google public STUN server for peer connection acquisition', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -36,7 +97,9 @@ describe('startPeerSession', () => {
           (() =>
             Stream.make({
               event: openedEvent(bob),
-            }).pipe(Stream.concat(Stream.never))) as AppClient['Service']['OpenRoomSession'],
+            }).pipe(
+              Stream.concat(Stream.never),
+            )) as AppSignalingClient['Service']['OpenRoomSession'],
           ({ signal }) =>
             signal._tag === '@tether/SessionDescriptionSignal' && signal.type === 'offer'
               ? Deferred.succeed(offerSent, undefined)
@@ -61,7 +124,9 @@ describe('startPeerSession', () => {
           (() =>
             Stream.make({
               event: openedEvent(bob),
-            }).pipe(Stream.concat(Stream.never))) as AppClient['Service']['OpenRoomSession'],
+            }).pipe(
+              Stream.concat(Stream.never),
+            )) as AppSignalingClient['Service']['OpenRoomSession'],
           ({ signal }) =>
             signal._tag === '@tether/SessionDescriptionSignal' && signal.type === 'offer'
               ? Deferred.succeed(offerSent, undefined)
@@ -97,7 +162,7 @@ describe('startPeerSession', () => {
     Effect.gen(function* () {
       const scope = yield* Scope.make();
       const fixture = yield* makePeerSessionTestHarness(
-        (() => Stream.never) as AppClient['Service']['OpenRoomSession'],
+        (() => Stream.never) as AppSignalingClient['Service']['OpenRoomSession'],
       ).pipe(Scope.provide(scope));
       const preparedStream: MediaStreamHandle = { value: { id: 'prepared-media' } };
       const preparedMedia: PreparedMedia = {
@@ -143,7 +208,7 @@ describe('startPeerSession', () => {
             yield* Deferred.succeed(roomStreamSubscribed, undefined);
             return Stream.never;
           }),
-        )) as AppClient['Service']['OpenRoomSession']).pipe(Scope.provide(scope));
+        )) as AppSignalingClient['Service']['OpenRoomSession']).pipe(Scope.provide(scope));
       const preparedStream: MediaStreamHandle = { value: { id: 'prepared-media' } };
       const preparedMedia: PreparedMedia = {
         claim: Effect.acquireRelease(
@@ -187,7 +252,9 @@ describe('startPeerSession', () => {
         const fixture = yield* makePeerSessionTestHarness((() =>
           Stream.make({
             event: openedEvent(null),
-          }).pipe(Stream.concat(Stream.never))) as AppClient['Service']['OpenRoomSession']);
+          }).pipe(
+            Stream.concat(Stream.never),
+          )) as AppSignalingClient['Service']['OpenRoomSession']);
         const peerSession = yield* startPeerSession(session).pipe(
           Effect.provide(fixture.dependencies),
         );
@@ -213,7 +280,7 @@ describe('startPeerSession', () => {
       Effect.gen(function* () {
         const roomEventQueue = yield* Queue.unbounded<{ readonly event: RoomEvent }>();
         const fixture = yield* makePeerSessionTestHarness((() =>
-          Stream.fromQueue(roomEventQueue)) as AppClient['Service']['OpenRoomSession']);
+          Stream.fromQueue(roomEventQueue)) as AppSignalingClient['Service']['OpenRoomSession']);
         const peerSession = yield* startPeerSession(session).pipe(
           Effect.provide(fixture.dependencies),
         );
@@ -235,7 +302,7 @@ describe('startPeerSession', () => {
         const fixture = yield* makePeerSessionTestHarness((() =>
           Stream.make({
             event: openedEvent(null),
-          })) as AppClient['Service']['OpenRoomSession']);
+          })) as AppSignalingClient['Service']['OpenRoomSession']);
 
         yield* startPeerSession(session).pipe(Effect.provide(fixture.dependencies));
 
@@ -280,7 +347,7 @@ describe('startPeerSession', () => {
         const fixture = yield* makePeerSessionTestHarness((() =>
           Stream.fail(
             new RoomFull({ roomId: session.roomId }),
-          )) as AppClient['Service']['OpenRoomSession']);
+          )) as AppSignalingClient['Service']['OpenRoomSession']);
 
         yield* startPeerSession(session).pipe(Effect.provide(fixture.dependencies));
         const started = yield* Queue.take(fixture.eventQueue);
@@ -303,7 +370,7 @@ describe('startPeerSession', () => {
         const fixture = yield* makePeerSessionTestHarness((() =>
           Stream.fail(
             new RoomFull({ roomId: session.roomId }),
-          )) as AppClient['Service']['OpenRoomSession']);
+          )) as AppSignalingClient['Service']['OpenRoomSession']);
 
         yield* startPeerSession(session).pipe(Effect.provide(fixture.dependencies));
         yield* Queue.take(fixture.eventQueue);
@@ -322,7 +389,7 @@ describe('startPeerSession', () => {
     Effect.scoped(
       Effect.gen(function* () {
         const fixture = yield* makePeerSessionTestHarness((() =>
-          Stream.fail(new ServerAtCapacity())) as AppClient['Service']['OpenRoomSession']);
+          Stream.fail(new ServerAtCapacity())) as AppSignalingClient['Service']['OpenRoomSession']);
 
         yield* startPeerSession(session).pipe(Effect.provide(fixture.dependencies));
         const started = yield* Queue.take(fixture.eventQueue);
@@ -343,7 +410,7 @@ describe('startPeerSession', () => {
     Effect.gen(function* () {
       const scope = yield* Scope.make();
       const fixture = yield* makePeerSessionTestHarness(
-        (() => Stream.never) as AppClient['Service']['OpenRoomSession'],
+        (() => Stream.never) as AppSignalingClient['Service']['OpenRoomSession'],
       ).pipe(Scope.provide(scope));
 
       yield* startPeerSession(session).pipe(
@@ -371,7 +438,7 @@ describe('startPeerSession', () => {
               roomId: session.roomId,
               peerId: session.selfId,
             }),
-          )) as AppClient['Service']['OpenRoomSession']);
+          )) as AppSignalingClient['Service']['OpenRoomSession']);
 
         yield* startPeerSession(session).pipe(Effect.provide(fixture.dependencies));
         const started = yield* Queue.take(fixture.eventQueue);
@@ -394,7 +461,7 @@ describe('startPeerSession', () => {
         const fixture = yield* makePeerSessionTestHarness((() =>
           Stream.fail(
             new RoomNotFound({ roomId: session.roomId }),
-          )) as AppClient['Service']['OpenRoomSession']);
+          )) as AppSignalingClient['Service']['OpenRoomSession']);
 
         yield* startPeerSession(session).pipe(Effect.provide(fixture.dependencies));
         const started = yield* Queue.take(fixture.eventQueue);
@@ -415,7 +482,7 @@ describe('startPeerSession', () => {
     Effect.scoped(
       Effect.gen(function* () {
         const fixture = yield* makePeerSessionTestHarness((() =>
-          Stream.fail(new JoinDenied())) as AppClient['Service']['OpenRoomSession']);
+          Stream.fail(new JoinDenied())) as AppSignalingClient['Service']['OpenRoomSession']);
 
         yield* startPeerSession(session).pipe(Effect.provide(fixture.dependencies));
         const started = yield* Queue.take(fixture.eventQueue);
@@ -438,7 +505,9 @@ describe('startPeerSession', () => {
         const fixture = yield* makePeerSessionTestHarness((() =>
           Stream.make({
             event: openedEvent(null),
-          }).pipe(Stream.concat(Stream.never))) as AppClient['Service']['OpenRoomSession']);
+          }).pipe(
+            Stream.concat(Stream.never),
+          )) as AppSignalingClient['Service']['OpenRoomSession']);
         const peerSession = yield* startPeerSession(session).pipe(
           Effect.provide(fixture.dependencies),
         );
@@ -481,7 +550,7 @@ describe('startPeerSession', () => {
       Effect.gen(function* () {
         const roomEventQueue = yield* Queue.unbounded<{ readonly event: RoomEvent }>();
         const fixture = yield* makePeerSessionTestHarness((() =>
-          Stream.fromQueue(roomEventQueue)) as AppClient['Service']['OpenRoomSession']);
+          Stream.fromQueue(roomEventQueue)) as AppSignalingClient['Service']['OpenRoomSession']);
         const peerSession = yield* startPeerSession(session).pipe(
           Effect.provide(fixture.dependencies),
         );
@@ -515,7 +584,9 @@ describe('startPeerSession', () => {
           (() =>
             Stream.make({
               event: openedEvent(null),
-            }).pipe(Stream.concat(Stream.never))) as AppClient['Service']['OpenRoomSession'],
+            }).pipe(
+              Stream.concat(Stream.never),
+            )) as AppSignalingClient['Service']['OpenRoomSession'],
           undefined,
           undefined,
           new NoPendingJoin({ roomId: session.roomId, peerId: bob }),
@@ -541,7 +612,9 @@ describe('startPeerSession', () => {
           (() =>
             Stream.make({
               event: openedEvent(null),
-            }).pipe(Stream.concat(Stream.never))) as AppClient['Service']['OpenRoomSession'],
+            }).pipe(
+              Stream.concat(Stream.never),
+            )) as AppSignalingClient['Service']['OpenRoomSession'],
           undefined,
           undefined,
           new PeerNotInRoom({ roomId: session.roomId, peerId: session.selfId }),
@@ -570,7 +643,7 @@ describe('startPeerSession', () => {
         const fixture = yield* makePeerSessionTestHarness((() =>
           Stream.fail(
             new Error('signaling failed'),
-          )) as unknown as AppClient['Service']['OpenRoomSession']);
+          )) as unknown as AppSignalingClient['Service']['OpenRoomSession']);
 
         yield* startPeerSession(session).pipe(Effect.provide(fixture.dependencies));
         assert.deepStrictEqual((yield* Queue.take(fixture.eventQueue))._tag, 'SessionStarted');
@@ -589,7 +662,9 @@ describe('startPeerSession', () => {
           (() =>
             Stream.make({
               event: openedEvent(bob),
-            }).pipe(Stream.concat(Stream.never))) as AppClient['Service']['OpenRoomSession'],
+            }).pipe(
+              Stream.concat(Stream.never),
+            )) as AppSignalingClient['Service']['OpenRoomSession'],
           undefined,
           {
             createOffer: () =>
@@ -615,11 +690,13 @@ describe('startPeerSession', () => {
           (() =>
             Stream.make({
               event: openedEvent(bob),
-            }).pipe(Stream.concat(Stream.never))) as AppClient['Service']['OpenRoomSession'],
+            }).pipe(
+              Stream.concat(Stream.never),
+            )) as AppSignalingClient['Service']['OpenRoomSession'],
           (() =>
             Effect.fail(
               new PeerNotInRoom({ roomId: session.roomId, peerId: session.selfId }),
-            )) as AppClient['Service']['SendSignal'],
+            )) as AppSignalingClient['Service']['SendSignal'],
         );
 
         yield* startPeerSession(session).pipe(Effect.provide(fixture.dependencies));
@@ -642,7 +719,8 @@ describe('startPeerSession', () => {
         const roomEventQueue = yield* Queue.unbounded<{ readonly event: RoomEvent }>();
         const offerSent = yield* Deferred.make<void>();
         const fixture = yield* makePeerSessionTestHarness(
-          (() => Stream.fromQueue(roomEventQueue)) as AppClient['Service']['OpenRoomSession'],
+          (() =>
+            Stream.fromQueue(roomEventQueue)) as AppSignalingClient['Service']['OpenRoomSession'],
           ({ signal }) =>
             Effect.gen(function* () {
               if (signal._tag === '@tether/SessionDescriptionSignal' && signal.type === 'offer') {
@@ -690,7 +768,8 @@ describe('startPeerSession', () => {
         const roomEventQueue = yield* Queue.unbounded<{ readonly event: RoomEvent }>();
         const offerSent = yield* Deferred.make<void>();
         const fixture = yield* makePeerSessionTestHarness(
-          (() => Stream.fromQueue(roomEventQueue)) as AppClient['Service']['OpenRoomSession'],
+          (() =>
+            Stream.fromQueue(roomEventQueue)) as AppSignalingClient['Service']['OpenRoomSession'],
           ({ signal }) =>
             Effect.gen(function* () {
               if (signal._tag === '@tether/SessionDescriptionSignal' && signal.type === 'offer') {
@@ -730,7 +809,8 @@ describe('startPeerSession', () => {
         const roomEventQueue = yield* Queue.unbounded<{ readonly event: RoomEvent }>();
         const offerSent = yield* Deferred.make<void>();
         const fixture = yield* makePeerSessionTestHarness(
-          (() => Stream.fromQueue(roomEventQueue)) as AppClient['Service']['OpenRoomSession'],
+          (() =>
+            Stream.fromQueue(roomEventQueue)) as AppSignalingClient['Service']['OpenRoomSession'],
           ({ signal }) =>
             Effect.gen(function* () {
               if (signal._tag === '@tether/SessionDescriptionSignal' && signal.type === 'offer') {
@@ -778,7 +858,9 @@ describe('startPeerSession', () => {
           (() =>
             Stream.make({
               event: openedEvent(bob),
-            }).pipe(Stream.concat(Stream.never))) as AppClient['Service']['OpenRoomSession'],
+            }).pipe(
+              Stream.concat(Stream.never),
+            )) as AppSignalingClient['Service']['OpenRoomSession'],
           undefined,
           { createOffer: () => Effect.succeed({ type: 'offer', sdp: undefined }) },
         );
@@ -799,7 +881,9 @@ describe('startPeerSession', () => {
           (() =>
             Stream.make({
               event: openedEvent(bob),
-            }).pipe(Stream.concat(Stream.never))) as AppClient['Service']['OpenRoomSession'],
+            }).pipe(
+              Stream.concat(Stream.never),
+            )) as AppSignalingClient['Service']['OpenRoomSession'],
           undefined,
           { addLocalTracks: () => Effect.die('boom') },
         );

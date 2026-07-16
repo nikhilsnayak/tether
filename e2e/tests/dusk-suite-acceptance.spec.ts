@@ -51,8 +51,8 @@ test.describe('high-quality renderer', () => {
       await expect(scene).toHaveAttribute('data-room-quality-tier', 'high');
       await room.expectRendererReady(actor);
       await expect(scene.locator('canvas')).toBeVisible();
-      // The room keeps a live signaling connection open, so true network-idle
-      // never fires; a short settle window is enough to catch lazy-loaded assets.
+      // Allow late lazy imports to request their assets before inspecting the
+      // complete request list.
       await page.waitForTimeout(1_000);
       expect(externalAssets).toEqual([]);
     },

@@ -45,8 +45,14 @@ type ProbedConnectedRoom = {
   readonly roomId: string;
 };
 
+type TrackedServerSocket = {
+  readonly url: string;
+  closed: boolean;
+};
+
 export class RoomDriver {
   readonly #contexts: BrowserContext[] = [];
+  readonly #serverSockets = new Map<Page, TrackedServerSocket[]>();
 
   constructor(
     readonly browser: Browser,
@@ -56,6 +62,7 @@ export class RoomDriver {
   actorFor(page: Page): RoomActor;
   actorFor(page: Page, options: { readonly probeWebRtc: true }): Promise<ProbedRoomActor>;
   actorFor(page: Page, options?: { readonly probeWebRtc?: boolean }) {
+    this.#trackServerSockets(page);
     if (options?.probeWebRtc !== true) {
       return { context: page.context(), page };
     }
@@ -118,6 +125,7 @@ export class RoomDriver {
     this.#contexts.push(context);
     if (options.probeWebRtc) await installWebRtcProbe(context);
     const page = await context.newPage();
+    this.#trackServerSockets(page);
     return {
       context,
       page,
@@ -153,10 +161,28 @@ export class RoomDriver {
     });
   }
 
+  expectDetached(actor: RoomActor) {
+    return expect(actor.page.locator('[data-detached="true"]')).toBeAttached({
+      timeout: 15_000,
+    });
+  }
+
+  async expectZeroServerSockets(actor: RoomActor) {
+    const sockets = this.#serverSockets.get(actor.page) ?? [];
+    await expect
+      .poll(() => ({ count: sockets.length, allClosed: sockets.every((socket) => socket.closed) }))
+      .toEqual({ count: 1, allClosed: true });
+
+    const closedCount = sockets.length;
+    await actor.page.waitForTimeout(3_000);
+    expect(sockets).toHaveLength(closedCount);
+    expect(sockets.every((socket) => socket.closed)).toBe(true);
+  }
+
   expectPeerDeparted(actor: RoomActor) {
     return Promise.all([
       expect(
-        actor.page.getByText('They left the call. You can wait here in case they rejoin.'),
+        actor.page.getByText('This room has ended. Create a new room to talk again.'),
       ).toBeVisible(),
       expect(actor.page.getByLabel('Dusk Suite room scene')).toHaveAttribute(
         'data-room-journey',
@@ -212,6 +238,7 @@ export class RoomDriver {
   newPage(actor: RoomActor): Promise<RoomActor>;
   async newPage(actor: RoomActor): Promise<RoomActor> {
     const page = await actor.context.newPage();
+    this.#trackServerSockets(page);
     return {
       context: actor.context,
       page,
@@ -243,5 +270,20 @@ export class RoomDriver {
 
   startHostingRoom(actor: RoomActor, atThreshold?: ThresholdHook) {
     return this.completeMediaSetup(actor, 'Invite someone', atThreshold);
+  }
+
+  #trackServerSockets(page: Page) {
+    if (this.#serverSockets.has(page)) return;
+    const sockets: TrackedServerSocket[] = [];
+    this.#serverSockets.set(page, sockets);
+    page.on('websocket', (webSocket) => {
+      const url = new URL(webSocket.url());
+      if (url.pathname !== '/rpc/signaling') return;
+      const socket: TrackedServerSocket = { url: webSocket.url(), closed: false };
+      sockets.push(socket);
+      webSocket.on('close', () => {
+        socket.closed = true;
+      });
+    });
   }
 }

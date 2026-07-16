@@ -1,6 +1,7 @@
 import { assert, describe, it } from '@effect/vitest';
 import {
   DUSK_SUITE_TEMPLATE_ID,
+  DetachedEvent,
   DisplayName,
   JoinCancelledEvent,
   JoinDenied,
@@ -27,6 +28,7 @@ import { TestClock } from 'effect/testing';
 import * as ServerCrypto from '@/lib/ServerCrypto';
 
 import {
+  DETACHMENT_DEADLINE,
   MAX_LIVE_ROOMS,
   ROOM_CREATE_BUCKET_CAPACITY,
   ROOM_CREATE_BUCKET_REFILL_EVERY,
@@ -77,8 +79,8 @@ const requireOpenedEvent = (event: unknown): RoomSessionOpenedEvent => {
 const isOpened = (event: { readonly _tag: string }) =>
   event._tag === '@tether/RoomSessionOpenedEvent';
 
-const offer = (sdp: string) =>
-  new SessionDescriptionSignal({ negotiationEpoch: 0, type: 'offer', sdp });
+const offer = (sdp: string, negotiationEpoch = 0) =>
+  new SessionDescriptionSignal({ negotiationEpoch, type: 'offer', sdp });
 
 describe('RoomService knock-to-join', () => {
   it.effect('deletes template metadata when the ephemeral room closes', () =>
@@ -872,6 +874,367 @@ describe('RoomService signalling', () => {
 
         const aliceEvents = yield* Fiber.join(aliceFiber);
         assert.deepStrictEqual(aliceEvents[3], new PeerLeftEvent({ peerId: bob }));
+      }),
+    ),
+  );
+});
+
+describe('RoomService detachment', () => {
+  it.effect('does not commit when only one member is ready', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const harness = yield* makeRoomServiceTestHarness();
+        const room = harness.room;
+        const { roomId, aliceToken, bobToken, aliceFiber, bobFiber } = yield* harness.connect({
+          hostTake: 4,
+          joinerTake: 3,
+        });
+
+        yield* room.sendSignal(roomId, bob, bobToken, offer('detach-offer'));
+        yield* room.readyToDetach(roomId, alice, aliceToken, 0);
+        yield* Effect.yieldNow;
+
+        assert.isUndefined(bobFiber.pollUnsafe());
+        yield* Fiber.join(aliceFiber);
+        yield* Fiber.interrupt(bobFiber);
+      }),
+    ),
+  );
+
+  it.effect('ignores readiness before any offer has been relayed', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const harness = yield* makeRoomServiceTestHarness();
+        const room = harness.room;
+        const { roomId, aliceToken, bobToken, aliceFiber, bobFiber } = yield* harness.connect({
+          hostTake: 4,
+          joinerTake: 3,
+        });
+
+        yield* room.readyToDetach(roomId, alice, aliceToken, 0);
+        yield* room.readyToDetach(roomId, bob, bobToken, 0);
+        yield* Effect.yieldNow;
+
+        assert.isUndefined(aliceFiber.pollUnsafe());
+        assert.isUndefined(bobFiber.pollUnsafe());
+        yield* Fiber.interrupt(aliceFiber);
+        yield* Fiber.interrupt(bobFiber);
+      }),
+    ),
+  );
+
+  it.effect('clears stale readiness when a newer offer is relayed', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const harness = yield* makeRoomServiceTestHarness();
+        const room = harness.room;
+        const { roomId, aliceToken, bobToken, aliceFiber, bobFiber } = yield* harness.connect({
+          hostTake: 6,
+          joinerTake: 3,
+        });
+
+        yield* room.sendSignal(roomId, bob, bobToken, offer('epoch-zero', 0));
+        yield* room.readyToDetach(roomId, alice, aliceToken, 0);
+        yield* room.sendSignal(roomId, bob, bobToken, offer('epoch-one', 1));
+        yield* room.readyToDetach(roomId, bob, bobToken, 1);
+        yield* Effect.yieldNow;
+        assert.isUndefined(bobFiber.pollUnsafe());
+
+        yield* room.readyToDetach(roomId, alice, aliceToken, 1);
+
+        assert.instanceOf((yield* Fiber.join(aliceFiber)).at(-1), DetachedEvent);
+        assert.instanceOf((yield* Fiber.join(bobFiber)).at(-1), DetachedEvent);
+      }),
+    ),
+  );
+
+  it.effect('rejects readiness with missing membership or the wrong token', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const harness = yield* makeRoomServiceTestHarness();
+        const room = harness.room;
+        const { roomId, aliceToken } = yield* harness.connect({
+          hostTake: 3,
+          joinerTake: 2,
+        });
+
+        const wrongToken = yield* room
+          .readyToDetach(roomId, alice, 'wrong-session-token', 0)
+          .pipe(Effect.flip);
+        const missingRoom = yield* room
+          .readyToDetach(RoomId.make('zzz-zzzz-zzz'), alice, aliceToken, 0)
+          .pipe(Effect.flip);
+
+        assert.instanceOf(wrongToken, PeerNotInRoom);
+        assert.instanceOf(missingRoom, PeerNotInRoom);
+      }),
+    ),
+  );
+
+  it.effect('commits once when readiness is repeated at the current epoch', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const harness = yield* makeRoomServiceTestHarness();
+        const room = harness.room;
+        const { roomId, aliceToken, bobToken, aliceFiber, bobFiber } = yield* harness.connect({
+          hostTake: 5,
+          joinerTake: 3,
+        });
+
+        yield* room.sendSignal(roomId, bob, bobToken, offer('detach-offer'));
+        yield* room.readyToDetach(roomId, alice, aliceToken, 0);
+        yield* room.readyToDetach(roomId, alice, aliceToken, 0);
+        yield* room.readyToDetach(roomId, bob, bobToken, 0);
+        yield* room.readyToDetach(roomId, bob, bobToken, 0);
+
+        const aliceEvents = yield* Fiber.join(aliceFiber);
+        const bobEvents = yield* Fiber.join(bobFiber);
+        assert.lengthOf(
+          aliceEvents.filter((event) => event instanceof DetachedEvent),
+          1,
+        );
+        assert.lengthOf(
+          bobEvents.filter((event) => event instanceof DetachedEvent),
+          1,
+        );
+      }),
+    ),
+  );
+
+  it.effect('expires the room code as soon as detachment commits', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const harness = yield* makeRoomServiceTestHarness();
+        const room = harness.room;
+        const { roomId, aliceToken, bobToken, aliceFiber, bobFiber } = yield* harness.connect({
+          hostTake: 5,
+          joinerTake: 3,
+        });
+
+        yield* room.sendSignal(roomId, bob, bobToken, offer('detach-offer'));
+        yield* room.readyToDetach(roomId, alice, aliceToken, 0);
+        yield* room.readyToDetach(roomId, bob, bobToken, 0);
+        yield* Fiber.join(aliceFiber);
+        yield* Fiber.join(bobFiber);
+
+        assert.instanceOf(
+          yield* room.join(roomId, charlie, charlieName).pipe(Effect.flip),
+          RoomNotFound,
+        );
+        assert.instanceOf(yield* room.getRoomMetadata(roomId).pipe(Effect.flip), RoomNotFound);
+      }),
+    ),
+  );
+
+  it.effect('expires an undetached room and denies a pending knock at the deadline', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const room = yield* RoomService;
+        const roomIdDeferred = yield* Deferred.make<RoomId>();
+        const aliceTokenDeferred = yield* Deferred.make<string>();
+        const bobTokenDeferred = yield* Deferred.make<string>();
+
+        const aliceStream = yield* hostRoom(room, alice);
+        const aliceFiber = yield* aliceStream.pipe(
+          Stream.tap((event) =>
+            event instanceof RoomSessionOpenedEvent
+              ? Effect.all([
+                  Deferred.succeed(roomIdDeferred, event.roomId),
+                  Deferred.succeed(aliceTokenDeferred, event.sessionToken),
+                ])
+              : Effect.void,
+          ),
+          Stream.runDrain,
+          Effect.forkChild({ startImmediately: true }),
+        );
+        const roomId = yield* Deferred.await(roomIdDeferred);
+        const aliceToken = yield* Deferred.await(aliceTokenDeferred);
+
+        const bobStream = yield* room.join(roomId, bob, bobName);
+        const bobFiber = yield* bobStream.pipe(
+          Stream.tap((event) =>
+            event instanceof RoomSessionOpenedEvent
+              ? Deferred.succeed(bobTokenDeferred, event.sessionToken)
+              : Effect.void,
+          ),
+          Stream.runDrain,
+          Effect.forkChild({ startImmediately: true }),
+        );
+        const charlieStream = yield* room.join(roomId, charlie, charlieName);
+
+        yield* room.respondToJoin(roomId, alice, aliceToken, bob, 'allow');
+        yield* Deferred.await(bobTokenDeferred);
+        yield* TestClock.adjust(DETACHMENT_DEADLINE);
+
+        assert.isTrue(Exit.isFailure(yield* Fiber.await(aliceFiber)));
+        assert.isTrue(Exit.isFailure(yield* Fiber.await(bobFiber)));
+        assert.instanceOf(yield* charlieStream.pipe(Stream.runDrain, Effect.flip), JoinDenied);
+        assert.instanceOf(yield* room.getRoomMetadata(roomId).pipe(Effect.flip), RoomNotFound);
+      }),
+    ),
+  );
+
+  it.effect('keeps detached streams alive at the deadline and removes them silently', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const room = yield* RoomService;
+        const aliceScope = yield* Scope.make();
+        const bobScope = yield* Scope.make();
+        const roomIdDeferred = yield* Deferred.make<RoomId>();
+        const aliceTokenDeferred = yield* Deferred.make<string>();
+        const bobTokenDeferred = yield* Deferred.make<string>();
+        const aliceDetached = yield* Deferred.make<void>();
+        const bobDetached = yield* Deferred.make<void>();
+        const bobEvents: Array<unknown> = [];
+
+        const aliceStream = yield* hostRoom(room, alice).pipe(Scope.provide(aliceScope));
+        const aliceFiber = yield* aliceStream.pipe(
+          Stream.tap((event) => {
+            if (event instanceof RoomSessionOpenedEvent) {
+              return Effect.all([
+                Deferred.succeed(roomIdDeferred, event.roomId),
+                Deferred.succeed(aliceTokenDeferred, event.sessionToken),
+              ]);
+            }
+            return event instanceof DetachedEvent
+              ? Deferred.succeed(aliceDetached, undefined)
+              : Effect.void;
+          }),
+          Stream.runDrain,
+          Effect.forkChild({ startImmediately: true }),
+        );
+        const roomId = yield* Deferred.await(roomIdDeferred);
+        const aliceToken = yield* Deferred.await(aliceTokenDeferred);
+
+        const bobStream = yield* room.join(roomId, bob, bobName).pipe(Scope.provide(bobScope));
+        const bobFiber = yield* bobStream.pipe(
+          Stream.tap((event) =>
+            Effect.gen(function* () {
+              bobEvents.push(event);
+              if (event instanceof RoomSessionOpenedEvent) {
+                yield* Deferred.succeed(bobTokenDeferred, event.sessionToken);
+              }
+              if (event instanceof DetachedEvent) {
+                yield* Deferred.succeed(bobDetached, undefined);
+              }
+            }),
+          ),
+          Stream.runDrain,
+          Effect.forkChild({ startImmediately: true }),
+        );
+        yield* room.respondToJoin(roomId, alice, aliceToken, bob, 'allow');
+        const bobToken = yield* Deferred.await(bobTokenDeferred);
+
+        yield* room.sendSignal(roomId, bob, bobToken, offer('detach-offer'));
+        yield* room.readyToDetach(roomId, alice, aliceToken, 0);
+        yield* room.readyToDetach(roomId, bob, bobToken, 0);
+        yield* Deferred.await(aliceDetached);
+        yield* Deferred.await(bobDetached);
+        yield* TestClock.adjust(DETACHMENT_DEADLINE);
+
+        assert.isUndefined(aliceFiber.pollUnsafe());
+        assert.isUndefined(bobFiber.pollUnsafe());
+        yield* Scope.close(aliceScope, Exit.void);
+        yield* Effect.yieldNow;
+        assert.isUndefined(bobFiber.pollUnsafe());
+        assert.isEmpty(bobEvents.filter((event) => event instanceof PeerLeftEvent));
+        yield* Scope.close(bobScope, Exit.void);
+        yield* Fiber.interrupt(aliceFiber);
+        yield* Fiber.interrupt(bobFiber);
+      }),
+    ),
+  );
+
+  it.effect('spares a re-admitted room from a stale deadline', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const room = yield* RoomService;
+        const roomIdDeferred = yield* Deferred.make<RoomId>();
+        const aliceTokenDeferred = yield* Deferred.make<string>();
+        const aliceStream = yield* hostRoom(room, alice);
+        const aliceFiber = yield* aliceStream.pipe(
+          Stream.tap((event) =>
+            event instanceof RoomSessionOpenedEvent
+              ? Effect.all([
+                  Deferred.succeed(roomIdDeferred, event.roomId),
+                  Deferred.succeed(aliceTokenDeferred, event.sessionToken),
+                ])
+              : Effect.void,
+          ),
+          Stream.runDrain,
+          Effect.forkChild({ startImmediately: true }),
+        );
+        const roomId = yield* Deferred.await(roomIdDeferred);
+        const aliceToken = yield* Deferred.await(aliceTokenDeferred);
+
+        const bobScope = yield* Scope.make();
+        const bobTokenDeferred = yield* Deferred.make<string>();
+        const bobStream = yield* room.join(roomId, bob, bobName).pipe(Scope.provide(bobScope));
+        const bobFiber = yield* bobStream.pipe(
+          Stream.tap((event) =>
+            event instanceof RoomSessionOpenedEvent
+              ? Deferred.succeed(bobTokenDeferred, event.sessionToken)
+              : Effect.void,
+          ),
+          Stream.runDrain,
+          Effect.forkChild({ startImmediately: true }),
+        );
+        yield* room.respondToJoin(roomId, alice, aliceToken, bob, 'allow');
+        yield* Deferred.await(bobTokenDeferred);
+
+        yield* TestClock.adjust('30 seconds');
+        yield* Scope.close(bobScope, Exit.void);
+        yield* Fiber.interrupt(bobFiber);
+        yield* TestClock.adjust('30 seconds');
+
+        const charlieScope = yield* Scope.make();
+        const charlieTokenDeferred = yield* Deferred.make<string>();
+        const charlieStream = yield* room
+          .join(roomId, charlie, charlieName)
+          .pipe(Scope.provide(charlieScope));
+        const charlieFiber = yield* charlieStream.pipe(
+          Stream.tap((event) =>
+            event instanceof RoomSessionOpenedEvent
+              ? Deferred.succeed(charlieTokenDeferred, event.sessionToken)
+              : Effect.void,
+          ),
+          Stream.runDrain,
+          Effect.forkChild({ startImmediately: true }),
+        );
+        yield* room.respondToJoin(roomId, alice, aliceToken, charlie, 'allow');
+        yield* Deferred.await(charlieTokenDeferred);
+
+        yield* TestClock.adjust('30 seconds');
+        assert.isUndefined(aliceFiber.pollUnsafe());
+        assert.isUndefined(charlieFiber.pollUnsafe());
+        assert.deepStrictEqual(yield* room.getRoomMetadata(roomId), {
+          roomTemplateId: DUSK_SUITE_TEMPLATE_ID,
+        });
+
+        yield* TestClock.adjust('60 seconds');
+        assert.isTrue(Exit.isFailure(yield* Fiber.await(aliceFiber)));
+        assert.isTrue(Exit.isFailure(yield* Fiber.await(charlieFiber)));
+        yield* Scope.close(charlieScope, Exit.void);
+      }),
+    ),
+  );
+
+  it.effect('ignores an admission deadline after the room has already closed', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const harness = yield* makeRoomServiceTestHarness();
+        const room = harness.room;
+        const { roomId, aliceToken, bobToken, aliceFiber } = yield* harness.connect({
+          hostTake: 4,
+          joinerTake: 2,
+        });
+
+        yield* room.leave(roomId, bob, bobToken);
+        yield* Fiber.join(aliceFiber);
+        yield* room.leave(roomId, alice, aliceToken);
+        yield* TestClock.adjust(DETACHMENT_DEADLINE);
+
+        assert.instanceOf(yield* room.getRoomMetadata(roomId).pipe(Effect.flip), RoomNotFound);
       }),
     ),
   );

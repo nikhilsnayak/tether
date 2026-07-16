@@ -78,6 +78,7 @@ export type PlatformEvent =
     }
   | { readonly _tag: 'PeerConnectionFailed'; readonly peerConnection: PeerConnectionHandle }
   | { readonly _tag: 'PeerConnectionConnected'; readonly peerConnection: PeerConnectionHandle }
+  | { readonly _tag: 'IceGatheringComplete'; readonly peerConnection: PeerConnectionHandle }
   | { readonly _tag: 'DataChannelClosed'; readonly dataChannel: DataChannelHandle }
   | { readonly _tag: 'PeerConnectionInterrupted'; readonly peerConnection: PeerConnectionHandle }
   | { readonly _tag: 'PeerConnectionRestored'; readonly peerConnection: PeerConnectionHandle }
@@ -139,6 +140,7 @@ export type PeerSessionEvent =
   | {
       readonly _tag: 'SignalingDisconnected';
     }
+  | { readonly _tag: 'SessionDetached' }
   | {
       readonly _tag: 'SessionFailed';
     }
@@ -224,6 +226,7 @@ export interface PeerSessionView {
     | 'peer-departed';
   readonly messages: ReadonlyArray<ChatMessage>;
   readonly roomEventsReady: boolean;
+  readonly detached: boolean;
   readonly remoteAvatarPose: SequencedAvatarPose | null;
   readonly remoteMediaState: RevisionedMediaState | null;
   /** Safety code both peers compare aloud. */

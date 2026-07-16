@@ -24,8 +24,9 @@ export function SafetyCodeCard({
         {code}
       </Text>
       <Text style={styles.hint}>
-        Read this code aloud to each other. It proves that no one, not even the server, can see this
-        call. Trust the call only if you both see the same code.
+        Compare this code over a trusted channel, such as reading it aloud. A match checks that the
+        server did not substitute either connection fingerprint. Continue only if you both see the
+        same code.
       </Text>
       <View style={styles.actions}>
         <View style={styles.grow}>

@@ -12,7 +12,7 @@ import {
 import { Effect, Queue, Stream } from 'effect';
 import { TestClock } from 'effect/testing';
 
-import { AppClient } from '../../AppClient';
+import { AppSignalingClient } from '../../AppSignalingClient';
 import { startPeerSession } from '../room/PeerSessionHost';
 import { type DataChannelHandle, type PeerSessionEvent } from './Model';
 import { PlatformError } from './Platform';
@@ -500,7 +500,8 @@ describe('peer-session actor', () => {
         const offerSent = yield* Queue.unbounded<void>();
         let offerCount = 0;
         const fixture = yield* makePeerSessionTestHarness(
-          (() => Stream.fromQueue(roomEventQueue)) as AppClient['Service']['OpenRoomSession'],
+          (() =>
+            Stream.fromQueue(roomEventQueue)) as AppSignalingClient['Service']['OpenRoomSession'],
           ({ signal }) =>
             signal._tag === '@tether/SessionDescriptionSignal' && signal.type === 'offer'
               ? Effect.gen(function* () {

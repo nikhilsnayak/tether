@@ -64,6 +64,7 @@ const native = vi.hoisted(() => {
     readonly setRemoteDescription = vi.fn(async (_description: unknown) => undefined);
     readonly addIceCandidate = vi.fn(async (_candidate: unknown) => undefined);
     connectionState = 'new';
+    iceGatheringState = 'new';
     readonly configuration: { readonly iceServers: ReadonlyArray<IceServer> };
 
     constructor(configuration: { readonly iceServers: ReadonlyArray<IceServer> }) {
@@ -151,6 +152,10 @@ const makeNativePlatformTestHarness = (): NativePlatformTestHarness => {
       transitionConnection: (handle, state) => {
         peer(handle).connectionState = state;
         peer(handle).emit('connectionstatechange');
+      },
+      transitionIceGathering: (handle, state) => {
+        peer(handle).iceGatheringState = state;
+        peer(handle).emit('icegatheringstatechange');
       },
       setDataChannelState: (handle, state) => {
         channel(handle).readyState = state;

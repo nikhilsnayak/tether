@@ -18,8 +18,10 @@ import {
 import { Effect, Layer, Queue, Scope, Stream } from 'effect';
 import { TestClock } from 'effect/testing';
 
-import { AppClient } from '../../../AppClient';
+import { AppSignalingClient } from '../../../AppSignalingClient';
 import { webCrypto } from '../../../test/WebCrypto';
+import { PeerSessionSignalingTransport } from '../../room/PeerSessionHost';
+import type { PeerSessionInput } from '../ActorModel';
 import {
   type DataChannelHandle,
   type IceServer,
@@ -31,7 +33,7 @@ import {
   type RoomSession,
 } from '../Model';
 import { makePeerSessionActor } from '../PeerSession';
-import { ROOM_EVENTS_CHANNEL_LABEL } from '../RoomEvents';
+import { type AvatarPose, type MediaState, ROOM_EVENTS_CHANNEL_LABEL } from '../RoomEvents';
 import { PeerSessionEventSink, PeerSessionPlatform, PeerSessionSignaling } from '../Services';
 
 interface TestPeerConnection {
@@ -69,11 +71,12 @@ export const roomOpened: PeerSessionEvent = {
 };
 
 export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness')(function* (
-  openRoomSession: AppClient['Service']['OpenRoomSession'] = (() =>
-    Stream.empty) as AppClient['Service']['OpenRoomSession'],
-  sendSignal?: AppClient['Service']['SendSignal'],
+  openRoomSession: AppSignalingClient['Service']['OpenRoomSession'] = (() =>
+    Stream.empty) as AppSignalingClient['Service']['OpenRoomSession'],
+  sendSignal?: AppSignalingClient['Service']['SendSignal'],
   overrides?: Partial<PeerSessionPlatform['Service']>,
   respondToJoinError?: NoPendingJoin | PeerNotInRoom,
+  sendReadyToDetach?: (negotiationEpoch: number) => Effect.Effect<void, unknown>,
 ) {
   const peerConnections: Array<PeerConnectionHandle> = [];
   let nextPeerConnection = 0;
@@ -99,6 +102,7 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
   const operations: Array<string> = [];
   const signals: Array<Signal> = [];
   const sentSessionTokens: Array<string> = [];
+  const readinessEpochs: Array<number> = [];
   const respondToJoinPayloads: Array<{
     readonly roomId: RoomId;
     readonly selfId: PeerId;
@@ -177,7 +181,7 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
       Effect.sync(() => operations.push(`sendDataChannelMessage:${message}`)),
   };
   const platform = PeerSessionPlatform.of({ ...basePlatform, ...overrides });
-  const respondToJoin = ((payload: Parameters<AppClient['Service']['RespondToJoin']>[0]) =>
+  const respondToJoin = ((payload: Parameters<AppSignalingClient['Service']['RespondToJoin']>[0]) =>
     Effect.sync(() => {
       respondToJoinPayloads.push(payload);
       operations.push(`respondToJoin:${payload.decision}`);
@@ -185,7 +189,7 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
       Effect.andThen(
         respondToJoinError === undefined ? Effect.void : Effect.fail(respondToJoinError),
       ),
-    )) as AppClient['Service']['RespondToJoin'];
+    )) as AppSignalingClient['Service']['RespondToJoin'];
 
   const signaling = PeerSessionSignaling.of({
     sendSignal: (signal) => {
@@ -220,40 +224,45 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
             );
           });
     },
+    sendReadyToDetach: (negotiationEpoch) =>
+      sendReadyToDetach !== undefined
+        ? sendReadyToDetach(negotiationEpoch)
+        : Effect.sync(() => {
+            readinessEpochs.push(negotiationEpoch);
+            operations.push(`readyToDetach:${negotiationEpoch}`);
+          }),
+  });
+
+  const appSignalingClient = AppSignalingClient.of({
+    LeaveRoom: () =>
+      Effect.sync(() => {
+        operations.push('leaveRoom');
+      }),
+    ReadyToDetach: () => Effect.void,
+    RespondToJoin: respondToJoin,
+    OpenRoomSession: openRoomSession,
+    SendSignal: (payload) => {
+      sentSessionTokens.push(payload.sessionToken);
+      return sendSignal !== undefined
+        ? sendSignal(payload)
+        : Effect.sync(() => {
+            const { signal } = payload;
+            signals.push(signal);
+            operations.push(
+              signal._tag === '@tether/SessionDescriptionSignal'
+                ? `sendSignal:${signal.type}:${signal.sdp}`
+                : `sendSignal:ice:${signal.candidate}`,
+            );
+          });
+    },
   });
 
   const dependencies = Layer.mergeAll(
     webCrypto,
     Layer.succeed(PeerSessionPlatform, platform),
-    Layer.succeed(
-      AppClient,
-      AppClient.of({
-        GetRoomMetadata: (() =>
-          Effect.succeed({
-            roomTemplateId: DUSK_SUITE_TEMPLATE_ID,
-          })) as AppClient['Service']['GetRoomMetadata'],
-        LeaveRoom: () =>
-          Effect.sync(() => {
-            operations.push('leaveRoom');
-          }),
-        RespondToJoin: respondToJoin,
-        OpenRoomSession: openRoomSession,
-        SendSignal: (payload) => {
-          sentSessionTokens.push(payload.sessionToken);
-          return sendSignal !== undefined
-            ? sendSignal(payload)
-            : Effect.sync(() => {
-                const { signal } = payload;
-                signals.push(signal);
-                operations.push(
-                  signal._tag === '@tether/SessionDescriptionSignal'
-                    ? `sendSignal:${signal.type}:${signal.sdp}`
-                    : `sendSignal:ice:${signal.candidate}`,
-                );
-              });
-        },
-      }),
-    ),
+    Layer.succeed(PeerSessionSignalingTransport, {
+      acquire: Effect.succeed(appSignalingClient),
+    }),
     Layer.succeed(
       PeerSessionEventSink,
       PeerSessionEventSink.of({
@@ -274,14 +283,11 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
     () => {},
   ).pipe(Effect.provide(dependencies));
 
-  const actor = (input: unknown): Effect.Effect<void, unknown, Scope.Scope> => {
-    if (
-      typeof input === 'object' &&
-      input !== null &&
-      '_tag' in input &&
-      input._tag === 'RoomEvent'
-    ) {
-      const event = (input as unknown as { readonly event: RoomEvent }).event;
+  const actor = (
+    input: PeerSessionInput | { readonly _tag: 'RoomEvent'; readonly event: RoomEvent },
+  ): Effect.Effect<unknown, unknown, Scope.Scope> => {
+    if (input._tag === 'RoomEvent') {
+      const { event } = input;
       switch (event._tag) {
         case '@tether/RoomSessionOpenedEvent':
           return Effect.gen(function* () {
@@ -341,9 +347,11 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
             events.push(output);
             yield* Queue.offer(eventQueue, output);
           });
+        case '@tether/DetachedEvent':
+          return peerActor.handleInput({ _tag: 'Detached' });
       }
     }
-    return peerActor.handleInput(input as never) as Effect.Effect<void, unknown, Scope.Scope>;
+    return peerActor.handleInput(input);
   };
 
   const roomEvent = Effect.fn('PeerSessionTestHarness.roomEvent')((event: RoomEvent) =>
@@ -409,6 +417,10 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
     (connection: PeerConnectionHandle = peerConnection) =>
       actor({ _tag: 'PeerConnectionConnected', peerConnection: connection }),
   );
+  const gatheringComplete = Effect.fn('PeerSessionTestHarness.gatheringComplete')(
+    (connection: PeerConnectionHandle = peerConnection) =>
+      actor({ _tag: 'IceGatheringComplete', peerConnection: connection }),
+  );
   const connectionFailed = Effect.fn('PeerSessionTestHarness.connectionFailed')(
     (connection: PeerConnectionHandle = peerConnection) =>
       actor({ _tag: 'PeerConnectionFailed', peerConnection: connection }),
@@ -432,17 +444,34 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
   const sendChat = Effect.fn('PeerSessionTestHarness.sendChat')((message: string) =>
     actor({ _tag: 'SendMessage', message }),
   );
-  const sendPose = Effect.fn('PeerSessionTestHarness.sendPose')(
-    (pose: {
-      readonly x: number;
-      readonly z: number;
-      readonly yaw: number;
-      readonly action: 'idle' | 'walk' | 'run';
-    }) => actor({ _tag: 'SendAvatarPose', pose }),
+  const sendPose = Effect.fn('PeerSessionTestHarness.sendPose')((pose: AvatarPose) =>
+    actor({ _tag: 'SendAvatarPose', pose }),
   );
   const sendMediaState = Effect.fn('PeerSessionTestHarness.sendMediaState')(
-    (mediaState: { readonly cameraOn: boolean; readonly microphoneOn: boolean }) =>
-      actor({ _tag: 'SendMediaState', mediaState }),
+    (mediaState: MediaState) => actor({ _tag: 'SendMediaState', mediaState }),
+  );
+  const receiveDetachProbe = Effect.fn('PeerSessionTestHarness.receiveDetachProbe')(
+    (dataChannel: DataChannelHandle = localDataChannel) =>
+      actor({
+        _tag: 'DataChannelMessageReceived',
+        dataChannel,
+        data: JSON.stringify({ version: 1, type: 'detach-probe' }),
+      }),
+  );
+  const receiveLeave = Effect.fn('PeerSessionTestHarness.receiveLeave')(
+    (dataChannel: DataChannelHandle = localDataChannel) =>
+      actor({
+        _tag: 'DataChannelMessageReceived',
+        dataChannel,
+        data: JSON.stringify({ version: 1, type: 'leave' }),
+      }),
+  );
+  const detached = Effect.fn('PeerSessionTestHarness.detached')(() => actor({ _tag: 'Detached' }));
+  const sendLeave = Effect.fn('PeerSessionTestHarness.sendLeave')(() =>
+    actor({ _tag: 'SendLeave' }),
+  );
+  const signalingEnded = Effect.fn('PeerSessionTestHarness.signalingEnded')(() =>
+    actor({ _tag: 'SignalingEnded' }),
   );
   const advance = Effect.fn('PeerSessionTestHarness.advance')(
     (duration: Parameters<typeof TestClock.adjust>[0]) => TestClock.adjust(duration),
@@ -458,6 +487,7 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
     connectionInterrupted,
     connectionRestored,
     dataChannels,
+    detached,
     dependencies,
     dispatchPlatformEvent: (event: PlatformEvent) => {
       if (platformEventDispatch === undefined) {
@@ -467,6 +497,7 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
     },
     eventQueue,
     events,
+    gatheringComplete,
     localDataChannel,
     localMediaStream,
     openRoom,
@@ -477,14 +508,19 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
     peerLeft,
     peerConnection,
     peerConnections,
+    readinessEpochs,
     respondToJoinPayloads,
     receiveAnswer,
+    receiveDetachProbe,
     receiveIce,
+    receiveLeave,
     receiveOffer,
     sendChat,
+    sendLeave,
     sendMediaState,
     sendPose,
     sentSessionTokens,
     signals,
+    signalingEnded,
   };
 });

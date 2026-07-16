@@ -7,6 +7,7 @@ import {
   RoomEvent,
   RoomId,
   RoomRpcs,
+  RoomSignalingRpcs,
   RoomSessionOpenedEvent,
   SessionToken,
 } from '@tether/contracts/modules/room';
@@ -14,24 +15,27 @@ import { Deferred, Effect, Fiber, Layer, Schema, Stream } from 'effect';
 import { RpcTest } from 'effect/unstable/rpc';
 
 import * as ServerCrypto from '../../../lib/ServerCrypto';
-import { RoomHandlers } from '../Handlers';
+import { RoomHandlers, RoomSignalingHandlers } from '../Handlers';
 import { RoomService } from '../RoomService';
 
 const alice = PeerId.make('aaaaaaaaaaaa');
 const bob = PeerId.make('bbbbbbbbbbbb');
 const bobName = DisplayName.make('Bob');
 
-const TestHandlers = RoomHandlers.pipe(
+const TestHandlers = Layer.mergeAll(RoomHandlers, RoomSignalingHandlers).pipe(
   Layer.provide(RoomService.layer),
   Layer.provide(ServerCrypto.layer),
 );
-const makeRoomRpcClient = RpcTest.makeClient(RoomRpcs).pipe(Effect.provide(TestHandlers));
+const makeRoomRpcClients = Effect.all({
+  client: RpcTest.makeClient(RoomSignalingRpcs),
+  metadataClient: RpcTest.makeClient(RoomRpcs),
+}).pipe(Effect.provide(TestHandlers));
 
 const isJoinRequestedEvent = Schema.is(JoinRequestedEvent);
 const isRoomSessionOpenedEvent = Schema.is(RoomSessionOpenedEvent);
 
 export const makeRoomRpcTestHarness = Effect.fn('makeRoomRpcTestHarness')(function* () {
-  const client = yield* makeRoomRpcClient;
+  const { client, metadataClient } = yield* makeRoomRpcClients;
   const connect = Effect.fn('RoomRpcTestHarness.connect')(function* (
     options: { readonly hostTake?: number; readonly joinerTake?: number } = {},
   ) {
@@ -53,7 +57,7 @@ export const makeRoomRpcTestHarness = Effect.fn('makeRoomRpcTestHarness')(functi
 
     const roomId = yield* Deferred.await(roomIdDeferred);
     const aliceToken = yield* Deferred.await(aliceTokenDeferred);
-    assert.deepStrictEqual(yield* client.GetRoomMetadata({ roomId }), {
+    assert.deepStrictEqual(yield* metadataClient.GetRoomMetadata({ roomId }), {
       roomTemplateId: DUSK_SUITE_TEMPLATE_ID,
     });
 
@@ -107,5 +111,5 @@ export const makeRoomRpcTestHarness = Effect.fn('makeRoomRpcTestHarness')(functi
     }
   });
 
-  return { client, connect } as const;
+  return { client, connect, metadataClient };
 });

@@ -13,6 +13,7 @@ import {
 import { Effect, Exit, type Layer, Scope } from 'effect';
 
 type ConnectionState = 'connected' | 'disconnected' | 'failed';
+type IceGatheringState = 'new' | 'gathering' | 'complete';
 type DataChannelState = 'connecting' | 'open' | 'closed';
 
 export interface PeerSessionPlatformTestHarness {
@@ -33,6 +34,10 @@ export interface PeerSessionPlatformTestHarness {
     readonly transitionConnection: (
       peerConnection: PeerConnectionHandle,
       state: ConnectionState,
+    ) => void;
+    readonly transitionIceGathering: (
+      peerConnection: PeerConnectionHandle,
+      state: IceGatheringState,
     ) => void;
     readonly setDataChannelState: (dataChannel: DataChannelHandle, state: DataChannelState) => void;
     readonly emitDataChannelOpen: (dataChannel: DataChannelHandle) => void;
@@ -194,6 +199,26 @@ export const describePeerSessionPlatformContract = (
               events.map((event) => event._tag),
               ['PeerConnectionConnected', 'PeerConnectionFailed'],
             );
+          }),
+        ),
+      );
+    });
+
+    it.effect('forwards ICE gathering completion and ignores intermediate states', () => {
+      const harness = makeHarness();
+      return Effect.scoped(
+        withPlatform(
+          harness,
+          Effect.gen(function* () {
+            const platform = yield* PeerSessionPlatform;
+            const peerConnection = yield* platform.acquirePeerConnection([]);
+            const events: PlatformEvent[] = [];
+            yield* platform.observePeerConnection(peerConnection, (event) => events.push(event));
+
+            harness.controls.transitionIceGathering(peerConnection, 'gathering');
+            harness.controls.transitionIceGathering(peerConnection, 'complete');
+
+            assert.deepStrictEqual(events, [{ _tag: 'IceGatheringComplete', peerConnection }]);
           }),
         ),
       );

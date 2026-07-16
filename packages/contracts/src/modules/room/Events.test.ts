@@ -8,6 +8,7 @@ import {
   isRoomNotFound,
   isServerAtCapacity,
   isUnsupportedRoomTemplate,
+  DetachedEvent,
   JoinCancelledEvent,
   JoinDenied,
   OpenRoomSessionError,
@@ -61,6 +62,14 @@ describe('room events and errors', () => {
         signal: iceCandidate('candidate'),
       }),
     );
+  });
+
+  it('round-trips detached events through the room event union', () => {
+    const event = new DetachedEvent({});
+    const encoded = Schema.encodeUnknownSync(RoomEvent)(event);
+
+    assert.deepStrictEqual(encoded, { _tag: '@tether/DetachedEvent' });
+    assert.deepStrictEqual(Schema.decodeUnknownSync(RoomEvent)(encoded), event);
   });
 
   it('decodes and identifies errors through the RPC error union', () => {

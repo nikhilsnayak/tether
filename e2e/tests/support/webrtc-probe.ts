@@ -133,6 +133,20 @@ export class WebRtcProbe {
     }, count);
   }
 
+  failLatestPeerConnection() {
+    return this.page.evaluate(() => {
+      const peerConnection = window.__tetherE2E.peerConnections.at(-1);
+      if (peerConnection === undefined) {
+        throw new Error('Expected an instrumented peer connection');
+      }
+      Object.defineProperty(peerConnection, 'connectionState', {
+        configurable: true,
+        value: 'failed',
+      });
+      peerConnection.dispatchEvent(new Event('connectionstatechange'));
+    });
+  }
+
   iceServers() {
     return this.page.evaluate(() => window.__tetherE2E.configurations[0]?.iceServers ?? []);
   }

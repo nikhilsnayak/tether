@@ -3,7 +3,7 @@ import { Schema } from 'effect';
 const SessionDescription = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(262_144));
 const IceCandidate = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(8_192));
 const IceCandidateAttribute = Schema.String.check(Schema.isMinLength(0), Schema.isMaxLength(256));
-const NegotiationEpoch = Schema.Number.check(
+export const NegotiationEpoch = Schema.Number.check(
   Schema.isInt(),
   Schema.isBetween({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
 );

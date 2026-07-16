@@ -79,5 +79,7 @@ export const translateRoomEventData = (event: RoomEvent): RoomEventTranslation =
         ...noTranslation,
         uiEvent: { _tag: 'JoinRequestCancelled', peerId: event.peerId },
       };
+    case '@tether/DetachedEvent':
+      return { ...noTranslation, input: { _tag: 'Detached' } };
   }
 };

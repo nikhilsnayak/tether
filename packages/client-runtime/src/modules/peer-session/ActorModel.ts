@@ -52,6 +52,7 @@ export type PeerSessionActorState =
       readonly peerId: PeerId;
       readonly negotiation: PeerNegotiationState;
       readonly peerConnectionState: 'connecting' | 'connected' | 'interrupted';
+      readonly iceGatheringComplete: boolean;
       readonly dataChannelState: DataChannelState;
       readonly reconnectAttempts: number;
     }
@@ -63,7 +64,8 @@ export type PeerSessionUiCommand =
       readonly message: string;
     }
   | { readonly _tag: 'SendAvatarPose'; readonly pose: AvatarPose }
-  | { readonly _tag: 'SendMediaState'; readonly mediaState: MediaState };
+  | { readonly _tag: 'SendMediaState'; readonly mediaState: MediaState }
+  | { readonly _tag: 'SendLeave' };
 
 /** Identifies the connection generation guarded by a negotiation deadline. */
 export type PeerSessionTimerInput =
@@ -85,10 +87,20 @@ export type PeerSessionRemoteInput =
   | { readonly _tag: 'RoomSessionOpened'; readonly peerId: PeerId | null }
   | { readonly _tag: 'PeerJoined'; readonly peerId: PeerId }
   | { readonly _tag: 'PeerLeft'; readonly peerId: PeerId }
+  | { readonly _tag: 'Detached' }
   | {
       readonly _tag: 'SignalReceived';
       readonly peerId: PeerId;
       readonly signal: PeerSessionSignal;
     };
 
-export type PeerSessionInput = PeerSessionRemoteInput | PeerSessionLocalInput;
+/** Enqueued by the signaling pump as its final act; the actor decides what it means. */
+export type PeerSessionSignalingEnded = { readonly _tag: 'SignalingEnded' };
+
+export type PeerSessionInput =
+  | PeerSessionRemoteInput
+  | PeerSessionLocalInput
+  | PeerSessionSignalingEnded;
+
+/** 'stop' ends the host drain loop; 'continue' keeps it running. */
+export type PeerSessionInputOutcome = 'continue' | 'stop';

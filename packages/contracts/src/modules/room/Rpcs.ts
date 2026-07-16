@@ -8,6 +8,8 @@ import {
   OpenRoomSessionError,
   OpenRoomSessionPayload,
   OpenRoomSessionSuccess,
+  ReadyToDetachError,
+  ReadyToDetachPayload,
   RespondToJoinError,
   RespondToJoinPayload,
   SendSignalError,
@@ -37,14 +39,22 @@ const SendSignalRpc = Rpc.make('SendSignal', {
   error: SendSignalError,
 });
 
+const ReadyToDetachRpc = Rpc.make('ReadyToDetach', {
+  payload: ReadyToDetachPayload,
+  error: ReadyToDetachError,
+});
+
 const LeaveRoomRpc = Rpc.make('LeaveRoom', {
   payload: LeaveRoomPayload,
 });
 
-export const RoomRpcs = RpcGroup.make(
+export const RoomSignalingRpcs = RpcGroup.make(
   OpenRoomSessionRpc,
-  GetRoomMetadataRpc,
   RespondToJoinRpc,
   SendSignalRpc,
+  ReadyToDetachRpc,
   LeaveRoomRpc,
 );
+
+// Generic request/response RPCs served over HTTP at /rpc.
+export const RoomRpcs = RpcGroup.make(GetRoomMetadataRpc);

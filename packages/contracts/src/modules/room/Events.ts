@@ -54,6 +54,13 @@ export class SignalReceivedEvent extends Schema.TaggedClass<SignalReceivedEvent>
   },
 ) {}
 
+// Both peers confirmed the direct connection; the server has committed
+// detachment and will remove the room silently.
+export class DetachedEvent extends Schema.TaggedClass<DetachedEvent>()(
+  '@tether/DetachedEvent',
+  {},
+) {}
+
 export const RoomEvent = Schema.Union([
   RoomSessionOpenedEvent,
   PeerJoinedEvent,
@@ -62,5 +69,6 @@ export const RoomEvent = Schema.Union([
   JoinRequestedEvent,
   JoinPendingEvent,
   JoinCancelledEvent,
+  DetachedEvent,
 ]);
 export type RoomEvent = typeof RoomEvent.Type;

@@ -6,6 +6,7 @@ import type {
   PeerConnectionGeneration,
   PeerSessionActorState,
   PeerSessionInput,
+  PeerSessionInputOutcome,
   PeerSessionLocalInputDispatch,
 } from './ActorModel';
 import {
@@ -56,7 +57,7 @@ const requireDescription = (description: SessionDescription, type: 'offer' | 'an
  * ```text
  * INPUTS                              SERIALIZED PROCESSOR
  * room session open -> remote input --------+
- * platform callback -> PlatformEvent -------+--> merged stream --> actor
+ * platform callback -> PlatformEvent -------+--> mailbox --> actor
  * room UI commands -------------------------+
  *
  * ACTOR OUTPUTS
@@ -118,6 +119,56 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     }
     yield* platform.sendDataChannelMessage(dataChannel, encoded.success);
     return true;
+  });
+
+  const maybeAdvanceDetachment = Effect.fnUntraced(function* () {
+    if (memory.detachment.isDetached() || state._tag !== 'PeerKnown') {
+      return;
+    }
+
+    if (
+      state.peerConnectionState !== 'connected' ||
+      state.dataChannelState._tag !== 'DataChannelOpen' ||
+      !state.iceGatheringComplete ||
+      state.negotiation.phase !== 'answered'
+    ) {
+      return;
+    }
+    const { dataChannel } = state.dataChannelState;
+    if (memory.detachment.needsProbe()) {
+      const sent = yield* transmitRoomEvent(dataChannel, {
+        version: ROOM_EVENT_VERSION,
+        type: 'detach-probe',
+      }).pipe(
+        Effect.catchIf(isPlatformError, (error) =>
+          Effect.logWarning('Failed to send detach probe').pipe(
+            Effect.annotateLogs('operation', error.operation),
+            Effect.as(false),
+          ),
+        ),
+      );
+      if (!sent) return;
+      memory.detachment.markProbeSent();
+    }
+
+    if (
+      memory.detachment.isProbeExchanged() &&
+      !memory.detachment.hasDeclaredReadinessFor(state.negotiation.epoch)
+    ) {
+      const negotiationEpoch = state.negotiation.epoch;
+      yield* signaling.sendReadyToDetach(negotiationEpoch).pipe(
+        Effect.andThen(
+          Effect.sync(() => {
+            memory.detachment.markReadinessSent(negotiationEpoch);
+          }),
+        ),
+        Effect.catch((error) =>
+          Effect.logWarning('Failed to declare detach readiness').pipe(
+            Effect.annotateLogs('reason', String(error)),
+          ),
+        ),
+      );
+    }
   });
 
   // Hashes the SDPs as they crossed signaling; failure downgrades to unverified.
@@ -211,6 +262,16 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       return;
     }
 
+    if (memory.detachment.isDetached()) {
+      const { peerId } = state;
+      yield* Scope.close(state.generation.scope, Exit.void);
+      state = { _tag: 'TransportLost', peerId };
+      yield* Effect.logWarning('Direct transport failed after detachment');
+      return yield* eventSink.emit({ _tag: 'TransportLost', peerId });
+    }
+
+    memory.detachment.resetGeneration();
+
     const { peerId, reconnectAttempts } = state;
     const role = state.negotiation.role;
     yield* Scope.close(state.generation.scope, Exit.void);
@@ -232,6 +293,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
         peerId,
         negotiation: { role: 'answerer', phase: 'awaiting-offer' },
         peerConnectionState: 'connecting',
+        iceGatheringComplete: false,
         dataChannelState: { _tag: 'AwaitingRemoteDataChannel' },
         reconnectAttempts: reconnectAttempts + 1,
       };
@@ -260,6 +322,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
         offerSdp,
       },
       peerConnectionState: 'connecting',
+      iceGatheringComplete: false,
       dataChannelState: { _tag: 'DataChannelConnecting', dataChannel },
       reconnectAttempts: reconnectAttempts + 1,
     };
@@ -302,6 +365,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
         offerSdp,
       },
       peerConnectionState: 'connecting',
+      iceGatheringComplete: false,
       dataChannelState: { _tag: 'DataChannelConnecting', dataChannel },
       reconnectAttempts: 0,
     };
@@ -320,6 +384,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       peerId,
       negotiation: { role: 'answerer', phase: 'awaiting-offer' },
       peerConnectionState: 'connecting',
+      iceGatheringComplete: false,
       dataChannelState: { _tag: 'AwaitingRemoteDataChannel' },
       reconnectAttempts: 0,
     };
@@ -350,6 +415,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
             state.generation.peerConnection,
             signal,
           );
+          memory.detachment.resetGeneration();
           state = {
             ...state,
             negotiation: {
@@ -496,7 +562,11 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     peerConnection: PeerConnectionHandle,
     candidate: IceCandidate,
   ) {
-    if (state._tag !== 'PeerKnown' || state.generation.peerConnection !== peerConnection) {
+    if (
+      memory.detachment.isDetached() ||
+      state._tag !== 'PeerKnown' ||
+      state.generation.peerConnection !== peerConnection
+    ) {
       return;
     }
     if (state.negotiation.phase === 'awaiting-offer') {
@@ -551,6 +621,15 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       yield* emitSas(state.negotiation.offerSdp, state.negotiation.answerSdp);
     }
   });
+
+  const handleIceGatheringComplete = (peerConnection: PeerConnectionHandle) =>
+    Effect.sync(() => {
+      if (state._tag !== 'PeerKnown' || state.generation.peerConnection !== peerConnection) {
+        return;
+      }
+
+      state = { ...state, iceGatheringComplete: true };
+    });
 
   const handleDataChannelClosed = Effect.fnUntraced(function* (dataChannel: DataChannelHandle) {
     if (
@@ -781,6 +860,19 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     }
 
     switch (decoded.success.type) {
+      case 'detach-probe':
+        if (!memory.detachment.markProbeReceived()) return;
+        return;
+      case 'leave': {
+        if (!memory.detachment.isDetached()) {
+          return yield* Effect.logWarning('Ignored leave envelope before detachment');
+        }
+        const { peerId, generation } = state;
+        yield* Scope.close(generation.scope, Exit.void);
+        state = { _tag: 'TransportLost', peerId };
+        yield* Effect.logInfo('Peer departed over the data channel');
+        return yield* eventSink.emit({ _tag: 'PeerDeparted', peerId });
+      }
       case 'chat-message':
         return yield* eventSink.emit({
           _tag: 'ChatMessageAdded',
@@ -879,6 +971,29 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     yield* sendLatestMediaState(state.dataChannelState.dataChannel);
   });
 
+  const handleUiSendLeave = Effect.fnUntraced(function* () {
+    if (state._tag !== 'PeerKnown' || state.dataChannelState._tag !== 'DataChannelOpen') {
+      return;
+    }
+    yield* transmitRoomEvent(state.dataChannelState.dataChannel, {
+      version: ROOM_EVENT_VERSION,
+      type: 'leave',
+    }).pipe(
+      Effect.catchIf(isPlatformError, (error) =>
+        Effect.logWarning('Failed to send leave envelope').pipe(
+          Effect.annotateLogs('operation', error.operation),
+          Effect.as(false),
+        ),
+      ),
+    );
+  });
+
+  const handleDetached = Effect.fnUntraced(function* () {
+    if (!memory.detachment.markDetached()) return;
+    yield* Effect.logInfo('Call detached from signaling server');
+    yield* eventSink.emit({ _tag: 'SessionDetached' });
+  });
+
   const handleRetryPendingAvatarPose = Effect.fnUntraced(function* (
     peerConnection: PeerConnectionHandle,
     dataChannel: DataChannelHandle,
@@ -895,7 +1010,9 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     yield* flushOrRetryAvatarPose(peerConnection, dataChannel);
   });
 
-  const handleInput = Effect.fnUntraced(function* (input: PeerSessionInput) {
+  const dispatchInput = Effect.fnUntraced(function* (
+    input: Exclude<PeerSessionInput, { readonly _tag: 'SignalingEnded' }>,
+  ) {
     switch (input._tag) {
       case 'RoomSessionOpened':
         return yield* handleRoomSessionOpened(input.peerId);
@@ -905,6 +1022,8 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
         return yield* handleSignal(input.peerId, input.signal);
       case 'PeerLeft':
         return yield* handlePeerLeft(input.peerId);
+      case 'Detached':
+        return yield* handleDetached();
       case 'RemoteDataChannel':
         return yield* handleRemoteDataChannel(input.peerConnection, input.dataChannel);
       case 'LocalIceCandidate':
@@ -919,6 +1038,8 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
         return yield* handlePeerConnectionFailed(input.peerConnection);
       case 'PeerConnectionConnected':
         return yield* handlePeerConnectionConnected(input.peerConnection);
+      case 'IceGatheringComplete':
+        return yield* handleIceGatheringComplete(input.peerConnection);
       case 'DataChannelClosed':
         return yield* handleDataChannelClosed(input.dataChannel);
       case 'PeerConnectionInterrupted':
@@ -935,7 +1056,28 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
         return yield* handleUiSendAvatarPose(input.pose);
       case 'SendMediaState':
         return yield* handleUiSendMediaState(input.mediaState);
+      case 'SendLeave':
+        return yield* handleUiSendLeave();
     }
+  });
+
+  const handleInput = Effect.fnUntraced(function* (input: PeerSessionInput) {
+    if (input._tag === 'SignalingEnded') {
+      if (memory.detachment.isDetached()) {
+        yield* Effect.logInfo('Signaling ended after detachment; ignoring');
+        return 'continue' satisfies PeerSessionInputOutcome;
+      }
+      if (memory.detachment.hasDeclaredReadiness()) {
+        yield* Effect.logInfo('Signaling ended after readiness; detaching implicitly');
+        yield* handleDetached();
+        return 'continue' satisfies PeerSessionInputOutcome;
+      }
+      yield* Effect.logInfo('Signaling stream ended');
+      return 'stop' satisfies PeerSessionInputOutcome;
+    }
+    yield* dispatchInput(input);
+    yield* maybeAdvanceDetachment();
+    return 'continue' satisfies PeerSessionInputOutcome;
   });
 
   return { handleInput };

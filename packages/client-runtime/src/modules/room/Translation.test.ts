@@ -1,6 +1,7 @@
 import { assert, describe, it } from '@effect/vitest';
 import {
   DUSK_SUITE_TEMPLATE_ID,
+  DetachedEvent,
   DisplayName,
   IceCandidateSignal,
   JoinCancelledEvent,
@@ -117,6 +118,14 @@ describe('translateRoomEventData', () => {
     assert.deepStrictEqual(translateRoomEventData(new JoinCancelledEvent({ peerId })).uiEvent, {
       _tag: 'JoinRequestCancelled',
       peerId,
+    });
+  });
+
+  it('translates detached events into actor input', () => {
+    assert.deepStrictEqual(translateRoomEventData(new DetachedEvent({})), {
+      input: { _tag: 'Detached' },
+      uiEvent: null,
+      openedSession: null,
     });
   });
 });
