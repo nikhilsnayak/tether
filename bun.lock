@@ -5,7 +5,7 @@
     "": {
       "name": "tether",
       "dependencies": {
-        "@effect/language-service": "0.86.4",
+        "@effect/language-service": "0.87.0",
         "@types/bun": "catalog:",
         "oxfmt": "^0.59.0",
         "oxlint": "^1.74.0",
@@ -383,7 +383,7 @@
 
     "@effect/atom-react": ["@effect/atom-react@4.0.0-beta.98", "", { "peerDependencies": { "effect": "^4.0.0-beta.98", "react": "^19.2.4", "scheduler": "*" } }, "sha512-M7BMiXyJZ1sSOwkipkF8/yNYoAp5WA6xhD0u8wobI6h9OIQp5oxx+AvE4FCj0wmfexAsUZPfZ4McCXstXYskbg=="],
 
-    "@effect/language-service": ["@effect/language-service@0.86.4", "", { "bin": { "effect-language-service": "cli.js" } }, "sha512-XzAPsbwCdm0gRh0E8wJu3wXECb00QraE3LnbObA4RgHn8u2TEbwAjmBadRnwSgOIElfzZjbsRqNR706/V54hDg=="],
+    "@effect/language-service": ["@effect/language-service@0.87.0", "", { "bin": { "effect-language-service": "cli.js" } }, "sha512-GwZtEwBaOMyKea6YAtN0T0OGBtzJ8/y0KUIfyg29u3hnMRiXKlR2BRDqJmi+SbgaODJNNB3YOd6KuRB/vsxnWw=="],
 
     "@effect/platform-bun": ["@effect/platform-bun@4.0.0-beta.98", "", { "dependencies": { "@effect/platform-node-shared": "^4.0.0-beta.98" }, "peerDependencies": { "effect": "^4.0.0-beta.98" } }, "sha512-QorRKhvwHDPwvE8lH5lE0r0dI2z+zj12VUN4h7hfoIunKUiXSoSOMZqF3w13W30RpV6ivsvJywUycaa/18yMPA=="],
 
