@@ -27,19 +27,21 @@ export function RoomEntryFlow({
   readonly onLeave: () => void;
 }) {
   const [state, dispatch] = useReducer(roomEntryReducer, initialRoomEntryState);
-  // session.selfId is stable for the page, so it can never trigger the error
-  // boundary's auto-reset. A monotonic attempt counter gives each retry a fresh
-  // reset key, so the boundary clears even if a retry keeps the subtree mounted.
-  const attempt = useRef(0);
+  // One record per entry attempt: `index` is the error boundary's reset key
+  // (session.selfId is stable and never resets it), and `claimed` latches the
+  // first accepted media synchronously so a racing completion can't slip past.
+  const attempt = useRef({ index: 0, claimed: false });
 
   const prepareMedia = (preparedMedia: PreparedMediaSelection) => {
-    // The reducer rejects a duplicate without disposing, and nobody else would
-    // release these tracks, so release a selection that arrives off-stage here.
-    if (state._tag === 'MediaSetup') {
-      dispatch({ _tag: 'MediaPrepared', preparedMedia });
-    } else {
+    // A ref settles synchronously, so a second completion racing the first
+    // MediaPrepared dispatch releases its selection here rather than leaking
+    // the tracks the reducer would silently drop.
+    if (attempt.current.claimed) {
       void preparedMedia.release();
+      return;
     }
+    attempt.current.claimed = true;
+    dispatch({ _tag: 'MediaPrepared', preparedMedia });
   };
 
   return (
@@ -56,10 +58,10 @@ export function RoomEntryFlow({
         <SessionRequestedStage
           session={session}
           preparedMedia={state.preparedMedia}
-          resetKey={attempt.current}
+          resetKey={attempt.current.index}
           onLeaveRoom={onLeave}
           onRestartMediaSetup={() => {
-            attempt.current += 1;
+            attempt.current = { index: attempt.current.index + 1, claimed: false };
             dispatch({ _tag: 'RestartMediaSetup' });
           }}
         />
