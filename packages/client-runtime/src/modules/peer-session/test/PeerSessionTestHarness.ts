@@ -410,6 +410,10 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
     (connection: PeerConnectionHandle = peerConnection) =>
       actor({ _tag: 'PeerConnectionConnected', peerConnection: connection }),
   );
+  const gatheringComplete = Effect.fn('PeerSessionTestHarness.gatheringComplete')(
+    (connection: PeerConnectionHandle = peerConnection) =>
+      actor({ _tag: 'IceGatheringComplete', peerConnection: connection }),
+  );
   const connectionFailed = Effect.fn('PeerSessionTestHarness.connectionFailed')(
     (connection: PeerConnectionHandle = peerConnection) =>
       actor({ _tag: 'PeerConnectionFailed', peerConnection: connection }),
@@ -462,6 +466,7 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
     },
     eventQueue,
     events,
+    gatheringComplete,
     localDataChannel,
     localMediaStream,
     openRoom,

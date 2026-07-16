@@ -78,6 +78,7 @@ export type PlatformEvent =
     }
   | { readonly _tag: 'PeerConnectionFailed'; readonly peerConnection: PeerConnectionHandle }
   | { readonly _tag: 'PeerConnectionConnected'; readonly peerConnection: PeerConnectionHandle }
+  | { readonly _tag: 'IceGatheringComplete'; readonly peerConnection: PeerConnectionHandle }
   | { readonly _tag: 'DataChannelClosed'; readonly dataChannel: DataChannelHandle }
   | { readonly _tag: 'PeerConnectionInterrupted'; readonly peerConnection: PeerConnectionHandle }
   | { readonly _tag: 'PeerConnectionRestored'; readonly peerConnection: PeerConnectionHandle }

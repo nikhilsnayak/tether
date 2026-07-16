@@ -233,6 +233,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
         peerId,
         negotiation: { role: 'answerer', phase: 'awaiting-offer' },
         peerConnectionState: 'connecting',
+        iceGatheringComplete: false,
         dataChannelState: { _tag: 'AwaitingRemoteDataChannel' },
         reconnectAttempts: reconnectAttempts + 1,
       };
@@ -261,6 +262,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
         offerSdp,
       },
       peerConnectionState: 'connecting',
+      iceGatheringComplete: false,
       dataChannelState: { _tag: 'DataChannelConnecting', dataChannel },
       reconnectAttempts: reconnectAttempts + 1,
     };
@@ -303,6 +305,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
         offerSdp,
       },
       peerConnectionState: 'connecting',
+      iceGatheringComplete: false,
       dataChannelState: { _tag: 'DataChannelConnecting', dataChannel },
       reconnectAttempts: 0,
     };
@@ -321,6 +324,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       peerId,
       negotiation: { role: 'answerer', phase: 'awaiting-offer' },
       peerConnectionState: 'connecting',
+      iceGatheringComplete: false,
       dataChannelState: { _tag: 'AwaitingRemoteDataChannel' },
       reconnectAttempts: 0,
     };
@@ -552,6 +556,15 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       yield* emitSas(state.negotiation.offerSdp, state.negotiation.answerSdp);
     }
   });
+
+  const handleIceGatheringComplete = (peerConnection: PeerConnectionHandle) =>
+    Effect.sync(() => {
+      if (state._tag !== 'PeerKnown' || state.generation.peerConnection !== peerConnection) {
+        return;
+      }
+
+      state = { ...state, iceGatheringComplete: true };
+    });
 
   const handleDataChannelClosed = Effect.fnUntraced(function* (dataChannel: DataChannelHandle) {
     if (
@@ -922,6 +935,8 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
         return yield* handlePeerConnectionFailed(input.peerConnection);
       case 'PeerConnectionConnected':
         return yield* handlePeerConnectionConnected(input.peerConnection);
+      case 'IceGatheringComplete':
+        return yield* handleIceGatheringComplete(input.peerConnection);
       case 'DataChannelClosed':
         return yield* handleDataChannelClosed(input.dataChannel);
       case 'PeerConnectionInterrupted':

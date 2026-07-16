@@ -52,6 +52,7 @@ export type PeerSessionActorState =
       readonly peerId: PeerId;
       readonly negotiation: PeerNegotiationState;
       readonly peerConnectionState: 'connecting' | 'connected' | 'interrupted';
+      readonly iceGatheringComplete: boolean;
       readonly dataChannelState: DataChannelState;
       readonly reconnectAttempts: number;
     }

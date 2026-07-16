@@ -51,6 +51,44 @@ describe('startPeerSession', () => {
     ),
   );
 
+  it.effect('accepts ICE gathering completion for the active generation', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makePeerSessionTestHarness();
+        yield* fixture.openRoom(bob);
+        const eventCount = fixture.events.length;
+
+        assert.strictEqual(yield* fixture.gatheringComplete(), 'continue');
+        assert.lengthOf(fixture.events, eventCount);
+      }),
+    ),
+  );
+
+  it.effect('ignores ICE gathering completion before a peer is known', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makePeerSessionTestHarness();
+
+        assert.strictEqual(yield* fixture.gatheringComplete(), 'continue');
+        assert.deepStrictEqual(fixture.events, []);
+      }),
+    ),
+  );
+
+  it.effect('ignores ICE gathering completion from a stale generation', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makePeerSessionTestHarness();
+        yield* fixture.openRoom(bob);
+        yield* fixture.connectionFailed();
+        const eventCount = fixture.events.length;
+
+        assert.strictEqual(yield* fixture.gatheringComplete(fixture.peerConnection), 'continue');
+        assert.lengthOf(fixture.events, eventCount);
+      }),
+    ),
+  );
+
   it.effect('uses the Google public STUN server for peer connection acquisition', () =>
     Effect.scoped(
       Effect.gen(function* () {

@@ -156,6 +156,15 @@ const observePeerConnection = Effect.fnUntraced(function* (
     });
   };
 
+  const handleIceGatheringStateChange = () => {
+    if (peerConnection.iceGatheringState !== 'complete') return;
+
+    dispatch({
+      _tag: 'IceGatheringComplete',
+      peerConnection: peerConnectionHandle,
+    });
+  };
+
   // Distinguishes the initial connection from a recovery while rejecting
   // duplicate and terminal browser state notifications.
   let observedConnectionState: 'initial' | 'connected' | 'interrupted' | 'failed' = 'initial';
@@ -203,6 +212,7 @@ const observePeerConnection = Effect.fnUntraced(function* (
       peerConnection.addEventListener('icecandidate', handleIceCandidate);
       peerConnection.addEventListener('datachannel', handleDataChannel);
       peerConnection.addEventListener('track', handleTrack);
+      peerConnection.addEventListener('icegatheringstatechange', handleIceGatheringStateChange);
       peerConnection.addEventListener('connectionstatechange', handleConnectionStateChange);
     }),
     () =>
@@ -210,6 +220,10 @@ const observePeerConnection = Effect.fnUntraced(function* (
         peerConnection.removeEventListener('icecandidate', handleIceCandidate);
         peerConnection.removeEventListener('datachannel', handleDataChannel);
         peerConnection.removeEventListener('track', handleTrack);
+        peerConnection.removeEventListener(
+          'icegatheringstatechange',
+          handleIceGatheringStateChange,
+        );
         peerConnection.removeEventListener('connectionstatechange', handleConnectionStateChange);
       }),
   );
