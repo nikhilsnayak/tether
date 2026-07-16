@@ -141,6 +141,7 @@ test.describe('real room', { tag: '@gpu' }, () => {
       room.expectPreparedMediaTransferred(guest),
     ]);
     await expect.poll(() => guest.probe.latestDataChannelLabel()).toBe('room-events-v1');
+    await Promise.all([room.expectRendererReady(host), room.expectRendererReady(guest)]);
 
     // The scene must be the exact same Canvas the actor saw at media setup: one
     // renderer survived the media-setup -> session transition, no remount.

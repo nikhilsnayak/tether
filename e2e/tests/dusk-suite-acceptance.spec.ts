@@ -45,9 +45,11 @@ test.describe('high-quality renderer', () => {
         if (url.origin !== appOrigin) externalAssets.push(url.href);
       });
 
-      await room.createRoom(room.actorFor(page));
+      const actor = room.actorFor(page);
+      await room.createRoom(actor);
       const scene = page.getByLabel('Dusk Suite room scene');
       await expect(scene).toHaveAttribute('data-room-quality-tier', 'high');
+      await room.expectRendererReady(actor);
       await expect(scene.locator('canvas')).toBeVisible();
       // The room keeps a live signaling connection open, so true network-idle
       // never fires; a short settle window is enough to catch lazy-loaded assets.

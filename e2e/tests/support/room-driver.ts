@@ -174,6 +174,18 @@ export class RoomDriver {
       });
   }
 
+  expectRendererReady(actor: RoomActor) {
+    const scene = actor.page.getByLabel('Dusk Suite room scene');
+    return Promise.all([
+      expect(scene).toHaveAttribute('data-room-renderer-ready', 'true', { timeout: 30_000 }),
+      expect(scene).toHaveAttribute(
+        'data-room-renderer-backend',
+        process.env.CI ? 'webgl' : /^(webgpu|webgl)$/,
+        { timeout: 30_000 },
+      ),
+    ]);
+  }
+
   expectWaitingForPeer(actor: RoomActor) {
     return Promise.all([
       expect(actor.page.getByText('Share this room to invite someone.')).toBeVisible(),
