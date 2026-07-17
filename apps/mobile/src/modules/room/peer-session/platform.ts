@@ -7,10 +7,16 @@ import {
   type PeerConnectionHandle,
   type PlatformEventDispatch,
   type IceServer,
+  type ProgramTransceiverHandle,
 } from '@tether/client-runtime/modules/peer-session';
 import { Crypto, Effect, Layer } from 'effect';
 import * as ExpoCrypto from 'expo-crypto';
-import { MediaStream, RTCPeerConnection, mediaDevices } from 'react-native-webrtc';
+import {
+  MediaStream,
+  type MediaStreamTrack,
+  RTCPeerConnection,
+  mediaDevices,
+} from 'react-native-webrtc';
 
 export const nativeCryptoLayer = Layer.succeed(
   Crypto.Crypto,
@@ -32,10 +38,13 @@ export const nativeCryptoLayer = Layer.succeed(
 
 // Not exported from the package index.
 type RTCDataChannel = ReturnType<RTCPeerConnection['createDataChannel']>;
+type RTCRtpTransceiver = ReturnType<RTCPeerConnection['addTransceiver']>;
 
 const peerConnectionValue = (handle: PeerConnectionHandle) => handle.value as RTCPeerConnection;
 const dataChannelValue = (handle: DataChannelHandle) => handle.value as RTCDataChannel;
 export const mediaStreamValue = (handle: MediaStreamHandle) => handle.value as MediaStream;
+const programTransceiverValue = (handle: ProgramTransceiverHandle) =>
+  handle.value as { readonly video: RTCRtpTransceiver; readonly audio: RTCRtpTransceiver };
 
 export const acquireLocalMedia = Effect.acquireRelease(
   Effect.tryPromise({
@@ -109,14 +118,28 @@ const observePeerConnection = Effect.fnUntraced(function* (
     });
   };
 
-  const handleTrack = (event: { readonly streams: ReadonlyArray<MediaStream> }) => {
+  let sharedStream: MediaStream | null = null;
+  const handleTrack = (event: {
+    readonly streams: ReadonlyArray<MediaStream>;
+    readonly track: MediaStreamTrack | null;
+  }) => {
     const stream = event.streams[0];
-    if (stream === undefined) return;
+    if (stream !== undefined) {
+      dispatch({
+        _tag: 'RemoteTrackReceived',
+        peerConnection: peerConnectionHandle,
+        stream: { value: stream },
+      });
+      return;
+    }
+    if (event.track == null) return;
 
+    if (sharedStream === null) sharedStream = new MediaStream([event.track]);
+    else sharedStream.addTrack(event.track);
     dispatch({
-      _tag: 'RemoteTrackReceived',
+      _tag: 'RemoteSharedTrackReceived',
       peerConnection: peerConnectionHandle,
-      stream: { value: stream },
+      stream: { value: sharedStream },
     });
   };
 
@@ -260,6 +283,33 @@ const nativePeerSessionPlatform = PeerSessionPlatform.of({
         }
       },
       catch: (cause) => new PlatformError({ operation: 'add-local-tracks', cause }),
+    }),
+  reserveProgramTransceivers: (peerConnection) =>
+    Effect.try({
+      try: () => {
+        const peer = peerConnectionValue(peerConnection);
+        // First-release mobile is a receive-only watcher: it never presents, so
+        // its program transceivers do not advertise sending capability.
+        return {
+          value: {
+            video: peer.addTransceiver('video', { direction: 'recvonly' }),
+            audio: peer.addTransceiver('audio', { direction: 'recvonly' }),
+          },
+        };
+      },
+      catch: (cause) => new PlatformError({ operation: 'reserve-program-transceivers', cause }),
+    }),
+  replaceProgramTracks: (transceiver, stream) =>
+    Effect.tryPromise({
+      try: async () => {
+        const { video, audio } = programTransceiverValue(transceiver);
+        const media = stream === null ? null : mediaStreamValue(stream);
+        await Promise.all([
+          video.sender.replaceTrack(media?.getVideoTracks()[0] ?? null),
+          audio.sender.replaceTrack(media?.getAudioTracks()[0] ?? null),
+        ]);
+      },
+      catch: (cause) => new PlatformError({ operation: 'replace-program-tracks', cause }),
     }),
   observePeerConnection,
   createDataChannel: (peerConnection, label) =>

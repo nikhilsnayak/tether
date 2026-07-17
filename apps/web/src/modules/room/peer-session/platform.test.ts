@@ -29,7 +29,11 @@ class FakeTrack {
 
 class FakeMediaStream {
   readonly track = new FakeTrack();
+  readonly videoTrack = new FakeTrack();
+  readonly audioTrack = new FakeTrack();
   readonly getTracks = vi.fn(() => [this.track]);
+  readonly getVideoTracks = vi.fn(() => [this.videoTrack]);
+  readonly getAudioTracks = vi.fn(() => [this.audioTrack]);
 }
 
 class FakeDataChannel {
@@ -66,6 +70,9 @@ class FakeDataChannel {
 class FakePeerConnection {
   readonly listeners = new Map<string, Set<(event: never) => void>>();
   readonly addTrack = vi.fn((_track: unknown, _stream: unknown) => undefined);
+  readonly addTransceiver = vi.fn((_kind: unknown, _init: unknown) => ({
+    sender: { replaceTrack: vi.fn(async (_track: unknown) => undefined) },
+  }));
   readonly close = vi.fn();
   readonly createOffer = vi.fn(async () => ({ sdp: 'offer-sdp' }));
   readonly createAnswer = vi.fn(async () => ({ sdp: 'answer-sdp' }));
@@ -116,6 +123,13 @@ const makeWebPlatformTestHarness = (): WebPlatformTestHarness => {
   const digest = vi.fn(async (_algorithm: string, data: Uint8Array) => data);
 
   vi.stubGlobal('RTCPeerConnection', FakePeerConnection);
+  vi.stubGlobal(
+    'MediaStream',
+    class {
+      readonly addTrack = vi.fn();
+      constructor(_tracks?: ReadonlyArray<unknown>) {}
+    },
+  );
   vi.stubGlobal('navigator', { mediaDevices: { getUserMedia } });
   vi.stubGlobal('crypto', { getRandomValues, subtle: { digest } });
 
@@ -309,6 +323,38 @@ describe('web peer-session platform', () => {
         if (platform.closeDataChannel === undefined) return;
         yield* platform.closeDataChannel(dataChannel);
         assert.strictEqual(channel.close.mock.calls.length, 1);
+      }).pipe(Effect.provide(harness.layer)),
+    );
+  });
+
+  it.effect('reserves and replaces browser watch-along tracks', () => {
+    const harness = makeWebPlatformTestHarness();
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const platform = yield* PeerSessionPlatform;
+        const peerConnection = yield* platform.acquirePeerConnection([]);
+        const transceiver = yield* platform.reserveProgramTransceivers(peerConnection);
+
+        yield* platform.replaceProgramTracks(transceiver, harness.localMedia);
+        yield* platform.replaceProgramTracks(transceiver, null);
+
+        const peer = peerConnection.value as FakePeerConnection;
+        assert.deepStrictEqual(peer.addTransceiver.mock.calls, [
+          ['video', { direction: 'sendrecv' }],
+          ['audio', { direction: 'sendrecv' }],
+        ]);
+        const reserved = transceiver.value as {
+          readonly video: { readonly sender: { readonly replaceTrack: ReturnType<typeof vi.fn> } };
+          readonly audio: { readonly sender: { readonly replaceTrack: ReturnType<typeof vi.fn> } };
+        };
+        assert.deepStrictEqual(reserved.video.sender.replaceTrack.mock.calls, [
+          [harness.mediaStream.videoTrack],
+          [null],
+        ]);
+        assert.deepStrictEqual(reserved.audio.sender.replaceTrack.mock.calls, [
+          [harness.mediaStream.audioTrack],
+          [null],
+        ]);
       }).pipe(Effect.provide(harness.layer)),
     );
   });

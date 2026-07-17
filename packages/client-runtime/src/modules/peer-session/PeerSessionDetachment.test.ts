@@ -186,7 +186,9 @@ describe('peer-session actor — detachment', () => {
 
         yield* fixture.connectionFailed();
         const replacementConnection = fixture.peerConnections[1]!;
-        const replacementChannel = fixture.dataChannels[1]!;
+        // Index 1 is the first generation's watch-control channel; the
+        // replacement generation's room-events channel is index 2.
+        const replacementChannel = fixture.dataChannels[2]!;
         yield* fixture.receiveAnswer(bob, 'answer-sdp-1', 1);
         yield* fixture.connectionConnected(replacementConnection);
         yield* fixture.openRoomEvents(replacementChannel);

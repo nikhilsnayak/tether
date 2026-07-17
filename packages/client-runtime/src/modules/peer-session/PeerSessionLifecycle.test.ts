@@ -1,5 +1,6 @@
 import { assert, describe, it } from '@effect/vitest';
 import {
+  DUSK_SUITE_TEMPLATE_ID,
   JoinDenied,
   NoPendingJoin,
   PeerAlreadyJoined,
@@ -44,7 +45,11 @@ describe('startPeerSession', () => {
         const fixture = yield* makePeerSessionTestHarness();
 
         assert.strictEqual(
-          yield* fixture.actor({ _tag: 'RoomSessionOpened', peerId: null }),
+          yield* fixture.actor({
+            _tag: 'RoomSessionOpened',
+            peerId: null,
+            roomTemplateId: DUSK_SUITE_TEMPLATE_ID,
+          }),
           'continue',
         );
       }),

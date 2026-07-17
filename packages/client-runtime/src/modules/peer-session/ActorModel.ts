@@ -1,4 +1,4 @@
-import type { PeerId } from '@tether/contracts/modules/room';
+import type { PeerId, RoomTemplateId } from '@tether/contracts/modules/room';
 import type { Scope } from 'effect';
 
 import type {
@@ -7,7 +7,7 @@ import type {
   PeerConnectionHandle,
   PeerSessionSignal,
   PlatformEvent,
-  SharedTransceiverHandle,
+  ProgramTransceiverHandle,
 } from './Model';
 import type { AvatarPose, MediaState } from './RoomEvents';
 
@@ -20,7 +20,8 @@ export type DataChannelState =
 export type PeerConnectionGeneration = {
   readonly scope: Scope.Closeable;
   readonly peerConnection: PeerConnectionHandle;
-  readonly sharedTransceiver: SharedTransceiverHandle;
+  /** Present only when the room template enables watch-along. */
+  readonly programTransceivers: ProgramTransceiverHandle | null;
 };
 
 export type PeerNegotiationState =
@@ -57,6 +58,11 @@ export type PeerSessionActorState =
       readonly peerConnectionState: 'connecting' | 'connected' | 'interrupted';
       readonly iceGatheringComplete: boolean;
       readonly dataChannelState: DataChannelState;
+      /**
+       * The watch-control channel handle once provisioned; open/close semantics
+       * belong to the watch actor. Present only when watch-along is enabled.
+       */
+      readonly watchChannel: DataChannelHandle | null;
       /** Stream assembled from the generation's reserved remote transceivers. */
       readonly remoteSharedStream: MediaStreamHandle | null;
       readonly reconnectAttempts: number;
@@ -89,7 +95,11 @@ export type PeerSessionLocalInput = PlatformEvent | PeerSessionUiCommand | PeerS
 export type PeerSessionLocalInputDispatch = (input: PeerSessionLocalInput) => void;
 
 export type PeerSessionRemoteInput =
-  | { readonly _tag: 'RoomSessionOpened'; readonly peerId: PeerId | null }
+  | {
+      readonly _tag: 'RoomSessionOpened';
+      readonly peerId: PeerId | null;
+      readonly roomTemplateId: RoomTemplateId;
+    }
   | { readonly _tag: 'PeerJoined'; readonly peerId: PeerId }
   | { readonly _tag: 'PeerLeft'; readonly peerId: PeerId }
   | { readonly _tag: 'Detached' }

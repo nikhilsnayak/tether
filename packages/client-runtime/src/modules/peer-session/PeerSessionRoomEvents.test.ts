@@ -134,7 +134,10 @@ describe('peer-session actor — room events and commands', () => {
           _tag: 'PeerConnectionFailed',
           peerConnection: fixture.peerConnection,
         });
-        const replacementChannel = fixture.dataChannels[1]!;
+        // Index 0 is the first generation's room-events channel, index 1 its
+        // watch-control channel, so the replacement generation's room-events
+        // channel is index 2.
+        const replacementChannel = fixture.dataChannels[2]!;
         yield* fixture.actor({ _tag: 'DataChannelOpened', dataChannel: replacementChannel });
 
         const allSends = fixture.operations.filter((operation) =>

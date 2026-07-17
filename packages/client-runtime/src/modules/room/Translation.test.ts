@@ -35,7 +35,11 @@ describe('translateRoomEventData', () => {
         }),
       ),
       {
-        input: { _tag: 'RoomSessionOpened', peerId: null },
+        input: {
+          _tag: 'RoomSessionOpened',
+          peerId: null,
+          roomTemplateId: DUSK_SUITE_TEMPLATE_ID,
+        },
         uiEvent: { _tag: 'RoomOpened', roomId, roomTemplateId: DUSK_SUITE_TEMPLATE_ID },
         openedSession: { roomId, sessionToken },
       },

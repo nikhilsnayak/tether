@@ -257,6 +257,19 @@ const makeRoomEventMemory = (initialMediaState: MediaState | null) => {
   };
 };
 
+// Resolved once from the room template when the session opens; it gates all
+// watch-along transport provisioning and never changes within a session.
+const makeWatchMemory = () => {
+  let enabled = false;
+
+  return {
+    isEnabled: () => enabled,
+    setEnabled: (value: boolean) => {
+      enabled = value;
+    },
+  };
+};
+
 /**
  * Mutable protocol bookkeeping owned by one serialized peer-session actor.
  * Dependent room-event fields are represented as discriminated states and
@@ -270,4 +283,5 @@ export const makePeerSessionMemory = (
   detachment: makeDetachmentMemory(),
   negotiation: makeNegotiationMemory(),
   roomEvents: makeRoomEventMemory(initialMediaState),
+  watch: makeWatchMemory(),
 });

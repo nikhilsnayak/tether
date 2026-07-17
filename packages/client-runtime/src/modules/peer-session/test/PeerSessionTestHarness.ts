@@ -13,6 +13,7 @@ import {
   SessionToken,
   SignalReceivedEvent,
   type RoomEvent,
+  type RoomTemplateId,
   type Signal,
 } from '@tether/contracts/modules/room';
 import { Effect, Layer, Queue, Scope, Stream } from 'effect';
@@ -55,12 +56,15 @@ export const bobName = DisplayName.make('Bob');
 export const charlie = PeerId.make('cccccccccccc');
 export const mallory = PeerId.make('mmmmmmmmmmmm');
 export const testSessionToken = SessionToken.make('test-session-token');
-export const openedEvent = (peerId: PeerId | null) =>
+export const openedEvent = (
+  peerId: PeerId | null,
+  roomTemplateId: RoomTemplateId = DUSK_SUITE_TEMPLATE_ID,
+) =>
   new RoomSessionOpenedEvent({
     peerId,
     sessionToken: testSessionToken,
     roomId: session.roomId,
-    roomTemplateId: DUSK_SUITE_TEMPLATE_ID,
+    roomTemplateId,
   });
 
 // Every RoomSessionOpenedEvent makes the actor surface the minted roomId first.
@@ -141,6 +145,15 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
         () => Effect.sync(() => operations.push('unobservePeerConnection')),
       ),
     addLocalTracks: () => Effect.sync(() => operations.push('addLocalTracks')),
+    reserveProgramTransceivers: () =>
+      Effect.sync(() => {
+        operations.push('reserveProgramTransceivers');
+        return { value: {} };
+      }),
+    replaceProgramTracks: (_, stream) =>
+      Effect.sync(() => {
+        operations.push(`replaceProgramTracks:${stream === null ? 'clear' : 'set'}`);
+      }),
     createDataChannel: (_, label) =>
       Effect.sync(() => {
         operations.push(`createDataChannel:${label}`);
@@ -298,7 +311,11 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
             };
             events.push(opened);
             yield* Queue.offer(eventQueue, opened);
-            yield* peerActor.handleInput({ _tag: 'RoomSessionOpened', peerId: event.peerId });
+            yield* peerActor.handleInput({
+              _tag: 'RoomSessionOpened',
+              peerId: event.peerId,
+              roomTemplateId: event.roomTemplateId,
+            });
           });
         case '@tether/PeerJoinedEvent':
           return peerActor.handleInput({ _tag: 'PeerJoined', peerId: event.peerId });
@@ -357,8 +374,9 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
   const roomEvent = Effect.fn('PeerSessionTestHarness.roomEvent')((event: RoomEvent) =>
     actor({ _tag: 'RoomEvent', event }),
   );
-  const openRoom = Effect.fn('PeerSessionTestHarness.openRoom')((peerId: PeerId | null) =>
-    roomEvent(openedEvent(peerId)),
+  const openRoom = Effect.fn('PeerSessionTestHarness.openRoom')(
+    (peerId: PeerId | null, roomTemplateId?: RoomTemplateId) =>
+      roomEvent(openedEvent(peerId, roomTemplateId)),
   );
   const peerJoined = Effect.fn('PeerSessionTestHarness.peerJoined')((peerId: PeerId) =>
     roomEvent(new PeerJoinedEvent({ peerId })),

@@ -56,7 +56,7 @@ export interface MediaStreamHandle {
   readonly value: unknown;
 }
 
-export interface SharedTransceiverHandle {
+export interface ProgramTransceiverHandle {
   readonly value: unknown;
 }
 

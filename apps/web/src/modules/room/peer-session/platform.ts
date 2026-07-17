@@ -7,6 +7,7 @@ import {
   type MediaStreamHandle,
   type PeerConnectionHandle,
   type PlatformEventDispatch,
+  type ProgramTransceiverHandle,
 } from '@tether/client-runtime/modules/peer-session';
 import type { PreparedMedia } from '@tether/client-runtime/modules/room';
 import { Crypto, Effect, Exit, Layer, Scope } from 'effect';
@@ -26,6 +27,8 @@ export const webCryptoLayer = Layer.succeed(
 const peerConnectionValue = (handle: PeerConnectionHandle) => handle.value as RTCPeerConnection;
 const dataChannelValue = (handle: DataChannelHandle) => handle.value as RTCDataChannel;
 export const mediaStreamValue = (handle: MediaStreamHandle) => handle.value as MediaStream;
+const programTransceiverValue = (handle: ProgramTransceiverHandle) =>
+  handle.value as { readonly video: RTCRtpTransceiver; readonly audio: RTCRtpTransceiver };
 
 const acquireLocalMedia = Effect.acquireRelease(
   Effect.tryPromise({
@@ -145,14 +148,27 @@ const observePeerConnection = Effect.fnUntraced(function* (
     });
   };
 
+  // Camera/mic tracks carry their stream. Reserved watch-along tracks do not,
+  // so group those into a separate stream for the shared-media projection.
+  let sharedStream: MediaStream | null = null;
   const handleTrack = (event: RTCTrackEvent) => {
     const stream = event.streams[0];
-    if (stream === undefined) return;
+    if (stream !== undefined) {
+      dispatch({
+        _tag: 'RemoteTrackReceived',
+        peerConnection: peerConnectionHandle,
+        stream: { value: stream },
+      });
+      return;
+    }
 
+    if (event.track == null) return;
+    if (sharedStream === null) sharedStream = new MediaStream([event.track]);
+    else sharedStream.addTrack(event.track);
     dispatch({
-      _tag: 'RemoteTrackReceived',
+      _tag: 'RemoteSharedTrackReceived',
       peerConnection: peerConnectionHandle,
-      stream: { value: stream },
+      stream: { value: sharedStream },
     });
   };
 
@@ -296,6 +312,31 @@ const webPeerSessionPlatform = PeerSessionPlatform.of({
         }
       },
       catch: (cause) => new PlatformError({ operation: 'add-local-tracks', cause }),
+    }),
+  reserveProgramTransceivers: (peerConnection) =>
+    Effect.try({
+      try: () => {
+        const peer = peerConnectionValue(peerConnection);
+        return {
+          value: {
+            video: peer.addTransceiver('video', { direction: 'sendrecv' }),
+            audio: peer.addTransceiver('audio', { direction: 'sendrecv' }),
+          },
+        };
+      },
+      catch: (cause) => new PlatformError({ operation: 'reserve-program-transceivers', cause }),
+    }),
+  replaceProgramTracks: (transceiver, stream) =>
+    Effect.tryPromise({
+      try: async () => {
+        const { video, audio } = programTransceiverValue(transceiver);
+        const media = stream === null ? null : mediaStreamValue(stream);
+        await Promise.all([
+          video.sender.replaceTrack(media?.getVideoTracks()[0] ?? null),
+          audio.sender.replaceTrack(media?.getAudioTracks()[0] ?? null),
+        ]);
+      },
+      catch: (cause) => new PlatformError({ operation: 'replace-program-tracks', cause }),
     }),
   observePeerConnection,
   createDataChannel: (peerConnection, label) =>

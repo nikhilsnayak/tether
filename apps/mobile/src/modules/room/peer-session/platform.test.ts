@@ -22,8 +22,14 @@ const native = vi.hoisted(() => {
 
   class FakeMediaStream {
     readonly track = new FakeTrack();
+    readonly videoTrack = new FakeTrack();
+    readonly audioTrack = new FakeTrack();
     readonly getTracks = vi.fn(() => [this.track]);
+    readonly getVideoTracks = vi.fn(() => [this.videoTrack]);
+    readonly getAudioTracks = vi.fn(() => [this.audioTrack]);
+    readonly addTrack = vi.fn();
     readonly release = vi.fn();
+    constructor(_tracks?: ReadonlyArray<unknown>) {}
   }
 
   class FakeDataChannel {
@@ -57,6 +63,9 @@ const native = vi.hoisted(() => {
     static failNext = false;
     readonly listeners = new Map<string, Set<(event: never) => void>>();
     readonly addTrack = vi.fn((_track: unknown, _stream: unknown) => undefined);
+    readonly addTransceiver = vi.fn((_kind: unknown, _init: unknown) => ({
+      sender: { replaceTrack: vi.fn(async (_track: unknown) => undefined) },
+    }));
     readonly close = vi.fn();
     readonly createOffer = vi.fn(async (_options?: unknown) => ({ sdp: 'offer-sdp' }));
     readonly createAnswer = vi.fn(async () => ({ sdp: 'answer-sdp' }));
@@ -268,6 +277,39 @@ describe('native peer-session platform', () => {
               usernameFragment: null,
             },
           },
+        ]);
+      }).pipe(Effect.provide(harness.layer)),
+    );
+  });
+
+  it.effect('reserves and replaces native watch-along tracks', () => {
+    const harness = makeNativePlatformTestHarness();
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const platform = yield* PeerSessionPlatform;
+        const peerConnection = yield* platform.acquirePeerConnection([]);
+        const transceiver = yield* platform.reserveProgramTransceivers(peerConnection);
+
+        yield* platform.replaceProgramTracks(transceiver, harness.localMedia);
+        yield* platform.replaceProgramTracks(transceiver, null);
+
+        const peer = peerConnection.value as InstanceType<typeof native.FakePeerConnection>;
+        // First-release mobile is receive-only: it never presents program media.
+        assert.deepStrictEqual(peer.addTransceiver.mock.calls, [
+          ['video', { direction: 'recvonly' }],
+          ['audio', { direction: 'recvonly' }],
+        ]);
+        const reserved = transceiver.value as {
+          readonly video: { readonly sender: { readonly replaceTrack: ReturnType<typeof vi.fn> } };
+          readonly audio: { readonly sender: { readonly replaceTrack: ReturnType<typeof vi.fn> } };
+        };
+        assert.deepStrictEqual(reserved.video.sender.replaceTrack.mock.calls, [
+          [harness.mediaStream.videoTrack],
+          [null],
+        ]);
+        assert.deepStrictEqual(reserved.audio.sender.replaceTrack.mock.calls, [
+          [harness.mediaStream.audioTrack],
+          [null],
         ]);
       }).pipe(Effect.provide(harness.layer)),
     );

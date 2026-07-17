@@ -10,6 +10,7 @@ import type {
   PeerSessionEvent,
   PlatformEventDispatch,
   SessionDescription,
+  ProgramTransceiverHandle,
 } from './Model';
 import type { PlatformError } from './Platform';
 
@@ -24,6 +25,13 @@ export class PeerSessionPlatform extends Context.Service<
     readonly addLocalTracks: (
       peerConnection: PeerConnectionHandle,
       localStream: MediaStreamHandle,
+    ) => Effect.Effect<void, PlatformError>;
+    readonly reserveProgramTransceivers: (
+      peerConnection: PeerConnectionHandle,
+    ) => Effect.Effect<ProgramTransceiverHandle, PlatformError>;
+    readonly replaceProgramTracks: (
+      transceiver: ProgramTransceiverHandle,
+      stream: MediaStreamHandle | null,
     ) => Effect.Effect<void, PlatformError>;
     readonly observePeerConnection: (
       peerConnection: PeerConnectionHandle,
