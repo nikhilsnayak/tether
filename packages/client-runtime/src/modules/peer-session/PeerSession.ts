@@ -229,7 +229,11 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     // negotiation carries the media; remote tracks arrive via observation.
     yield* platform.addLocalTracks(peerConnection, localStream);
 
-    return { scope: connectionScope, peerConnection };
+    // Reserve idle audio/video slots in the initial negotiation so watch-along
+    // can start later without renegotiating a detached session.
+    const sharedTransceiver = yield* platform.reserveSharedTransceiver(peerConnection);
+
+    return { scope: connectionScope, peerConnection, sharedTransceiver };
   });
 
   /**
@@ -295,6 +299,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
         peerConnectionState: 'connecting',
         iceGatheringComplete: false,
         dataChannelState: { _tag: 'AwaitingRemoteDataChannel' },
+        remoteSharedStream: null,
         reconnectAttempts: reconnectAttempts + 1,
       };
       yield* armNegotiationDeadline(generation);
@@ -324,6 +329,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       peerConnectionState: 'connecting',
       iceGatheringComplete: false,
       dataChannelState: { _tag: 'DataChannelConnecting', dataChannel },
+      remoteSharedStream: null,
       reconnectAttempts: reconnectAttempts + 1,
     };
   });
@@ -367,6 +373,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       peerConnectionState: 'connecting',
       iceGatheringComplete: false,
       dataChannelState: { _tag: 'DataChannelConnecting', dataChannel },
+      remoteSharedStream: null,
       reconnectAttempts: 0,
     };
   });
@@ -386,6 +393,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       peerConnectionState: 'connecting',
       iceGatheringComplete: false,
       dataChannelState: { _tag: 'AwaitingRemoteDataChannel' },
+      remoteSharedStream: null,
       reconnectAttempts: 0,
     };
     yield* armNegotiationDeadline(generation);
@@ -557,6 +565,17 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     }
     yield* eventSink.emit({ _tag: 'RemoteStreamReady', stream });
   });
+
+  const handleRemoteSharedTrack = (
+    peerConnection: PeerConnectionHandle,
+    stream: MediaStreamHandle,
+  ) =>
+    Effect.sync(() => {
+      if (state._tag !== 'PeerKnown' || state.generation.peerConnection !== peerConnection) {
+        return;
+      }
+      state = { ...state, remoteSharedStream: stream };
+    });
 
   const handleLocalIceCandidate = Effect.fnUntraced(function* (
     peerConnection: PeerConnectionHandle,
@@ -1030,6 +1049,8 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
         return yield* handleLocalIceCandidate(input.peerConnection, input.candidate);
       case 'RemoteTrackReceived':
         return yield* handleRemoteTrack(input.peerConnection, input.stream);
+      case 'RemoteSharedTrackReceived':
+        return yield* handleRemoteSharedTrack(input.peerConnection, input.stream);
       case 'DataChannelOpened':
         return yield* handleDataChannelOpened(input.dataChannel);
       case 'DataChannelMessageReceived':

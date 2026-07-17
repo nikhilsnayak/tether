@@ -3,9 +3,11 @@ import type { Scope } from 'effect';
 
 import type {
   DataChannelHandle,
+  MediaStreamHandle,
   PeerConnectionHandle,
   PeerSessionSignal,
   PlatformEvent,
+  SharedTransceiverHandle,
 } from './Model';
 import type { AvatarPose, MediaState } from './RoomEvents';
 
@@ -18,6 +20,7 @@ export type DataChannelState =
 export type PeerConnectionGeneration = {
   readonly scope: Scope.Closeable;
   readonly peerConnection: PeerConnectionHandle;
+  readonly sharedTransceiver: SharedTransceiverHandle;
 };
 
 export type PeerNegotiationState =
@@ -54,6 +57,8 @@ export type PeerSessionActorState =
       readonly peerConnectionState: 'connecting' | 'connected' | 'interrupted';
       readonly iceGatheringComplete: boolean;
       readonly dataChannelState: DataChannelState;
+      /** Stream assembled from the generation's reserved remote transceivers. */
+      readonly remoteSharedStream: MediaStreamHandle | null;
       readonly reconnectAttempts: number;
     }
   | { readonly _tag: 'TransportLost'; readonly peerId: PeerId };
