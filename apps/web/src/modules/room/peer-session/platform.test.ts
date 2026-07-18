@@ -19,18 +19,35 @@ import { afterEach, vi } from 'vitest';
 import {
   mediaStreamValue,
   prepareLocalMedia,
+  tuneSenderParameters,
   webCryptoLayer,
   webPeerSessionPlatformLayer,
 } from './platform';
 
 class FakeTrack {
+  contentHint = '';
   readonly stop = vi.fn();
+  readonly kind: 'audio' | 'video';
+
+  constructor(kind: 'audio' | 'video' = 'audio') {
+    this.kind = kind;
+  }
+}
+
+class FakeSender {
+  readonly replaceTrack = vi.fn(async (_track: unknown) => undefined);
+  readonly setParameters = vi.fn(async (_parameters: unknown) => undefined);
+  readonly parameters = {
+    encodings: [{ priority: 'low', networkPriority: 'low' }],
+    degradationPreference: 'balanced',
+  };
+  readonly getParameters = vi.fn(() => this.parameters);
 }
 
 class FakeMediaStream {
-  readonly track = new FakeTrack();
-  readonly videoTrack = new FakeTrack();
-  readonly audioTrack = new FakeTrack();
+  readonly track = new FakeTrack('audio');
+  readonly videoTrack = new FakeTrack('video');
+  readonly audioTrack = new FakeTrack('audio');
   readonly getTracks = vi.fn(() => [this.track]);
   readonly getVideoTracks = vi.fn(() => [this.videoTrack]);
   readonly getAudioTracks = vi.fn(() => [this.audioTrack]);
@@ -69,10 +86,14 @@ class FakeDataChannel {
 
 class FakePeerConnection {
   readonly listeners = new Map<string, Set<(event: never) => void>>();
-  readonly addTrack = vi.fn((_track: unknown, _stream: unknown) => undefined);
-  readonly addTransceiver = vi.fn((_kind: unknown, _init: unknown) => ({
-    sender: { replaceTrack: vi.fn(async (_track: unknown) => undefined) },
-  }));
+  readonly localSender = new FakeSender();
+  readonly transceiverSenders: FakeSender[] = [];
+  readonly addTrack = vi.fn((_track: unknown, _stream: unknown) => this.localSender);
+  readonly addTransceiver = vi.fn((_kind: unknown, _init: unknown) => {
+    const sender = new FakeSender();
+    this.transceiverSenders.push(sender);
+    return { sender };
+  });
   readonly close = vi.fn();
   readonly createOffer = vi.fn(async () => ({ sdp: 'offer-sdp' }));
   readonly createAnswer = vi.fn(async () => ({ sdp: 'answer-sdp' }));
@@ -158,8 +179,11 @@ const makeWebPlatformTestHarness = (): WebPlatformTestHarness => {
       emitIceCandidate: (handle, candidate) => peer(handle).emit('icecandidate', { candidate }),
       emitRemoteDataChannel: (handle, label) =>
         peer(handle).emit('datachannel', { channel: new FakeDataChannel(label) }),
-      emitRemoteTrack: (handle, stream) =>
-        peer(handle).emit('track', { streams: stream === null ? [] : [stream.value] }),
+      emitRemoteTrack: (handle, stream) => {
+        if (stream !== null) {
+          peer(handle).emit('track', { streams: [stream.value], track: new FakeTrack() });
+        }
+      },
       transitionConnection: (handle, state) => {
         peer(handle).connectionState = state;
         peer(handle).emit('connectionstatechange');
@@ -344,8 +368,8 @@ describe('web peer-session platform', () => {
           ['audio', { direction: 'sendrecv' }],
         ]);
         const reserved = transceiver.value as {
-          readonly video: { readonly sender: { readonly replaceTrack: ReturnType<typeof vi.fn> } };
-          readonly audio: { readonly sender: { readonly replaceTrack: ReturnType<typeof vi.fn> } };
+          readonly video: { readonly sender: FakeSender };
+          readonly audio: { readonly sender: FakeSender };
         };
         assert.deepStrictEqual(reserved.video.sender.replaceTrack.mock.calls, [
           [harness.mediaStream.videoTrack],
@@ -355,8 +379,130 @@ describe('web peer-session platform', () => {
           [harness.mediaStream.audioTrack],
           [null],
         ]);
+        assert.strictEqual(harness.mediaStream.videoTrack.contentHint, 'detail');
+        assert.strictEqual(
+          reserved.video.sender.parameters.degradationPreference,
+          'maintain-resolution',
+        );
+        assert.strictEqual(reserved.video.sender.parameters.encodings[0]?.priority, 'low');
+        assert.strictEqual(reserved.audio.sender.parameters.encodings[0]?.priority, 'medium');
       }).pipe(Effect.provide(harness.layer)),
     );
+  });
+
+  it('feature-detects sender tuning and preserves already-tuned parameters', () => {
+    const unsupported = { encodings: [{}] } as RTCRtpSendParameters;
+    assert.isFalse(tuneSenderParameters(unsupported, 'voice-audio'));
+    assert.isTrue(tuneSenderParameters(unsupported, 'program-video'));
+    assert.strictEqual(unsupported.degradationPreference, 'maintain-resolution');
+
+    const voice = {
+      encodings: [{ priority: 'low', networkPriority: 'medium' }],
+    } as RTCRtpSendParameters;
+    assert.isTrue(tuneSenderParameters(voice, 'voice-audio'));
+    assert.deepStrictEqual(voice.encodings[0], { priority: 'high', networkPriority: 'high' });
+    assert.isFalse(tuneSenderParameters(voice, 'voice-audio'));
+
+    const programVideo = {
+      encodings: [{ priority: 'high', networkPriority: 'high' }],
+      degradationPreference: 'balanced',
+    } as RTCRtpSendParameters;
+    assert.isTrue(tuneSenderParameters(programVideo, 'program-video'));
+    assert.deepStrictEqual(programVideo.encodings[0], {
+      priority: 'low',
+      networkPriority: 'low',
+    });
+    assert.strictEqual(programVideo.degradationPreference, 'maintain-resolution');
+  });
+
+  it.effect('gives local voice the highest supported sender priority', () => {
+    const harness = makeWebPlatformTestHarness();
+    harness.mediaStream.getTracks.mockReturnValue([
+      harness.mediaStream.videoTrack,
+      harness.mediaStream.audioTrack,
+    ]);
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const platform = yield* PeerSessionPlatform;
+        const peerConnection = yield* platform.acquirePeerConnection([]);
+        yield* platform.addLocalTracks(peerConnection, harness.localMedia);
+        const peer = peerConnection.value as FakePeerConnection;
+        assert.strictEqual(peer.localSender.parameters.encodings[0]?.priority, 'high');
+        assert.strictEqual(peer.localSender.parameters.encodings[0]?.networkPriority, 'high');
+        assert.strictEqual(peer.localSender.setParameters.mock.calls.length, 1);
+      }).pipe(Effect.provide(harness.layer)),
+    );
+  });
+
+  it.effect('treats rejected optional sender tuning as best effort', () => {
+    const harness = makeWebPlatformTestHarness();
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const platform = yield* PeerSessionPlatform;
+        const peerConnection = yield* platform.acquirePeerConnection([]);
+        const peer = peerConnection.value as FakePeerConnection;
+        peer.localSender.setParameters.mockRejectedValueOnce(new Error('unsupported tuning'));
+        yield* platform.addLocalTracks(peerConnection, harness.localMedia);
+        assert.strictEqual(peer.localSender.setParameters.mock.calls.length, 1);
+      }).pipe(Effect.provide(harness.layer)),
+    );
+  });
+
+  it.effect('groups multiple streamless program tracks into one media stream', () => {
+    const harness = makeWebPlatformTestHarness();
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const platform = yield* PeerSessionPlatform;
+        const peerConnection = yield* platform.acquirePeerConnection([]);
+        const events: Array<{
+          readonly _tag: string;
+          readonly stream?: { readonly value: unknown };
+        }> = [];
+        yield* platform.observePeerConnection(peerConnection, (event) => events.push(event));
+        const peer = peerConnection.value as FakePeerConnection;
+        peer.emit('track', { streams: [], track: new FakeTrack('video') });
+        peer.emit('track', { streams: [], track: new FakeTrack('audio') });
+
+        assert.deepStrictEqual(
+          events.map((event) => event._tag),
+          ['RemoteSharedTrackReceived', 'RemoteSharedTrackReceived'],
+        );
+        assert.strictEqual(events[0]?.stream?.value, events[1]?.stream?.value);
+        const stream = events[0]?.stream?.value as { readonly addTrack: ReturnType<typeof vi.fn> };
+        assert.strictEqual(stream.addTrack.mock.calls.length, 1);
+      }).pipe(Effect.provide(harness.layer)),
+    );
+  });
+
+  it.effect('maps program transceiver and replacement failures', () => {
+    const reserveHarness = makeWebPlatformTestHarness();
+    const reserve = Effect.scoped(
+      Effect.gen(function* () {
+        const platform = yield* PeerSessionPlatform;
+        const peerConnection = yield* platform.acquirePeerConnection([]);
+        const peer = peerConnection.value as FakePeerConnection;
+        peer.addTransceiver.mockImplementationOnce(() => {
+          throw new Error('reserve');
+        });
+        const error = yield* platform.reserveProgramTransceivers(peerConnection).pipe(Effect.flip);
+        assert.strictEqual(error.operation, 'reserve-program-transceivers');
+      }).pipe(Effect.provide(reserveHarness.layer)),
+    );
+    const replaceHarness = makeWebPlatformTestHarness();
+    const replace = Effect.scoped(
+      Effect.gen(function* () {
+        const platform = yield* PeerSessionPlatform;
+        const peerConnection = yield* platform.acquirePeerConnection([]);
+        const transceiver = yield* platform.reserveProgramTransceivers(peerConnection);
+        const value = transceiver.value as { readonly video: { readonly sender: FakeSender } };
+        value.video.sender.replaceTrack.mockRejectedValueOnce(new Error('replace'));
+        const error = yield* platform
+          .replaceProgramTracks(transceiver, replaceHarness.localMedia)
+          .pipe(Effect.flip);
+        assert.strictEqual(error.operation, 'replace-program-tracks');
+      }).pipe(Effect.provide(replaceHarness.layer)),
+    );
+    return reserve.pipe(Effect.andThen(replace));
   });
 
   it.effect('maps browser channel-close failures to PlatformError', () => {

@@ -30,6 +30,58 @@ export const mediaStreamValue = (handle: MediaStreamHandle) => handle.value as M
 const programTransceiverValue = (handle: ProgramTransceiverHandle) =>
   handle.value as { readonly video: RTCRtpTransceiver; readonly audio: RTCRtpTransceiver };
 
+export type SenderTrafficClass = 'voice-audio' | 'program-audio' | 'program-video';
+
+const senderTuning = {
+  'voice-audio': { priority: 'high' },
+  'program-audio': { priority: 'medium' },
+  'program-video': { priority: 'low', degradationPreference: 'maintain-resolution' },
+} as const satisfies Record<
+  SenderTrafficClass,
+  { readonly priority: RTCPriorityType; readonly degradationPreference?: RTCDegradationPreference }
+>;
+
+/** Feature-detects encoding priorities and applies standard degradation preference best-effort. */
+export const tuneSenderParameters = (
+  parameters: RTCRtpSendParameters,
+  trafficClass: SenderTrafficClass,
+): boolean => {
+  const tuning = senderTuning[trafficClass];
+  let changed = false;
+  for (const encoding of parameters.encodings) {
+    if ('priority' in encoding && encoding.priority !== tuning.priority) {
+      encoding.priority = tuning.priority;
+      changed = true;
+    }
+    if ('networkPriority' in encoding && encoding.networkPriority !== tuning.priority) {
+      encoding.networkPriority = tuning.priority;
+      changed = true;
+    }
+  }
+  if (
+    'degradationPreference' in tuning &&
+    parameters.degradationPreference !== tuning.degradationPreference
+  ) {
+    parameters.degradationPreference = tuning.degradationPreference;
+    changed = true;
+  }
+  return changed;
+};
+
+const tuneSender = (sender: RTCRtpSender, trafficClass: SenderTrafficClass) =>
+  Effect.try(() => {
+    const parameters = sender.getParameters();
+    return tuneSenderParameters(parameters, trafficClass)
+      ? Effect.tryPromise(() => sender.setParameters(parameters))
+      : Effect.void;
+  }).pipe(Effect.flatten, Effect.ignore);
+
+const replaceSenderTrack = (sender: RTCRtpSender, track: MediaStreamTrack | null) =>
+  Effect.tryPromise({
+    try: () => sender.replaceTrack(track),
+    catch: (cause) => new PlatformError({ operation: 'replace-program-tracks', cause }),
+  });
+
 const acquireLocalMedia = Effect.acquireRelease(
   Effect.tryPromise({
     try: async (): Promise<MediaStreamHandle> => ({
@@ -162,7 +214,6 @@ const observePeerConnection = Effect.fnUntraced(function* (
       return;
     }
 
-    if (event.track == null) return;
     if (sharedStream === null) sharedStream = new MediaStream([event.track]);
     else sharedStream.addTrack(event.track);
     dispatch({
@@ -307,9 +358,13 @@ const webPeerSessionPlatform = PeerSessionPlatform.of({
     Effect.try({
       try: () => {
         const stream = mediaStreamValue(localStream);
-        for (const track of stream.getTracks()) {
-          peerConnectionValue(peerConnection).addTrack(track, stream);
-        }
+        return Effect.all(
+          stream.getTracks().map((track) => {
+            const sender = peerConnectionValue(peerConnection).addTrack(track, stream);
+            return track.kind === 'audio' ? tuneSender(sender, 'voice-audio') : Effect.void;
+          }),
+          { discard: true },
+        );
       },
       catch: (cause) => new PlatformError({ operation: 'add-local-tracks', cause }),
     }),
@@ -317,26 +372,33 @@ const webPeerSessionPlatform = PeerSessionPlatform.of({
     Effect.try({
       try: () => {
         const peer = peerConnectionValue(peerConnection);
-        return {
-          value: {
-            video: peer.addTransceiver('video', { direction: 'sendrecv' }),
-            audio: peer.addTransceiver('audio', { direction: 'sendrecv' }),
-          },
-        };
+        const video = peer.addTransceiver('video', { direction: 'sendrecv' });
+        const audio = peer.addTransceiver('audio', { direction: 'sendrecv' });
+        const transceivers = { value: { video, audio } };
+        return Effect.all(
+          [tuneSender(video.sender, 'program-video'), tuneSender(audio.sender, 'program-audio')],
+          { concurrency: 'unbounded', discard: true },
+        ).pipe(Effect.as(transceivers));
       },
       catch: (cause) => new PlatformError({ operation: 'reserve-program-transceivers', cause }),
-    }),
+    }).pipe(Effect.flatten),
   replaceProgramTracks: (transceiver, stream) =>
-    Effect.tryPromise({
-      try: async () => {
-        const { video, audio } = programTransceiverValue(transceiver);
-        const media = stream === null ? null : mediaStreamValue(stream);
-        await Promise.all([
-          video.sender.replaceTrack(media?.getVideoTracks()[0] ?? null),
-          audio.sender.replaceTrack(media?.getAudioTracks()[0] ?? null),
-        ]);
-      },
-      catch: (cause) => new PlatformError({ operation: 'replace-program-tracks', cause }),
+    Effect.gen(function* () {
+      const { video, audio } = programTransceiverValue(transceiver);
+      const media = stream === null ? null : mediaStreamValue(stream);
+      const videoTrack = media?.getVideoTracks()[0] ?? null;
+      if (videoTrack !== null) videoTrack.contentHint = 'detail';
+      yield* Effect.all(
+        [tuneSender(video.sender, 'program-video'), tuneSender(audio.sender, 'program-audio')],
+        { concurrency: 'unbounded', discard: true },
+      );
+      yield* Effect.all(
+        [
+          replaceSenderTrack(video.sender, videoTrack),
+          replaceSenderTrack(audio.sender, media?.getAudioTracks()[0] ?? null),
+        ],
+        { concurrency: 'unbounded', discard: true },
+      );
     }),
   observePeerConnection,
   createDataChannel: (peerConnection, label) =>

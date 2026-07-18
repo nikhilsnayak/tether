@@ -22,6 +22,7 @@ export default defineConfig({
         'src/lib/runtime.ts',
         'src/modules/room/peer-session/runtime.ts',
         'src/modules/room/preflight/use-media-preflight.ts',
+        'src/**/test/**',
       ],
       thresholds: {
         statements: 100,
