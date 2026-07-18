@@ -1,6 +1,8 @@
 import { Effect, Schema, Scope } from 'effect';
 
 import type { AvatarPose, MediaState } from '../peer-session/RoomEvents';
+import type { PreparedSourceHandle } from '../watch-along/Model';
+import type { WatchControlCommand } from '../watch-along/Protocol';
 import type { PeerSession } from './PeerSessionHost';
 
 export class PeerSessionUnavailableError extends Schema.TaggedErrorClass<PeerSessionUnavailableError>()(
@@ -20,6 +22,12 @@ export interface PeerSessionController {
   readonly sendMessage: (message: string) => PeerSessionCommandResult;
   readonly sendAvatarPose: (pose: AvatarPose) => PeerSessionCommandResult;
   readonly sendMediaState: (state: MediaState) => PeerSessionCommandResult;
+  readonly watch: {
+    readonly propose: (source: PreparedSourceHandle) => PeerSessionCommandResult;
+    readonly control: (control: WatchControlCommand) => PeerSessionCommandResult;
+    readonly cancel: () => PeerSessionCommandResult;
+    readonly failPipeline: (reason: 'renderer' | 'pipeline') => PeerSessionCommandResult;
+  };
   readonly respondToJoin: PeerSession['respondToJoin'];
   readonly leave: PeerSession['leave'];
 }
@@ -72,6 +80,12 @@ export const makePeerSessionControllerBinding = (): PeerSessionControllerBinding
     sendMessage: (message) => send((session) => session.sendMessage(message)),
     sendAvatarPose: (pose) => send((session) => session.sendAvatarPose(pose)),
     sendMediaState: (state) => send((session) => session.sendMediaState(state)),
+    watch: {
+      propose: (source) => send((session) => session.watch.propose(source)),
+      control: (control) => send((session) => session.watch.control(control)),
+      cancel: () => send((session) => session.watch.cancel()),
+      failPipeline: (reason) => send((session) => session.watch.failPipeline(reason)),
+    },
     respondToJoin: (peerId, decision) =>
       activeSession === null ? unavailable() : activeSession.respondToJoin(peerId, decision),
     leave: () => (activeSession === null ? unavailable() : activeSession.leave()),

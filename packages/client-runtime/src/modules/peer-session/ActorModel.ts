@@ -1,6 +1,9 @@
 import type { PeerId, RoomTemplateId } from '@tether/contracts/modules/room';
 import type { Scope } from 'effect';
 
+import type { PreparedSourceHandle } from '../watch-along/Model';
+import type { WatchControlCommand } from '../watch-along/Protocol';
+import type { WatchRuntime, WatchRuntimeTerminationReason } from '../watch-along/Supervisor';
 import type {
   DataChannelHandle,
   MediaStreamHandle,
@@ -65,6 +68,10 @@ export type PeerSessionActorState =
       readonly watchChannel: DataChannelHandle | null;
       /** Stream assembled from the generation's reserved remote transceivers. */
       readonly remoteSharedStream: MediaStreamHandle | null;
+      /** Monotonic within one peer-connection generation. */
+      readonly remoteProgramStreamVersion: number;
+      /** Child actor supervised by this generation, once its channel opens. */
+      readonly watchRuntime: WatchRuntime | null;
       readonly reconnectAttempts: number;
     }
   | { readonly _tag: 'TransportLost'; readonly peerId: PeerId };
@@ -76,6 +83,13 @@ export type PeerSessionUiCommand =
     }
   | { readonly _tag: 'SendAvatarPose'; readonly pose: AvatarPose }
   | { readonly _tag: 'SendMediaState'; readonly mediaState: MediaState }
+  | { readonly _tag: 'WatchProposeSource'; readonly source: PreparedSourceHandle }
+  | { readonly _tag: 'WatchRequestControl'; readonly control: WatchControlCommand }
+  | { readonly _tag: 'WatchCancelPreparing' }
+  | {
+      readonly _tag: 'WatchLocalPipelineFailed';
+      readonly reason: 'renderer' | 'pipeline';
+    }
   | { readonly _tag: 'SendLeave' };
 
 /** Identifies the connection generation guarded by a negotiation deadline. */
@@ -88,6 +102,11 @@ export type PeerSessionTimerInput =
       readonly _tag: 'RetryPendingAvatarPose';
       readonly peerConnection: PeerConnectionHandle;
       readonly dataChannel: DataChannelHandle;
+    }
+  | {
+      readonly _tag: 'WatchRuntimeTerminated';
+      readonly peerConnection: PeerConnectionHandle;
+      readonly reason: WatchRuntimeTerminationReason;
     };
 
 export type PeerSessionLocalInput = PlatformEvent | PeerSessionUiCommand | PeerSessionTimerInput;

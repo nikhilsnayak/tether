@@ -22,6 +22,8 @@ import { TestClock } from 'effect/testing';
 import { AppSignalingClient } from '../../../AppSignalingClient';
 import { webCrypto } from '../../../test/WebCrypto';
 import { PeerSessionSignalingTransport } from '../../room/PeerSessionHost';
+import type { WatchCapabilities, WatchEvent } from '../../watch-along/Model';
+import { WatchAlongPlatform, WatchEventSink } from '../../watch-along/Services';
 import type { PeerSessionInput } from '../ActorModel';
 import {
   type DataChannelHandle,
@@ -36,6 +38,7 @@ import {
 import { makePeerSessionActor } from '../PeerSession';
 import { type AvatarPose, type MediaState, ROOM_EVENTS_CHANNEL_LABEL } from '../RoomEvents';
 import { PeerSessionEventSink, PeerSessionPlatform, PeerSessionSignaling } from '../Services';
+import { WATCH_CONTROL_CHANNEL_LABEL } from '../WatchTransport';
 
 interface TestPeerConnection {
   readonly id: string;
@@ -81,6 +84,12 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
   overrides?: Partial<PeerSessionPlatform['Service']>,
   respondToJoinError?: NoPendingJoin | PeerNotInRoom,
   sendReadyToDetach?: (negotiationEpoch: number) => Effect.Effect<void, unknown>,
+  watchOverrides?: {
+    readonly role?: 'host' | 'guest';
+    readonly capabilities?: Partial<WatchCapabilities>;
+    readonly platform?: Partial<WatchAlongPlatform['Service']>;
+    readonly sink?: WatchEventSink['Service'];
+  },
 ) {
   const peerConnections: Array<PeerConnectionHandle> = [];
   let nextPeerConnection = 0;
@@ -118,6 +127,9 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
   const eventQueue = yield* Queue.unbounded<PeerSessionEvent>();
   const acquiredIceServers: Array<ReadonlyArray<IceServer>> = [];
   let platformEventDispatch: PlatformEventDispatch | undefined;
+  const watchEvents: Array<WatchEvent> = [];
+  const localInputs: Array<Extract<PeerSessionInput, { readonly _tag: 'WatchRuntimeTerminated' }>> =
+    [];
 
   const basePlatform: PeerSessionPlatform['Service'] = {
     acquirePeerConnection: (iceServers) =>
@@ -170,6 +182,11 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
           ),
       ),
     dataChannelLabel: (dataChannel) => (dataChannel.value as TestDataChannel).label,
+    dataChannelBufferedAmount: () => 0,
+    closeDataChannel: (dataChannel) =>
+      Effect.sync(() =>
+        operations.push(`closeDataChannel:${(dataChannel.value as TestDataChannel).label}`),
+      ),
     createOffer: () =>
       Effect.sync(() => {
         operations.push('createOffer');
@@ -194,6 +211,37 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
       Effect.sync(() => operations.push(`sendDataChannelMessage:${message}`)),
   };
   const platform = PeerSessionPlatform.of({ ...basePlatform, ...overrides });
+  const watchCapabilities: WatchCapabilities = {
+    canPresentLocalFile: true,
+    canReceiveProgramMedia: true,
+    canRenderWatch: true,
+    canControlWatch: true,
+  };
+  const baseWatchPlatform: WatchAlongPlatform['Service'] = {
+    cancelPreparedSource: () => Effect.sync(() => operations.push('watch:cancelPreparedSource')),
+    claimSource: () =>
+      Effect.acquireRelease(Effect.succeed({ value: { id: 'watch-claimed-source' } }), () =>
+        Effect.sync(() => operations.push('watch:releaseSource')),
+      ),
+    programStream: () => Effect.succeed({ value: { id: 'watch-program-stream' } }),
+    play: () => Effect.sync(() => operations.push('watch:play')),
+    pause: () => Effect.sync(() => operations.push('watch:pause')),
+    seek: () => Effect.sync(() => operations.push('watch:seek')),
+    currentProgress: () => Effect.succeed(0),
+    observeSource: () => Effect.void,
+    primeFirstFrame: () => Effect.void,
+    attachProgramTracks: () => Effect.void,
+    clearProgramTracks: Effect.void,
+  };
+  const watchPlatform = WatchAlongPlatform.of({
+    ...baseWatchPlatform,
+    ...watchOverrides?.platform,
+  });
+  const watchEventSink =
+    watchOverrides?.sink ??
+    WatchEventSink.of({
+      emit: (event) => Effect.sync(() => void watchEvents.push(event)),
+    });
   const respondToJoin = ((payload: Parameters<AppSignalingClient['Service']['RespondToJoin']>[0]) =>
     Effect.sync(() => {
       respondToJoinPayloads.push(payload);
@@ -293,7 +341,15 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
     session.selfId,
     localMediaStream,
     [],
-    () => {},
+    (input) => {
+      if (input._tag === 'WatchRuntimeTerminated') localInputs.push(input);
+    },
+    {
+      role: watchOverrides?.role ?? 'guest',
+      capabilities: { ...watchCapabilities, ...watchOverrides?.capabilities },
+      platform: watchPlatform,
+      sink: watchEventSink,
+    },
   ).pipe(Effect.provide(dependencies));
 
   const actor = (
@@ -459,6 +515,28 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
     (dataChannel: DataChannelHandle = localDataChannel) =>
       actor({ _tag: 'DataChannelClosed', dataChannel }),
   );
+  const watchChannel = () => {
+    const channels = dataChannels.filter(
+      (candidate) => (candidate.value as TestDataChannel).label === WATCH_CONTROL_CHANNEL_LABEL,
+    );
+    const channel = channels[channels.length - 1];
+    if (channel === undefined) throw new Error('Watch channel has not been provisioned');
+    return channel;
+  };
+  const openWatchChannel = Effect.fn('PeerSessionTestHarness.openWatchChannel')(() =>
+    actor({ _tag: 'DataChannelOpened', dataChannel: watchChannel() }),
+  );
+  const receiveWatchMessage = Effect.fn('PeerSessionTestHarness.receiveWatchMessage')(
+    (message: unknown) =>
+      actor({
+        _tag: 'DataChannelMessageReceived',
+        dataChannel: watchChannel(),
+        data: typeof message === 'string' ? message : JSON.stringify(message),
+      }),
+  );
+  const closeWatchChannel = Effect.fn('PeerSessionTestHarness.closeWatchChannel')(() =>
+    actor({ _tag: 'DataChannelClosed', dataChannel: watchChannel() }),
+  );
   const sendChat = Effect.fn('PeerSessionTestHarness.sendChat')((message: string) =>
     actor({ _tag: 'SendMessage', message }),
   );
@@ -500,6 +578,7 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
     actor,
     advance,
     closeRoomEvents,
+    closeWatchChannel,
     connectionConnected,
     connectionFailed,
     connectionInterrupted,
@@ -517,9 +596,11 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
     events,
     gatheringComplete,
     localDataChannel,
+    localInputs,
     localMediaStream,
     openRoom,
     openRoomEvents,
+    openWatchChannel,
     operationOrder: () => operations.slice(),
     operations,
     peerJoined,
@@ -533,6 +614,7 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
     receiveIce,
     receiveLeave,
     receiveOffer,
+    receiveWatchMessage,
     sendChat,
     sendLeave,
     sendMediaState,
@@ -540,5 +622,7 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
     sentSessionTokens,
     signals,
     signalingEnded,
+    watchChannel,
+    watchEvents,
   };
 });

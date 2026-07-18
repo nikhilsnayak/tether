@@ -3,6 +3,15 @@ import { Crypto, Duration, Effect, Exit, Result, Scope } from 'effect';
 
 import { deriveSasCode } from '../call-verification';
 import { resolveRoomFeatureManifest } from '../room-template';
+import type { WatchActorInput } from '../watch-along/ActorModel';
+import type { PreparedSourceHandle, WatchCapabilities } from '../watch-along/Model';
+import { decodeWatchMessage } from '../watch-along/Protocol';
+import {
+  type WatchAlongPlatform,
+  type WatchEventSink,
+  WatchPlatformError,
+} from '../watch-along/Services';
+import { startWatchRuntime } from '../watch-along/Supervisor';
 import type {
   PeerConnectionGeneration,
   PeerSessionActorState,
@@ -43,6 +52,13 @@ const MAX_RECONNECT_ATTEMPTS = 2;
 const POSE_BUFFER_HIGH_WATER_BYTES = 64 * 1024;
 const POSE_BUFFER_LOW_WATER_BYTES = 16 * 1024;
 const POSE_RETRY_DELAY = Duration.millis(100);
+
+export interface PeerSessionWatchDependencies {
+  readonly role: 'host' | 'guest';
+  readonly capabilities: WatchCapabilities;
+  readonly platform: WatchAlongPlatform['Service'];
+  readonly sink: WatchEventSink['Service'];
+}
 
 const requireDescription = (description: SessionDescription, type: 'offer' | 'answer') =>
   description.sdp === undefined
@@ -94,6 +110,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
   localStream: MediaStreamHandle,
   iceServers: ReadonlyArray<IceServer>,
   dispatchLocalInput: PeerSessionLocalInputDispatch,
+  watch: PeerSessionWatchDependencies,
   initialMediaState: MediaState | null = null,
 ) {
   const platform = yield* PeerSessionPlatform;
@@ -279,6 +296,91 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     return watchChannel;
   });
 
+  const startWatchRuntimeForChannel = Effect.fnUntraced(function* (dataChannel: DataChannelHandle) {
+    if (
+      state._tag !== 'PeerKnown' ||
+      state.watchChannel !== dataChannel ||
+      state.watchRuntime !== null
+    ) {
+      return;
+    }
+    const transceivers = state.generation.programTransceivers;
+    // A watch channel is provisioned only beside reserved transceivers.
+    /* v8 ignore next */
+    if (transceivers === null) return;
+    const closeDataChannel = platform.closeDataChannel;
+    if (closeDataChannel === undefined) {
+      return yield* Effect.logWarning(
+        'Watch runtime unavailable because the platform cannot close its channel',
+      );
+    }
+
+    const { generation, remoteSharedStream, remoteProgramStreamVersion } = state;
+    const runtime = yield* startWatchRuntime({
+      role: watch.role,
+      capabilities: watch.capabilities,
+      sendRaw: (payload) => platform.sendDataChannelMessage(dataChannel, payload),
+      bufferedAmount: () => platform.dataChannelBufferedAmount?.(dataChannel) ?? 0,
+      closeWatchChannel: closeDataChannel(dataChannel),
+      attach: (stream) =>
+        platform
+          .replaceProgramTracks(transceivers, { value: stream.value })
+          .pipe(
+            Effect.mapError(
+              (cause) => new WatchPlatformError({ operation: 'attach-program-tracks', cause }),
+            ),
+          ),
+      clear: platform
+        .replaceProgramTracks(transceivers, null)
+        .pipe(
+          Effect.mapError(
+            (cause) => new WatchPlatformError({ operation: 'clear-program-tracks', cause }),
+          ),
+        ),
+      platform: watch.platform,
+      sink: watch.sink,
+      onTerminated: (reason) =>
+        Effect.sync(() => {
+          dispatchLocalInput({
+            _tag: 'WatchRuntimeTerminated',
+            peerConnection: generation.peerConnection,
+            reason,
+          });
+        }),
+    }).pipe(Effect.provideService(Crypto.Crypto, crypto), Scope.provide(generation.scope));
+
+    state = { ...state, watchRuntime: runtime };
+    runtime.dispatch({ _tag: 'ChannelOpened' });
+    if (remoteSharedStream !== null) {
+      runtime.dispatch({
+        _tag: 'RemoteProgramStreamChanged',
+        stream: { value: remoteSharedStream.value },
+        version: remoteProgramStreamVersion,
+      });
+    }
+  });
+
+  const closeGeneration = Effect.fnUntraced(function* (generation: PeerConnectionGeneration) {
+    if (
+      state._tag === 'PeerKnown' &&
+      state.generation === generation &&
+      state.remoteSharedStream !== null
+    ) {
+      const version = state.remoteProgramStreamVersion + 1;
+      state.watchRuntime?.dispatch({
+        _tag: 'RemoteProgramStreamChanged',
+        stream: null,
+        version,
+      });
+      state = {
+        ...state,
+        remoteSharedStream: null,
+        remoteProgramStreamVersion: version,
+      };
+    }
+    yield* Scope.close(generation.scope, Exit.void);
+  });
+
   const beginPeerReconnect = Effect.fnUntraced(function* () {
     // Unreachable: both callers (peer-connection failure and negotiation
     // deadline) narrow to PeerKnown first. This guard only narrows the state
@@ -290,7 +392,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
 
     if (memory.detachment.isDetached()) {
       const { peerId } = state;
-      yield* Scope.close(state.generation.scope, Exit.void);
+      yield* closeGeneration(state.generation);
       state = { _tag: 'TransportLost', peerId };
       yield* Effect.logWarning('Direct transport failed after detachment');
       return yield* eventSink.emit({ _tag: 'TransportLost', peerId });
@@ -300,7 +402,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
 
     const { peerId, reconnectAttempts } = state;
     const role = state.negotiation.role;
-    yield* Scope.close(state.generation.scope, Exit.void);
+    yield* closeGeneration(state.generation);
 
     if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
       state = { _tag: 'TransportLost', peerId };
@@ -323,6 +425,8 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
         dataChannelState: { _tag: 'AwaitingRemoteDataChannel' },
         watchChannel: null,
         remoteSharedStream: null,
+        remoteProgramStreamVersion: 0,
+        watchRuntime: null,
         reconnectAttempts: reconnectAttempts + 1,
       };
       yield* armNegotiationDeadline(generation);
@@ -355,6 +459,8 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       dataChannelState: { _tag: 'DataChannelConnecting', dataChannel },
       watchChannel,
       remoteSharedStream: null,
+      remoteProgramStreamVersion: 0,
+      watchRuntime: null,
       reconnectAttempts: reconnectAttempts + 1,
     };
   });
@@ -405,6 +511,8 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       dataChannelState: { _tag: 'DataChannelConnecting', dataChannel },
       watchChannel,
       remoteSharedStream: null,
+      remoteProgramStreamVersion: 0,
+      watchRuntime: null,
       reconnectAttempts: 0,
     };
   });
@@ -426,6 +534,8 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       dataChannelState: { _tag: 'AwaitingRemoteDataChannel' },
       watchChannel: null,
       remoteSharedStream: null,
+      remoteProgramStreamVersion: 0,
+      watchRuntime: null,
       reconnectAttempts: 0,
     };
     yield* armNegotiationDeadline(generation);
@@ -542,7 +652,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       return;
     }
 
-    yield* Scope.close(state.generation.scope, Exit.void);
+    yield* closeGeneration(state.generation);
 
     const newGeneration = yield* acquirePeerConnectionGeneration();
     memory.negotiation.resetRemoteOffer();
@@ -632,7 +742,13 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       if (state._tag !== 'PeerKnown' || state.generation.peerConnection !== peerConnection) {
         return;
       }
-      state = { ...state, remoteSharedStream: stream };
+      const version = state.remoteProgramStreamVersion + 1;
+      state = { ...state, remoteSharedStream: stream, remoteProgramStreamVersion: version };
+      state.watchRuntime?.dispatch({
+        _tag: 'RemoteProgramStreamChanged',
+        stream: { value: stream.value },
+        version,
+      });
     });
 
   const handleLocalIceCandidate = Effect.fnUntraced(function* (
@@ -709,6 +825,10 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     });
 
   const handleDataChannelClosed = Effect.fnUntraced(function* (dataChannel: DataChannelHandle) {
+    if (state._tag === 'PeerKnown' && state.watchChannel === dataChannel) {
+      state.watchRuntime?.dispatch({ _tag: 'ChannelClosed' });
+      return;
+    }
     if (
       state._tag !== 'PeerKnown' ||
       state.dataChannelState._tag === 'AwaitingRemoteDataChannel' ||
@@ -859,6 +979,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     }
 
     state = { ...state, peerConnectionState: 'interrupted' };
+    state.watchRuntime?.dispatch({ _tag: 'TransportInterrupted' });
     yield* Effect.logWarning('Peer connection interrupted');
     yield* eventSink.emit({ _tag: 'PeerInterrupted', peerId: state.peerId });
   });
@@ -875,6 +996,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     }
 
     state = { ...state, peerConnectionState: 'connected', reconnectAttempts: 0 };
+    state.watchRuntime?.dispatch({ _tag: 'TransportRestored' });
     yield* Effect.logInfo('Peer connection restored');
     yield* eventSink.emit({ _tag: 'PeerRestored', peerId: state.peerId });
     if (state.dataChannelState._tag === 'DataChannelOpen') {
@@ -886,6 +1008,9 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
   });
 
   const handleDataChannelOpened = Effect.fnUntraced(function* (dataChannel: DataChannelHandle) {
+    if (state._tag === 'PeerKnown' && state.watchChannel === dataChannel) {
+      return yield* startWatchRuntimeForChannel(dataChannel);
+    }
     if (
       state._tag === 'PeerKnown' &&
       state.dataChannelState._tag === 'DataChannelOpen' &&
@@ -922,6 +1047,13 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     dataChannel: DataChannelHandle,
     data: unknown,
   ) {
+    if (state._tag === 'PeerKnown' && state.watchChannel === dataChannel) {
+      if (state.watchRuntime === null || !state.watchRuntime.isAlive()) return;
+      const decoded = decodeWatchMessage(data);
+      if (Result.isFailure(decoded)) return;
+      state.watchRuntime.dispatch({ _tag: 'RemoteMessage', message: decoded.success });
+      return;
+    }
     if (
       state._tag !== 'PeerKnown' ||
       state.dataChannelState._tag !== 'DataChannelOpen' ||
@@ -945,7 +1077,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
           return yield* Effect.logWarning('Ignored leave envelope before detachment');
         }
         const { peerId, generation } = state;
-        yield* Scope.close(generation.scope, Exit.void);
+        yield* closeGeneration(generation);
         state = { _tag: 'TransportLost', peerId };
         yield* Effect.logInfo('Peer departed over the data channel');
         return yield* eventSink.emit({ _tag: 'PeerDeparted', peerId });
@@ -1048,6 +1180,36 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     yield* sendLatestMediaState(state.dataChannelState.dataChannel);
   });
 
+  const dispatchWatchInput = (input: WatchActorInput) =>
+    state._tag === 'PeerKnown' &&
+    state.watchRuntime !== null &&
+    state.watchRuntime.isAlive() &&
+    state.watchRuntime.dispatch(input);
+
+  const cancelPreparedSource = (source: PreparedSourceHandle) =>
+    watch.platform
+      .cancelPreparedSource(source)
+      .pipe(
+        Effect.catchTag('WatchPlatformError', (error) =>
+          Effect.logWarning('Failed to cancel an unclaimed watch source').pipe(
+            Effect.annotateLogs('operation', error.operation),
+          ),
+        ),
+      );
+
+  const handleWatchProposeSource = Effect.fnUntraced(function* (source: PreparedSourceHandle) {
+    if (dispatchWatchInput({ _tag: 'ProposeLocalSource', source })) return;
+    yield* cancelPreparedSource(source);
+  });
+
+  const handleWatchRuntimeTerminated = (peerConnection: PeerConnectionHandle) =>
+    Effect.sync(() => {
+      if (state._tag !== 'PeerKnown' || state.generation.peerConnection !== peerConnection) {
+        return;
+      }
+      state = { ...state, watchRuntime: null };
+    });
+
   const handleUiSendLeave = Effect.fnUntraced(function* () {
     if (state._tag !== 'PeerKnown' || state.dataChannelState._tag !== 'DataChannelOpen') {
       return;
@@ -1129,12 +1291,25 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
         return yield* handleNegotiationDeadlineElapsed(input.peerConnection);
       case 'RetryPendingAvatarPose':
         return yield* handleRetryPendingAvatarPose(input.peerConnection, input.dataChannel);
+      case 'WatchRuntimeTerminated':
+        return yield* handleWatchRuntimeTerminated(input.peerConnection);
       case 'SendMessage':
         return yield* handleUiSendMessage(input.message);
       case 'SendAvatarPose':
         return yield* handleUiSendAvatarPose(input.pose);
       case 'SendMediaState':
         return yield* handleUiSendMediaState(input.mediaState);
+      case 'WatchProposeSource':
+        return yield* handleWatchProposeSource(input.source);
+      case 'WatchRequestControl':
+        dispatchWatchInput({ _tag: 'RequestControl', control: input.control });
+        return;
+      case 'WatchCancelPreparing':
+        dispatchWatchInput({ _tag: 'CancelPreparing' });
+        return;
+      case 'WatchLocalPipelineFailed':
+        dispatchWatchInput({ _tag: 'LocalPipelineFailed', reason: input.reason });
+        return;
       case 'SendLeave':
         return yield* handleUiSendLeave();
     }

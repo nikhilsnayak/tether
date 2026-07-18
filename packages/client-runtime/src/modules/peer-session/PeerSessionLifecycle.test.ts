@@ -346,6 +346,45 @@ describe('startPeerSession', () => {
     ),
   );
 
+  it.effect('rejects every public enqueue while actor teardown is still in progress', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const teardownStarted = yield* Deferred.make<void>();
+        const allowTeardown = yield* Deferred.make<void>();
+        const fixture = yield* makePeerSessionTestHarness(
+          (() =>
+            Stream.make({
+              event: openedEvent(bob),
+            })) as AppSignalingClient['Service']['OpenRoomSession'],
+          undefined,
+          {
+            observePeerConnection: () =>
+              Effect.acquireRelease(Effect.void, () =>
+                Deferred.succeed(teardownStarted, undefined).pipe(
+                  Effect.andThen(Deferred.await(allowTeardown)),
+                ),
+              ),
+          },
+        );
+        const peerSession = yield* startPeerSession(session).pipe(
+          Effect.provide(fixture.dependencies),
+        );
+
+        yield* Deferred.await(teardownStarted);
+
+        assert.isFalse(peerSession.sendMessage('too late'));
+        assert.isFalse(peerSession.sendAvatarPose({ x: 0, z: 0, yaw: 0, action: 'idle' }));
+        assert.isFalse(peerSession.sendMediaState({ cameraOn: false, microphoneOn: false }));
+        assert.isFalse(peerSession.watch.propose({ value: { id: 'too-late-source' } }));
+        assert.isFalse(peerSession.watch.control({ kind: 'play' }));
+        assert.isFalse(peerSession.watch.cancel());
+        assert.isFalse(peerSession.watch.failPipeline('pipeline'));
+
+        yield* Deferred.succeed(allowTeardown, undefined);
+      }),
+    ),
+  );
+
   it.effect('emits RoomJoinRejected when the room is full', () =>
     Effect.scoped(
       Effect.gen(function* () {
