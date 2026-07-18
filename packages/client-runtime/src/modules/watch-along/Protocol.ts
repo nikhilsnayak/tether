@@ -154,6 +154,10 @@ const encodeWatchMessageJson = Schema.encodeResult(WatchMessageJsonSchema, {
 
 export type WatchMessage = typeof WatchMessageSchema.Type;
 export type WatchControlCommand = typeof WatchControl.Type;
+export type WatchStatus = typeof WatchStatus.Type;
+export type BufferingReason = typeof BufferingReason.Type;
+export type RejectionReason = typeof RejectionReason.Type;
+export type FailureReason = typeof FailureReason.Type;
 export type Hello = typeof HelloWatchMessage.Type;
 export type WatchProposed = typeof WatchProposedMessage.Type;
 export type WatchReady = typeof WatchReadyMessage.Type;
