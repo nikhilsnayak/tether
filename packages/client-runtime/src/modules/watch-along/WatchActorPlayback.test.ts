@@ -279,6 +279,32 @@ describe('watch actor — playback authority and progress', () => {
     ),
   );
 
+  it.effect('keeps sampling after a progress heartbeat is dropped', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const presenter = yield* makeWatchActorTestHarness({ role: 'host', currentProgress: 0.3 });
+        yield* presenter.openChannel();
+        yield* presenter.receiveHello();
+        yield* presenter.propose();
+        const id = proposedId(presenter.sent);
+        yield* presenter.receiveReady(id);
+        yield* presenter.requestControl({ kind: 'play' });
+
+        presenter.failNextProgressOffer();
+        yield* presenter.advance('500 millis');
+        assert.strictEqual(presenter.lastView()?.status, 'playing');
+        assert.deepStrictEqual(presenter.progressOffers, []);
+        assert.isFalse(presenter.events.some((event) => event._tag === 'WatchFailed'));
+
+        yield* presenter.advance('500 millis');
+        assert.deepStrictEqual(
+          presenter.progressOffers.map((sample) => sample.sequence),
+          [1],
+        );
+      }),
+    ),
+  );
+
   it.effect('emits an optimistic view for every watcher control kind', () =>
     Effect.scoped(
       Effect.gen(function* () {

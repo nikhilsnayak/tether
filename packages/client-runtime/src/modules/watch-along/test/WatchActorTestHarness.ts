@@ -108,6 +108,7 @@ export const makeWatchActorTestHarness = Effect.fn('makeWatchActorTestHarness')(
   // offer overwrites it, and a discrete send flushes it (discrete outranks).
   let pendingProgress: ProgressSample | null = null;
   let sendBroken = false;
+  let failNextProgressOffer = false;
   const transport = WatchTransport.of({
     role,
     sendDiscrete: (message) =>
@@ -118,9 +119,15 @@ export const makeWatchActorTestHarness = Effect.fn('makeWatchActorTestHarness')(
             sent.push(message);
           }),
     offerLatestProgress: (message) =>
-      Effect.sync(() => {
-        pendingProgress = message;
-        progressOffers.push(message);
+      Effect.suspend(() => {
+        if (failNextProgressOffer) {
+          failNextProgressOffer = false;
+          return Effect.fail(new WatchTransportError({ cause: 'broken-progress' }));
+        }
+        return Effect.sync(() => {
+          pendingProgress = message;
+          progressOffers.push(message);
+        });
       }),
   });
 
@@ -232,6 +239,7 @@ export const makeWatchActorTestHarness = Effect.fn('makeWatchActorTestHarness')(
     lastSent: () => sent[sent.length - 1],
     pendingProgress: () => pendingProgress,
     breakTransport: () => void (sendBroken = true),
+    failNextProgressOffer: () => void (failNextProgressOffer = true),
     localPipelineFailed: (reason: 'renderer' | 'pipeline') =>
       submit({ _tag: 'LocalPipelineFailed', reason }),
     sessionViews: () =>

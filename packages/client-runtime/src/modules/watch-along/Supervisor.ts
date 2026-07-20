@@ -96,15 +96,20 @@ export const startWatchRuntime = Effect.fn('@tether/client-runtime/startWatchRun
       Effect.andThen(Effect.fail(new WatchTransportError({ cause }))),
     );
 
-  const sendMessage = Effect.fnUntraced(function* (message: WatchMessage) {
+  const failTransport = (cause: unknown) => Effect.fail(new WatchTransportError({ cause }));
+
+  const sendMessage = Effect.fnUntraced(function* (
+    message: WatchMessage,
+    onFailure: (cause: unknown) => Effect.Effect<never, WatchTransportError>,
+  ) {
     const encoded = encodeWatchMessage(message);
     // Actor-produced messages are schema-valid by construction; keep the
     // codec defense for future protocol families.
     /* v8 ignore next 3 */
     if (Result.isFailure(encoded)) {
-      return yield* closeFailedTransport(encoded.failure);
+      return yield* onFailure(encoded.failure);
     }
-    yield* deps.sendRaw(encoded.success).pipe(Effect.catchCause(closeFailedTransport));
+    yield* deps.sendRaw(encoded.success).pipe(Effect.catchCause(onFailure));
   });
 
   const readBufferedAmount = Effect.try({
@@ -119,7 +124,9 @@ export const startWatchRuntime = Effect.fn('@tether/client-runtime/startWatchRun
     if (amount >= WATCH_PROGRESS_BUFFER_HIGH_WATER_BYTES) return;
     const message = pendingProgress;
     pendingProgress = null;
-    yield* sendMessage(message).pipe(
+    // Progress is replaceable telemetry: retain it for a later flush without
+    // closing an otherwise healthy channel when this send races a state blip.
+    yield* sendMessage(message, failTransport).pipe(
       Effect.tapError(() =>
         Effect.sync(() => {
           pendingProgress ??= message;
@@ -131,7 +138,7 @@ export const startWatchRuntime = Effect.fn('@tether/client-runtime/startWatchRun
   const transport = WatchTransport.of({
     role: deps.role,
     sendDiscrete: Effect.fnUntraced(function* (message) {
-      yield* sendMessage(message);
+      yield* sendMessage(message, closeFailedTransport);
       yield* flushLatestProgress();
     }),
     offerLatestProgress: Effect.fnUntraced(function* (message) {

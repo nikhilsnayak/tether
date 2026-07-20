@@ -33,6 +33,7 @@ import {
   WatchAlongPlatform,
   WatchEventSink,
   WatchLocalCapabilities,
+  type WatchPlatformError,
   WatchTransport,
 } from './Services';
 import { makeWatchActorMemory } from './WatchActorMemory';
@@ -149,6 +150,17 @@ const makeWatchActor = Effect.fnUntraced(function* (dispatchInput: WatchActorInp
       .pipe(
         Effect.catchTag('WatchTransportError', (error) =>
           Effect.logWarning('Failed to send watch control message').pipe(
+            Effect.annotateLogs('cause', String(error.cause)),
+          ),
+        ),
+      );
+
+  const offerLatestProgress = (message: ProgressSample) =>
+    transport
+      .offerLatestProgress(message)
+      .pipe(
+        Effect.catchTag('WatchTransportError', (error) =>
+          Effect.logWarning('Failed to send watch progress sample').pipe(
             Effect.annotateLogs('cause', String(error.cause)),
           ),
         ),
@@ -669,28 +681,53 @@ const makeWatchActor = Effect.fnUntraced(function* (dispatchInput: WatchActorInp
     rejectOnInvalid: boolean,
   ) {
     const reject = rejectOnInvalid ? sendDiscrete(controlRejected(session)) : Effect.void;
+    const apply = (
+      operation: Effect.Effect<void, WatchPlatformError>,
+      commit: Effect.Effect<void, unknown>,
+    ) =>
+      operation.pipe(
+        Effect.matchEffect({
+          onFailure: (error) =>
+            Effect.logWarning('Failed to apply watch control').pipe(
+              Effect.annotateLogs({ control: control.kind, operation: error.operation }),
+              Effect.andThen(reject),
+            ),
+          onSuccess: () => commit,
+        }),
+      );
+
     switch (control.kind) {
       case 'play':
         if (state._tag !== 'LoadedPaused') return yield* reject;
-        yield* platform.play(session.source);
-        return yield* commitPresenter(session, 'playing', session.progress);
+        return yield* apply(
+          platform.play(session.source),
+          commitPresenter(session, 'playing', session.progress),
+        );
       case 'pause':
         if (state._tag !== 'Playing' && state._tag !== 'Buffering') return yield* reject;
-        yield* platform.pause(session.source);
-        return yield* commitPresenter(session, 'loaded-paused', session.progress);
+        return yield* apply(
+          platform.pause(session.source),
+          commitPresenter(session, 'loaded-paused', session.progress),
+        );
       case 'seek':
         if (state._tag === 'Buffering') return yield* reject;
-        yield* platform.seek(session.source, control.target);
-        return yield* commitPresenter(
-          session,
-          state._tag === 'Playing' ? 'playing' : 'loaded-paused',
-          control.target,
+        return yield* apply(
+          platform.seek(session.source, control.target),
+          commitPresenter(
+            session,
+            state._tag === 'Playing' ? 'playing' : 'loaded-paused',
+            control.target,
+          ),
         );
       case 'replay':
         if (state._tag !== 'Ended') return yield* reject;
-        yield* platform.seek(session.source, 0);
-        yield* platform.play(session.source);
-        return yield* commitPresenter(session, 'playing', 0);
+        return yield* apply(
+          Effect.gen(function* () {
+            yield* platform.seek(session.source, 0);
+            yield* platform.play(session.source);
+          }),
+          commitPresenter(session, 'playing', 0),
+        );
       case 'eject':
         yield* sendDiscrete(watchEnded(session.watchSessionId));
         return yield* resetToIdle();
@@ -773,7 +810,7 @@ const makeWatchActor = Effect.fnUntraced(function* (dispatchInput: WatchActorInp
     const progress = yield* platform.currentProgress(session.source);
     const next: PresenterWatchSession = { ...session, progress };
     state = { _tag: 'Playing', session: next };
-    yield* transport.offerLatestProgress(progressSample(next, memory.sampling.nextSequence()));
+    yield* offerLatestProgress(progressSample(next, memory.sampling.nextSequence()));
     yield* emitView();
     yield* armSampling(next);
   });

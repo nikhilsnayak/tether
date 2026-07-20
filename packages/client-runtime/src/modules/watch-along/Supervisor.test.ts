@@ -59,6 +59,7 @@ describe('watch runtime supervisor', () => {
           let bufferedAmount = 0;
           let progress = 0;
           let failProgressSend = false;
+          let failDiscreteSend = false;
           const platform = makePlatform(operations, () => progress);
           const runtime = yield* startWatchRuntime({
             role: 'host',
@@ -68,6 +69,9 @@ describe('watch runtime supervisor', () => {
                 const message = JSON.parse(payload) as WatchMessage;
                 if (failProgressSend && message.type === 'progress-sample') {
                   return Effect.fail('progress-send-failed');
+                }
+                if (failDiscreteSend && message.type !== 'progress-sample') {
+                  return Effect.fail('discrete-send-failed');
                 }
                 return Effect.sync(() => {
                   sent.push(message);
@@ -152,8 +156,26 @@ describe('watch runtime supervisor', () => {
           failProgressSend = true;
           progress = 0.9;
           runtime.dispatch({ _tag: 'ProgressSampleTick', watchSessionId });
-          yield* eventually(() => !runtime.isAlive());
-          assert.include(operations, 'closeWatchChannel');
+          yield* eventually(() =>
+            events.some(
+              (event) => event._tag === 'WatchSessionChanged' && event.view.progress === 0.9,
+            ),
+          );
+          assert.isTrue(runtime.isAlive());
+          assert.notInclude(operations, 'closeWatchChannel');
+
+          failProgressSend = false;
+          progress = 0.95;
+          runtime.dispatch({ _tag: 'ProgressSampleTick', watchSessionId });
+          yield* eventually(() =>
+            sent.some((message) => message.type === 'progress-sample' && message.progress === 0.95),
+          );
+          assert.isTrue(runtime.isAlive());
+          assert.notInclude(operations, 'closeWatchChannel');
+
+          failDiscreteSend = true;
+          runtime.dispatch({ _tag: 'RequestControl', control: { kind: 'pause' } });
+          yield* eventually(() => operations.includes('closeWatchChannel'));
         }),
       ),
     ),

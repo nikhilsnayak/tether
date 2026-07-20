@@ -83,6 +83,77 @@ describe('watch actor — failure, interruption, and recovery', () => {
     ),
   );
 
+  it.effect('rejects a failed remote control without changing canonical state', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { h, id } = yield* startPresenter({
+          overrides: { play: platformFailure('play') },
+        });
+
+        yield* h.receive({
+          version: 1,
+          type: 'control-requested',
+          watchSessionId: id,
+          authorityEpoch: 0,
+          baseRevision: 0,
+          control: { kind: 'play' },
+        });
+
+        assert.deepStrictEqual(h.lastSent(), {
+          version: 1,
+          type: 'control-rejected',
+          watchSessionId: id,
+          authorityEpoch: 0,
+          baseRevision: 0,
+        });
+        assert.strictEqual(h.lastView()?.status, 'loaded-paused');
+        assert.strictEqual(h.lastView()?.revision, 0);
+        assert.isFalse(h.events.some((event) => event._tag === 'WatchFailed'));
+
+        yield* h.receive({
+          version: 1,
+          type: 'control-requested',
+          watchSessionId: id,
+          authorityEpoch: 0,
+          baseRevision: 0,
+          control: { kind: 'seek', target: 0.5 },
+        });
+        assert.strictEqual(h.lastView()?.progress, 0.5);
+        assert.strictEqual(h.lastView()?.revision, 1);
+      }),
+    ),
+  );
+
+  it.effect('keeps an ended session when replay play fails after seeking', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        let playAttempts = 0;
+        const { h } = yield* startPresenterPlaying({
+          overrides: {
+            play: () =>
+              Effect.suspend(() => {
+                playAttempts += 1;
+                return playAttempts === 1 ? Effect.void : platformFailure('play')();
+              }),
+          },
+        });
+        yield* h.sourceEvent({ _tag: 'SourceEnded' });
+        const sentBefore = h.sent.length;
+
+        yield* h.requestControl({ kind: 'replay' });
+
+        assert.deepInclude(h.operations, 'seek:0');
+        assert.strictEqual(h.lastView()?.status, 'ended');
+        assert.strictEqual(h.lastView()?.revision, 2);
+        assert.strictEqual(h.sent.length, sentBefore);
+        assert.isFalse(h.events.some((event) => event._tag === 'WatchFailed'));
+
+        yield* h.requestControl({ kind: 'eject' });
+        assert.strictEqual(h.lastView()?.status, 'idle');
+      }),
+    ),
+  );
+
   it.effect('tears down on a fatal source failure', () =>
     Effect.scoped(
       Effect.gen(function* () {
