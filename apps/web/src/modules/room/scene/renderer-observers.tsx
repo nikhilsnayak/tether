@@ -5,6 +5,7 @@ import type { Renderer } from 'three/webgpu';
 type RendererBackendStatus = {
   readonly isWebGLBackend?: boolean;
   readonly isWebGPUBackend?: boolean;
+  readonly gl?: WebGLRenderingContext;
 };
 
 export function FramePerformanceMonitor({
@@ -27,24 +28,46 @@ export function FramePerformanceMonitor({
 
 export function ContextLossGuard({
   updateContextLost,
+  onRendererFailure,
 }: {
   readonly updateContextLost: (lost: true) => void;
+  readonly onRendererFailure: (signal: 'context-lost' | 'device-lost' | 'health-check') => void;
 }) {
   const { renderer } = useThree();
+  const reported = useRef(false);
   useEffect(() => {
     const roomRenderer = renderer as Renderer;
+    const canvas = roomRenderer.domElement;
     const previousOnDeviceLost = roomRenderer.onDeviceLost;
     const onDeviceLost: Renderer['onDeviceLost'] = (info) => {
       previousOnDeviceLost.call(roomRenderer, info);
+      reported.current = true;
+      onRendererFailure('device-lost');
+      updateContextLost(true);
+    };
+    const onContextLost = (event: Event) => {
+      event.preventDefault();
+      reported.current = true;
+      onRendererFailure('context-lost');
       updateContextLost(true);
     };
     roomRenderer.onDeviceLost = onDeviceLost;
+    canvas.addEventListener('webglcontextlost', onContextLost);
     return () => {
+      canvas.removeEventListener('webglcontextlost', onContextLost);
       if (roomRenderer.onDeviceLost === onDeviceLost) {
         roomRenderer.onDeviceLost = previousOnDeviceLost;
       }
     };
-  }, [renderer, updateContextLost]);
+  }, [onRendererFailure, renderer, updateContextLost]);
+  useFrame(() => {
+    if (reported.current) return;
+    const backend = (renderer as Renderer).backend as RendererBackendStatus | undefined;
+    if (backend?.gl?.isContextLost() !== true) return;
+    reported.current = true;
+    onRendererFailure('health-check');
+    updateContextLost(true);
+  });
   return null;
 }
 

@@ -18,13 +18,14 @@ import { useRef, useState } from 'react';
 
 import { LogoMark, Wordmark } from '@/components/logo';
 
+import { useProgramAudioPreferences } from '../hooks/use-program-audio-preferences';
 import { useRemoteVideoAvailability } from '../hooks/use-remote-video-availability';
 import { useRoomQualityPreference } from '../hooks/use-room-quality-preference';
 import { useScreenWakeLock } from '../hooks/use-screen-wake-lock';
 import { mediaStreamValue } from '../peer-session/platform';
 import type { InitialMediaSettings } from '../preflight/media';
-import { roomJourneyLabel } from '../scene/journey';
-import { SPEAKER_OFF } from './audio-output-control';
+import { resolveRoomJourney, roomJourneyLabel } from '../scene/journey';
+import { useConsoleFocus } from '../watch-along/console-focus-context';
 import { CallControlButton, MediaToggleControls } from './call-controls';
 import { CallControlsToolbar } from './call-controls-toolbar';
 import { JoinRequestOverlay } from './join-request-overlay';
@@ -59,7 +60,9 @@ export function CallScreen({
   readonly onLeaveRoom: () => void;
 }) {
   useScreenWakeLock();
-  const { binding, journey } = useRoomExperience();
+  const { active, binding, entryStage } = useRoomExperience();
+  const consoleFocus = useConsoleFocus();
+  const { preferences: audioPreferences } = useProgramAudioPreferences();
   const { qualityPreference, setQualityPreference } = useRoomQualityPreference();
   const controller = binding.controller;
   const view = useAtomValue(peerSessionViewAtom);
@@ -67,11 +70,15 @@ export function CallScreen({
   const remoteStreamHandle = useAtomValue(peerRemoteStreamAtom);
   const localStream = localStreamHandle === null ? null : mediaStreamValue(localStreamHandle);
   const remoteStream = remoteStreamHandle === null ? null : mediaStreamValue(remoteStreamHandle);
+  const journey = resolveRoomJourney({
+    entryStage,
+    intent: session.intent,
+    active,
+    status: view.status,
+  });
   const remoteVideoAvailable = useRemoteVideoAvailability(remoteStream);
   const [micOn, setMicOn] = useState(initialMediaSettings.microphone);
   const [cameraOn, setCameraOn] = useState(initialMediaSettings.camera);
-  const [sinkId, setSinkId] = useState('');
-  const [speakerOn, setSpeakerOn] = useState(true);
   const [confirmedSas, setConfirmedSas] = useState<string | null>(null);
   const [handlingJoinPeerIds, setHandlingJoinPeerIds] = useState<ReadonlySet<PeerId>>(new Set());
   const selfPreviewBoundaryRef = useRef<HTMLDivElement>(null);
@@ -113,14 +120,6 @@ export function CallScreen({
     setCameraOn(enabled);
     controller.sendMediaState({ cameraOn: enabled, microphoneOn: micOn });
   };
-  const handleAudioOutputChange = (value: string) => {
-    if (value === SPEAKER_OFF) {
-      setSpeakerOn(false);
-      return;
-    }
-    setSpeakerOn(true);
-    setSinkId(value);
-  };
   const handleJoinDecision = (peerId: PeerId, decision: 'allow' | 'deny') => {
     setHandlingJoinPeerIds((current) => new Set(current).add(peerId));
     const clearHandling = () => {
@@ -142,8 +141,8 @@ export function CallScreen({
     >
       <RemoteAudio
         stream={remoteStream}
-        sinkId={sinkId}
-        muted={!speakerOn}
+        sinkId={audioPreferences.sinkId}
+        muted={!audioPreferences.speakerEnabled}
         pendingJoinPeerIds={view.pendingJoinRequests.map((request) => request.peerId)}
       />
       {journey === 'outside' && (
@@ -240,32 +239,36 @@ export function CallScreen({
             )}
           </div>
         </div>
-        <div
-          ref={selfPreviewBoundaryRef}
-          className='pointer-events-none absolute inset-x-4 top-16 bottom-24'
-        >
-          <div className='pointer-events-auto'>
-            <DraggableMediaTile
-              boundaryRef={selfPreviewBoundaryRef}
-              initialCorner='tr'
-              tileId='self'
-            >
-              <SelfVideo stream={localStream} cameraOn={cameraOn} selfId={session.selfId} />
-            </DraggableMediaTile>
-            {(journey === 'together' || journey === 'reconnecting') && (
+        {consoleFocus.tilesVisible && (
+          <div
+            ref={selfPreviewBoundaryRef}
+            className='pointer-events-none absolute inset-x-4 top-16 bottom-24'
+          >
+            <div className='pointer-events-auto'>
               <DraggableMediaTile
                 boundaryRef={selfPreviewBoundaryRef}
-                initialCorner='tl'
-                tileId='remote'
+                initialCorner='tr'
+                tileId='self'
               >
-                <RemoteVideo
-                  stream={remoteStream}
-                  cameraAvailable={view.remoteMediaState?.cameraOn === true && remoteVideoAvailable}
-                />
+                <SelfVideo stream={localStream} cameraOn={cameraOn} selfId={session.selfId} />
               </DraggableMediaTile>
-            )}
+              {(journey === 'together' || journey === 'reconnecting') && (
+                <DraggableMediaTile
+                  boundaryRef={selfPreviewBoundaryRef}
+                  initialCorner='tl'
+                  tileId='remote'
+                >
+                  <RemoteVideo
+                    stream={remoteStream}
+                    cameraAvailable={
+                      view.remoteMediaState?.cameraOn === true && remoteVideoAvailable
+                    }
+                  />
+                </DraggableMediaTile>
+              )}
+            </div>
           </div>
-        </div>
+        )}
         {view.sas !== null && !sasConfirmed && (
           <div className='pointer-events-auto'>
             <SafetyCodeCard
@@ -313,12 +316,9 @@ export function CallScreen({
           <CallControlsToolbar
             micOn={micOn}
             cameraOn={cameraOn}
-            sinkId={sinkId}
-            speakerOn={speakerOn}
             qualityPreference={qualityPreference}
             onMicToggle={handleMicToggle}
             onCameraToggle={handleCameraToggle}
-            onAudioOutputChange={handleAudioOutputChange}
             onQualityChange={setQualityPreference}
             onSendMessage={(message) => controller.sendMessage(message) === 'queued'}
             onLeave={handleLeave}

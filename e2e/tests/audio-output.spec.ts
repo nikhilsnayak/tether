@@ -57,5 +57,24 @@ test.describe('real room', { tag: '@gpu' }, () => {
     await expect.poll(remoteMuted).toBe(false);
 
     await host.keyboard.press('Escape');
+
+    await host.getByRole('button', { name: 'Audio output' }).click();
+    await host.getByRole('menuitemradio', { name: 'Off' }).click();
+    await expect.poll(remoteMuted).toBe(true);
+    await host.keyboard.press('Escape');
+
+    await host.getByRole('button', { name: 'Leave call' }).click();
+    await expect(host).toHaveURL('/');
+    await host.getByRole('button', { name: 'Call' }).click();
+    await expect(host).toHaveURL(/\/host$/);
+    await room.startHostingRoom(hostActor);
+    await host.getByRole('button', { name: 'Close' }).click();
+
+    await expect(remote).toBeAttached();
+    await expect.poll(remoteMuted).toBe(false);
+    await host.getByRole('button', { name: 'Audio output' }).click();
+    await expect(
+      host.getByRole('menuitemradio', { name: 'Fake Default Audio Output' }),
+    ).toHaveAttribute('aria-checked', 'true');
   });
 });

@@ -1,5 +1,6 @@
 import { Data, Effect, Semaphore } from 'effect';
 
+import { setAudioOutputSink } from './audio-output-sink';
 import { normalizeProgramVolume, type ProgramAudioPreferences } from './program-audio-preferences';
 
 export const PROGRAM_MONITOR_GRAPH = {
@@ -63,8 +64,6 @@ const browserProgramMonitorEnvironment: ProgramMonitorEnvironment = {
   createMonitorElement: () => document.createElement('audio') as unknown as MonitorElementLike,
 };
 
-const normalizeSinkId = (sinkId: string): string => (sinkId === 'default' ? '' : sinkId);
-
 export const createProgramMonitor = Effect.fn('createProgramMonitor')(function* (
   sourceElement: HTMLMediaElement,
   initialPreferences: ProgramAudioPreferences,
@@ -108,12 +107,7 @@ export const createProgramMonitor = Effect.fn('createProgramMonitor')(function* 
           resources.gain.gain.value = preferences.speakerEnabled
             ? normalizeProgramVolume(preferences.volume)
             : 0;
-          const sinkId = normalizeSinkId(preferences.sinkId);
-          if (resources.monitor.setSinkId !== undefined) {
-            await resources.monitor.setSinkId(sinkId);
-          } else if (sinkId !== '') {
-            throw new Error('Selected audio output is unsupported');
-          }
+          await setAudioOutputSink(resources.monitor, preferences.sinkId);
         },
         catch: (cause) => new ProgramMonitorError({ operation: 'set-sink', cause }),
       }),

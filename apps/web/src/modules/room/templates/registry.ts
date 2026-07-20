@@ -30,6 +30,22 @@ export interface RoomTemplate {
     readonly outside: CameraFraming;
     readonly look: CameraLookConfig;
   };
+  readonly watchAlong?: {
+    readonly display: {
+      readonly position: [number, number, number];
+      readonly size: readonly [number, number];
+    };
+    readonly console: {
+      readonly position: [number, number, number];
+      readonly interactionRadius: number;
+    };
+    readonly viewingCamera: {
+      readonly position: [number, number, number];
+      readonly target: [number, number, number];
+      readonly fieldOfView: number;
+    };
+    readonly programAudioSource: [number, number, number];
+  };
 }
 
 export type RoomTemplateResolution =
@@ -71,6 +87,16 @@ export const DUSK_SUITE_TEMPLATE: RoomTemplate = {
       recenterAfterMs: 2_800,
       recenterSeconds: 1.15,
     },
+  },
+  watchAlong: {
+    display: { position: [0, 2.35, -4.61], size: [6.5, 3.66] },
+    console: { position: [0, 0.5, -4.12], interactionRadius: 2.2 },
+    viewingCamera: {
+      position: [0, 1.6, 1.5],
+      target: [0, 2.35, -4.61],
+      fieldOfView: 40,
+    },
+    programAudioSource: [0, 2.35, -4.61],
   },
 };
 
