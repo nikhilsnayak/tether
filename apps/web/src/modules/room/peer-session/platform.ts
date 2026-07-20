@@ -367,7 +367,7 @@ const webPeerSessionPlatform = PeerSessionPlatform.of({
         );
       },
       catch: (cause) => new PlatformError({ operation: 'add-local-tracks', cause }),
-    }),
+    }).pipe(Effect.flatten),
   reserveProgramTransceivers: (peerConnection) =>
     Effect.try({
       try: () => {
