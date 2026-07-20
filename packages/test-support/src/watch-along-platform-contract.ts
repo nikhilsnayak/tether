@@ -25,12 +25,13 @@ export interface WatchAlongSourceFixture {
 export interface WatchAlongPlatformTestHarness {
   readonly layer: Layer.Layer<WatchAlongPlatform | WatchLocalCapabilities>;
   readonly capabilities: WatchCapabilities;
-  readonly makeSource: Effect.Effect<WatchAlongSourceFixture, unknown>;
+  readonly makeSource?: Effect.Effect<WatchAlongSourceFixture, unknown>;
 }
 
 export const describeWatchAlongPlatformContract = (
   platformName: string,
   makeHarness: () => WatchAlongPlatformTestHarness,
+  localPresentation: 'supported' | 'unsupported' = 'supported',
 ) => {
   describe(`${platformName} watch-along platform contract`, () => {
     it.effect('advertises immutable local capabilities', () => {
@@ -40,10 +41,36 @@ export const describeWatchAlongPlatformContract = (
       }).pipe(Effect.provide(harness.layer));
     });
 
+    if (localPresentation === 'unsupported') {
+      it.effect('rejects unsupported local presentation with typed failures', () => {
+        const harness = makeHarness();
+        return Effect.gen(function* () {
+          const platform = yield* WatchAlongPlatform;
+          const prepared = { value: Symbol('unsupported-prepared-source') };
+          const claimed = { value: Symbol('unsupported-claimed-source') };
+          const failures = yield* Effect.all([
+            platform.cancelPreparedSource(prepared).pipe(Effect.flip),
+            platform.claimSource(prepared).pipe(Effect.flip),
+            platform.programStream(claimed).pipe(Effect.flip),
+            platform.play(claimed).pipe(Effect.flip),
+            platform.pause(claimed).pipe(Effect.flip),
+            platform.seek(claimed, 0.5).pipe(Effect.flip),
+            platform.currentProgress(claimed).pipe(Effect.flip),
+            Effect.scoped(platform.observeSource(claimed, () => {})).pipe(Effect.flip),
+            platform.primeFirstFrame(claimed).pipe(Effect.flip),
+          ]);
+          for (const failure of failures) assert.instanceOf(failure, WatchPlatformError);
+          yield* platform.attachProgramTracks({ value: null });
+          yield* platform.clearProgramTracks;
+        }).pipe(Effect.provide(harness.layer));
+      });
+      return;
+    }
+
     it.effect('cancels an unclaimed source exactly once', () => {
       const harness = makeHarness();
       return Effect.gen(function* () {
-        const fixture = yield* harness.makeSource;
+        const fixture = yield* harness.makeSource!;
         const platform = yield* WatchAlongPlatform;
         yield* platform.cancelPreparedSource(fixture.source);
         yield* platform.cancelPreparedSource(fixture.source);
@@ -54,7 +81,7 @@ export const describeWatchAlongPlatformContract = (
     it.effect('transfers playback ownership into the claiming scope', () => {
       const harness = makeHarness();
       return Effect.gen(function* () {
-        const fixture = yield* harness.makeSource;
+        const fixture = yield* harness.makeSource!;
         const platform = yield* WatchAlongPlatform;
         const sourceScope = yield* Scope.make();
         const claimed = yield* platform

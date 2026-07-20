@@ -12,7 +12,7 @@ import {
   describePeerSessionPlatformContract,
   type PeerSessionPlatformTestHarness,
 } from '@tether/test-support/peer-session-platform-contract';
-import { Crypto, Effect } from 'effect';
+import { Crypto, Effect, Exit, Scope } from 'effect';
 import { afterEach, vi } from 'vitest';
 
 const native = vi.hoisted(() => {
@@ -109,6 +109,7 @@ const native = vi.hoisted(() => {
     FakeDataChannel,
     FakeMediaStream,
     FakePeerConnection,
+    FakeTrack,
     getUserMedia: vi.fn(),
     getRandomBytes: vi.fn((size: number) => new Uint8Array(size).fill(7)),
     digest: vi.fn(async (_algorithm: string, data: Uint8Array) => data),
@@ -282,6 +283,43 @@ describe('native peer-session platform', () => {
     );
   });
 
+  it.effect('groups streamless program tracks into one native stream', () => {
+    const harness = makeNativePlatformTestHarness();
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const platform = yield* PeerSessionPlatform;
+        const peerConnection = yield* platform.acquirePeerConnection([]);
+        const events: PlatformEvent[] = [];
+        const observerScope = yield* Scope.make();
+        yield* platform
+          .observePeerConnection(peerConnection, (event) => events.push(event))
+          .pipe(Scope.provide(observerScope));
+
+        const peer = peerConnection.value as InstanceType<typeof native.FakePeerConnection>;
+        const videoTrack = new native.FakeTrack();
+        const audioTrack = new native.FakeTrack();
+        peer.emit('track', { streams: [], track: videoTrack });
+        peer.emit('track', { streams: [], track: audioTrack });
+
+        const programEvents = events.filter((event) => event._tag === 'RemoteSharedTrackReceived');
+        assert.strictEqual(programEvents.length, 2);
+        if (
+          programEvents[0]?._tag !== 'RemoteSharedTrackReceived' ||
+          programEvents[1]?._tag !== 'RemoteSharedTrackReceived'
+        ) {
+          return assert.fail('Expected grouped program-track events');
+        }
+        assert.strictEqual(programEvents[0].stream.value, programEvents[1].stream.value);
+        const grouped = programEvents[0].stream.value as InstanceType<
+          typeof native.FakeMediaStream
+        >;
+        assert.deepStrictEqual(grouped.addTrack.mock.calls, [[audioTrack]]);
+        yield* Scope.close(observerScope, Exit.void);
+        assert.strictEqual(grouped.release.mock.calls.length, 1);
+      }).pipe(Effect.provide(harness.layer)),
+    );
+  });
+
   it.effect('reserves and replaces native watch-along tracks', () => {
     const harness = makeNativePlatformTestHarness();
     return Effect.scoped(
@@ -314,4 +352,33 @@ describe('native peer-session platform', () => {
       }).pipe(Effect.provide(harness.layer)),
     );
   });
+
+  it.effect('maps native program-transceiver failures', () =>
+    Effect.gen(function* () {
+      const platform = yield* PeerSessionPlatform;
+      const reserveFailure = yield* platform
+        .reserveProgramTransceivers({
+          value: {
+            addTransceiver: () => {
+              throw new Error('reserve');
+            },
+          },
+        })
+        .pipe(Effect.flip);
+      assert.strictEqual(reserveFailure.operation, 'reserve-program-transceivers');
+
+      const replaceFailure = yield* platform
+        .replaceProgramTracks(
+          {
+            value: {
+              video: { sender: { replaceTrack: async () => Promise.reject(new Error('replace')) } },
+              audio: { sender: { replaceTrack: async () => {} } },
+            },
+          },
+          null,
+        )
+        .pipe(Effect.flip);
+      assert.strictEqual(replaceFailure.operation, 'replace-program-tracks');
+    }).pipe(Effect.provide(nativePeerSessionPlatformLayer)),
+  );
 });

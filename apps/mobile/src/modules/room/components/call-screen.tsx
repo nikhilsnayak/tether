@@ -27,6 +27,7 @@ import { CallStage } from './call-stage';
 import { CallStatusScreen } from './call-status-screens';
 import { ChatModal } from './chat-modal';
 import { JoinRequestModal } from './join-request-modal';
+import { WatchStage } from './watch-stage';
 
 export function CallScreen({
   onLeaveRoom,
@@ -36,7 +37,7 @@ export function CallScreen({
   readonly session: RoomSession;
 }) {
   useKeepAwake();
-  const { leave, sendMessage, respondToJoin } = usePeerConnection({ input: session });
+  const { leave, sendMessage, respondToJoin, watch } = usePeerConnection({ input: session });
   const view = useAtomValue(peerSessionViewAtom);
   const localHandle = useAtomValue(peerLocalStreamAtom);
   const remoteHandle = useAtomValue(peerRemoteStreamAtom);
@@ -116,6 +117,7 @@ export function CallScreen({
         onLeave={handleLeave}
         onOpenChat={() => setChatOpen(true)}
       />
+      <WatchStage watch={watch} />
       <AudioOutputModal
         open={audioOutputOpen}
         availableRoutes={availableAudioRoutes}

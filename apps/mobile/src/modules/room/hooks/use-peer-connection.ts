@@ -10,5 +10,6 @@ export function usePeerConnection({ input }: { input: RoomSession }) {
     leave: session.value.leave,
     sendMessage: session.value.sendMessage,
     respondToJoin: session.value.respondToJoin,
+    watch: session.value.watch,
   };
 }

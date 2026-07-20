@@ -212,6 +212,8 @@ const observePeerConnection = Effect.fnUntraced(function* (
           handleIceGatheringStateChange,
         );
         peerConnection.removeEventListener('connectionstatechange', handleConnectionStateChange);
+        sharedStream?.release();
+        sharedStream = null;
       }),
   );
 });
@@ -278,6 +280,9 @@ const nativePeerSessionPlatform = PeerSessionPlatform.of({
     Effect.try({
       try: () => {
         const stream = mediaStreamValue(localStream);
+        // Native sender encodings expose no priority field, and mobile's
+        // program transceivers are recvonly, so there is no supported sender
+        // priority knob to apply on this platform.
         for (const track of stream.getTracks()) {
           peerConnectionValue(peerConnection).addTrack(track, stream);
         }
