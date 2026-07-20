@@ -106,14 +106,16 @@ export class WebRtcProbe {
     );
   }
 
-  closeLatestDataChannel() {
-    return this.page.evaluate(() => {
-      const dataChannel = window.__tetherE2E.dataChannels.at(-1);
+  closeDataChannel(label: string) {
+    return this.page.evaluate((expectedLabel) => {
+      const dataChannel = window.__tetherE2E.dataChannels.find(
+        (candidate) => candidate.label === expectedLabel,
+      );
       if (dataChannel === undefined) {
-        throw new Error('Expected an instrumented local data channel');
+        throw new Error(`Expected an instrumented ${expectedLabel} data channel`);
       }
       dataChannel.close();
-    });
+    }, label);
   }
 
   emitIceCandidateBurst(count: number) {
@@ -151,8 +153,10 @@ export class WebRtcProbe {
     return this.page.evaluate(() => window.__tetherE2E.configurations[0]?.iceServers ?? []);
   }
 
-  latestDataChannelLabel() {
-    return this.page.evaluate(() => window.__tetherE2E.dataChannels.at(-1)?.label ?? null);
+  dataChannelLabels() {
+    return this.page.evaluate(() =>
+      window.__tetherE2E.dataChannels.map((dataChannel) => dataChannel.label),
+    );
   }
 
   localStreamCount() {

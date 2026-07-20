@@ -71,9 +71,13 @@ test.describe('real room', { tag: '@gpu' }, () => {
     const initialHostConnections = await host.probe.peerConnectionCount();
     const initialGuestConnections = await guest.probe.peerConnectionCount();
     const safetyCode = (page: Page) => page.getByLabel('Safety code');
+    const hostScene = hostPage.getByLabel('Dusk Suite room scene');
+    const guestScene = guestPage.getByLabel('Dusk Suite room scene');
     await Promise.all([
       expect(safetyCode(hostPage)).toBeVisible(),
       expect(safetyCode(guestPage)).toBeVisible(),
+      expect(hostScene).toHaveAttribute('data-room-display', 'idle', { timeout: 20_000 }),
+      expect(guestScene).toHaveAttribute('data-room-display', 'idle', { timeout: 20_000 }),
     ]);
     const [hostCode, guestCode] = await Promise.all([
       safetyCode(hostPage).textContent(),
@@ -85,7 +89,7 @@ test.describe('real room', { tag: '@gpu' }, () => {
     const hostInput = hostPage.getByRole('textbox', { name: 'Message' });
     const guestInput = guestPage.getByRole('textbox', { name: 'Message' });
 
-    await guest.probe.closeLatestDataChannel();
+    await guest.probe.closeDataChannel('room-events-v1');
 
     await Promise.all([expect(hostInput).toBeDisabled(), expect(guestInput).toBeDisabled()]);
     await Promise.all([
@@ -100,14 +104,9 @@ test.describe('real room', { tag: '@gpu' }, () => {
     ]);
     await Promise.all([room.expectConnected(host), room.expectConnected(guest)]);
     await Promise.all([
-      expect(hostPage.getByLabel('Dusk Suite room scene')).toHaveAttribute(
-        'data-room-remote-avatar',
-        'present',
-      ),
-      expect(guestPage.getByLabel('Dusk Suite room scene')).toHaveAttribute(
-        'data-room-display',
-        'idle',
-      ),
+      expect(hostScene).toHaveAttribute('data-room-remote-avatar', 'present'),
+      expect(hostScene).toHaveAttribute('data-room-display', 'idle'),
+      expect(guestScene).toHaveAttribute('data-room-display', 'idle'),
     ]);
     await Promise.all([
       expect(hostPage.locator('[data-room-media-tile="remote"]')).toBeVisible(),

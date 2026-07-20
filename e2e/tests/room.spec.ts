@@ -146,7 +146,7 @@ test.describe('real room', { tag: '@gpu' }, () => {
         room.expectPreparedMediaTransferred(host),
         room.expectPreparedMediaTransferred(guest),
       ]);
-      await expect.poll(() => guest.probe.latestDataChannelLabel()).toBe('room-events-v1');
+      await expect.poll(() => guest.probe.dataChannelLabels()).toContain('room-events-v1');
       await Promise.all([room.expectRendererReady(host), room.expectRendererReady(guest)]);
 
       // The scene must be the exact same Canvas the actor saw at media setup: one
