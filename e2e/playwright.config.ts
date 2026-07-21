@@ -3,6 +3,8 @@ import { defineConfig, devices } from '@playwright/test';
 import { seededStorageState } from './tests/storage-seed';
 
 const CI = !!process.env.CI;
+const serverPort = Number(process.env.TETHER_E2E_SERVER_PORT ?? 8008);
+const webPort = Number(process.env.TETHER_E2E_WEB_PORT ?? 5173);
 const fakeMediaArgs = ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'];
 const gpuArgs = CI
   ? ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']
@@ -22,7 +24,7 @@ export default defineConfig({
   // timeout flakes on navigation and status transitions under that load.
   expect: { timeout: 10_000 },
   use: {
-    baseURL: `http://localhost:5173`,
+    baseURL: `http://localhost:${webPort}`,
     screenshot: 'only-on-failure',
     trace: 'on-first-retry',
     video: 'off',
@@ -63,18 +65,19 @@ export default defineConfig({
       command: 'bun run start',
       cwd: '../apps/server',
       gracefulShutdown: { signal: 'SIGTERM', timeout: 5_000 },
-      url: `http://localhost:8008/health`,
+      env: { PORT: String(serverPort) },
+      url: `http://localhost:${serverPort}/health`,
       reuseExistingServer: !CI,
       stdout: 'pipe',
     },
     {
-      command: `bun run dev`,
+      command: `bun run dev -- --port ${webPort}`,
       cwd: '../apps/web',
       gracefulShutdown: { signal: 'SIGTERM', timeout: 5_000 },
       env: {
-        VITE_SERVER_URL: `http://localhost:8008`,
+        VITE_SERVER_URL: `http://localhost:${serverPort}`,
       },
-      url: `http://localhost:5173`,
+      url: `http://localhost:${webPort}`,
       reuseExistingServer: !CI,
       stdout: 'pipe',
     },

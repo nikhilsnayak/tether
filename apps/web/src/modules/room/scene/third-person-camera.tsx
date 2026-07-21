@@ -17,7 +17,6 @@ export function ThirdPersonCamera({
   surfaceRef,
   outside,
   recenterSignal,
-  focusPose,
 }: {
   readonly template: RoomTemplate;
   readonly poseRef: RefObject<AvatarPose>;
@@ -25,7 +24,6 @@ export function ThirdPersonCamera({
   readonly surfaceRef: RefObject<HTMLDivElement | null>;
   readonly outside: boolean;
   readonly recenterSignal: RefObject<number>;
-  readonly focusPose: NonNullable<RoomTemplate['watchAlong']>['viewingCamera'] | null;
 }) {
   const { camera, size } = useThree();
   const orbit = useRef({ yaw: 0, pitch: 0 });
@@ -43,12 +41,6 @@ export function ThirdPersonCamera({
   const previousRecenterSignal = useRef(recenterSignal.current);
 
   useEffect(() => {
-    if (focusPose !== null) {
-      drag.current = null;
-      touchPointers.current.clear();
-      pinchDistance.current = null;
-      return;
-    }
     const element = surfaceRef.current;
     if (element === null) return;
     const pointerDown = (event: PointerEvent) => {
@@ -132,25 +124,13 @@ export function ThirdPersonCamera({
       element.removeEventListener('pointercancel', pointerUp);
       element.removeEventListener('wheel', wheel);
     };
-  }, [focusPose, surfaceRef, template]);
+  }, [surfaceRef, template]);
 
   useFrame((_, delta) => {
     if (previousRecenterSignal.current !== recenterSignal.current) {
       orbit.current = { yaw: 0, pitch: 0 };
       distance.current = template.gameplay.camera.distance;
       previousRecenterSignal.current = recenterSignal.current;
-    }
-
-    if (focusPose !== null) {
-      desiredPosition.current.set(...focusPose.position);
-      camera.position.lerp(desiredPosition.current, reducedMotion ? 1 : 1 - Math.exp(-delta * 6));
-      target.current.set(...focusPose.target);
-      camera.lookAt(target.current);
-      if ('fov' in camera && camera.fov !== focusPose.fieldOfView) {
-        camera.fov = focusPose.fieldOfView;
-        camera.updateProjectionMatrix();
-      }
-      return;
     }
 
     const framing = selectCameraFraming(size.width, size.height, outside, template.camera);

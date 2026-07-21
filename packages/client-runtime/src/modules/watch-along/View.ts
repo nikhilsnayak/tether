@@ -3,11 +3,7 @@ import type { WatchEvent, WatchSessionView } from './Model';
 export const initialWatchSessionView: WatchSessionView = {
   status: 'unavailable',
   role: null,
-  progress: 0,
-  revision: 0,
-  controlsEnabled: false,
   canPresent: false,
-  bufferingReason: null,
 };
 
 // The actor projects a complete session snapshot on every change, so the UI

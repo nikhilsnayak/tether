@@ -2,7 +2,10 @@ import type { BrowserContext, Page } from '@playwright/test';
 
 type WebRtcProbeState = {
   readonly configurations: RTCConfiguration[];
-  readonly dataChannels: RTCDataChannel[];
+  readonly dataChannels: Array<{
+    readonly channel: RTCDataChannel;
+    readonly side: 'local' | 'remote';
+  }>;
   readonly localStreams: MediaStream[];
   preflightPreviewStream: MediaStream | null;
   readonly peerConnections: RTCPeerConnection[];
@@ -10,6 +13,7 @@ type WebRtcProbeState = {
   failNextIceCandidate: boolean;
   rejectedIceCandidates: number;
   sasShownBeforeConnected: boolean;
+  negotiationNeededCount: number;
 };
 
 declare global {
@@ -31,6 +35,7 @@ export const installWebRtcProbe = (context: BrowserContext) =>
       failNextIceCandidate: false,
       rejectedIceCandidates: 0,
       sasShownBeforeConnected: false,
+      negotiationNeededCount: 0,
     };
     window.__tetherE2E = probe;
 
@@ -41,6 +46,12 @@ export const installWebRtcProbe = (context: BrowserContext) =>
         const configuration = args[0] as RTCConfiguration | undefined;
         probe.peerConnections.push(peerConnection);
         probe.configurations.push(configuration ?? {});
+        peerConnection.addEventListener('negotiationneeded', () => {
+          probe.negotiationNeededCount += 1;
+        });
+        peerConnection.addEventListener('datachannel', (event) => {
+          probe.dataChannels.push({ channel: event.channel, side: 'remote' });
+        });
 
         const nativeAddIceCandidate = peerConnection.addIceCandidate.bind(peerConnection);
         peerConnection.addIceCandidate = (candidate) => {
@@ -56,7 +67,7 @@ export const installWebRtcProbe = (context: BrowserContext) =>
         const nativeCreateDataChannel = peerConnection.createDataChannel.bind(peerConnection);
         peerConnection.createDataChannel = (label, options) => {
           const dataChannel = nativeCreateDataChannel(label, options);
-          probe.dataChannels.push(dataChannel);
+          probe.dataChannels.push({ channel: dataChannel, side: 'local' });
           return dataChannel;
         };
 
@@ -108,13 +119,13 @@ export class WebRtcProbe {
 
   closeDataChannel(label: string) {
     return this.page.evaluate((expectedLabel) => {
-      const dataChannel = window.__tetherE2E.dataChannels.find(
-        (candidate) => candidate.label === expectedLabel,
+      const matches = window.__tetherE2E.dataChannels.filter(
+        ({ channel }) => channel.label === expectedLabel,
       );
-      if (dataChannel === undefined) {
-        throw new Error(`Expected an instrumented ${expectedLabel} data channel`);
+      if (matches.length !== 1) {
+        throw new Error(`Expected exactly one instrumented ${expectedLabel} data channel`);
       }
-      dataChannel.close();
+      matches[0]?.channel.close();
     }, label);
   }
 
@@ -155,8 +166,12 @@ export class WebRtcProbe {
 
   dataChannelLabels() {
     return this.page.evaluate(() =>
-      window.__tetherE2E.dataChannels.map((dataChannel) => dataChannel.label),
+      window.__tetherE2E.dataChannels.map(({ channel }) => channel.label),
     );
+  }
+
+  negotiationNeededCount() {
+    return this.page.evaluate(() => window.__tetherE2E.negotiationNeededCount);
   }
 
   localStreamCount() {

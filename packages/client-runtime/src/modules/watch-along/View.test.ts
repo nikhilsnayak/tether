@@ -6,11 +6,7 @@ import { initialWatchSessionView, reduceWatchView } from './View';
 const playing: WatchSessionView = {
   status: 'playing',
   role: 'presenter',
-  progress: 0.5,
-  revision: 3,
-  controlsEnabled: true,
   canPresent: false,
-  bufferingReason: null,
 };
 
 describe('reduceWatchView', () => {

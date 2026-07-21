@@ -378,7 +378,6 @@ describe('startPeerSession', () => {
         assert.isFalse(peerSession.watch.propose({ value: { id: 'too-late-source' } }));
         assert.isFalse(peerSession.watch.control({ kind: 'play' }));
         assert.isFalse(peerSession.watch.cancel());
-        assert.isFalse(peerSession.watch.failPipeline('pipeline'));
 
         yield* Deferred.succeed(allowTeardown, undefined);
       }),

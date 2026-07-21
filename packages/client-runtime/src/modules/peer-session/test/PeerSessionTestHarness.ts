@@ -227,7 +227,6 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
     play: () => Effect.sync(() => operations.push('watch:play')),
     pause: () => Effect.sync(() => operations.push('watch:pause')),
     seek: () => Effect.sync(() => operations.push('watch:seek')),
-    currentProgress: () => Effect.succeed(0),
     observeSource: () => Effect.void,
     primeFirstFrame: () => Effect.void,
     attachProgramTracks: () => Effect.void,

@@ -10,6 +10,14 @@ import { seededStorageState } from '../storage-seed';
 import { installWebRtcProbe, WebRtcProbe } from './webrtc-probe';
 
 const REAL_MEDIA_READY_TIMEOUT = 30_000;
+type WatchState =
+  | 'unavailable'
+  | 'idle'
+  | 'preparing-local'
+  | 'awaiting-remote-start'
+  | 'loaded-paused'
+  | 'playing'
+  | 'ended';
 
 export type RoomActor = {
   readonly context: BrowserContext;
@@ -222,6 +230,52 @@ export class RoomDriver {
         'waiting',
       ),
     ]);
+  }
+
+  expectWatchState(actor: RoomActor, state: WatchState) {
+    return expect(actor.page.getByLabel('Dusk Suite room scene')).toHaveAttribute(
+      'data-room-display',
+      state,
+      { timeout: 30_000 },
+    );
+  }
+
+  async startWatch(actor: RoomActor) {
+    const bytes = await actor.page.evaluate(async () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 320;
+      canvas.height = 180;
+      const context = canvas.getContext('2d');
+      if (context === null) throw new Error('Canvas 2D is unavailable');
+      const stream = canvas.captureStream(24);
+      const recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp8' });
+      const chunks: Blob[] = [];
+      recorder.addEventListener('dataavailable', (event) => chunks.push(event.data));
+      const stopped = new Promise<void>((resolve) =>
+        recorder.addEventListener('stop', () => resolve(), { once: true }),
+      );
+      recorder.start();
+      const startedAt = performance.now();
+      await new Promise<void>((resolve) => {
+        const draw = () => {
+          const elapsed = performance.now() - startedAt;
+          context.fillStyle = `hsl(${Math.floor(elapsed / 8) % 360} 80% 50%)`;
+          context.fillRect(0, 0, canvas.width, canvas.height);
+          if (elapsed >= 2_000) resolve();
+          else requestAnimationFrame(draw);
+        };
+        draw();
+      });
+      recorder.stop();
+      await stopped;
+      for (const track of stream.getTracks()) track.stop();
+      return [...new Uint8Array(await new Blob(chunks, { type: recorder.mimeType }).arrayBuffer())];
+    });
+    await actor.page.locator('[data-watch-file-input]').setInputFiles({
+      name: 'watch-e2e.webm',
+      mimeType: 'video/webm',
+      buffer: Buffer.from(bytes),
+    });
   }
 
   admit(actor: RoomActor) {

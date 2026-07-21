@@ -1,5 +1,4 @@
 import { Effect, Layer, Queue } from 'effect';
-import { TestClock } from 'effect/testing';
 
 import { webCrypto } from '../../../test/WebCrypto';
 import type { WatchActorInput, WatchActorInputDispatch, WatchSourceEvent } from '../ActorModel';
@@ -12,10 +11,7 @@ import type {
 } from '../Model';
 import {
   WATCH_PROTOCOL_VERSION,
-  type BufferingReason,
   type FailureReason,
-  type ProgressSample,
-  type RejectionReason,
   type WatchControlCommand,
   type WatchMessage,
   type WatchSessionId,
@@ -46,7 +42,6 @@ export interface WatchHarnessOptions {
   readonly role?: 'host' | 'guest';
   readonly capabilities?: Partial<WatchCapabilities>;
   readonly overrides?: Partial<WatchAlongPlatform['Service']>;
-  readonly currentProgress?: number;
 }
 
 export const hello = (capabilities: WatchCapabilities): WatchMessage => ({
@@ -64,7 +59,6 @@ export const makeWatchActorTestHarness = Effect.fn('makeWatchActorTestHarness')(
   const operations: Array<string> = [];
   const events: Array<WatchEvent> = [];
   const sent: Array<WatchMessage> = [];
-  const progressOffers: Array<ProgressSample> = [];
   let sourceDispatch: ((input: WatchSourceEvent) => void) | undefined;
 
   const basePlatform: WatchAlongPlatform['Service'] = {
@@ -85,11 +79,6 @@ export const makeWatchActorTestHarness = Effect.fn('makeWatchActorTestHarness')(
     play: () => Effect.sync(() => operations.push('play')),
     pause: () => Effect.sync(() => operations.push('pause')),
     seek: (_source, progress) => Effect.sync(() => operations.push(`seek:${progress}`)),
-    currentProgress: () =>
-      Effect.sync(() => {
-        operations.push('currentProgress');
-        return options.currentProgress ?? 0;
-      }),
     observeSource: (_source, dispatch) =>
       Effect.acquireRelease(
         Effect.sync(() => {
@@ -104,31 +93,15 @@ export const makeWatchActorTestHarness = Effect.fn('makeWatchActorTestHarness')(
   };
   const platform = WatchAlongPlatform.of({ ...basePlatform, ...options.overrides });
 
-  // Models the transport's single replaceable pending progress slot: every
-  // offer overwrites it, and a discrete send flushes it (discrete outranks).
-  let pendingProgress: ProgressSample | null = null;
   let sendBroken = false;
-  let failNextProgressOffer = false;
   const transport = WatchTransport.of({
     role,
     sendDiscrete: (message) =>
       sendBroken
         ? Effect.fail(new WatchTransportError({ cause: 'broken' }))
         : Effect.sync(() => {
-            pendingProgress = null;
             sent.push(message);
           }),
-    offerLatestProgress: (message) =>
-      Effect.suspend(() => {
-        if (failNextProgressOffer) {
-          failNextProgressOffer = false;
-          return Effect.fail(new WatchTransportError({ cause: 'broken-progress' }));
-        }
-        return Effect.sync(() => {
-          pendingProgress = message;
-          progressOffers.push(message);
-        });
-      }),
   });
 
   const dependencies = Layer.mergeAll(
@@ -175,28 +148,19 @@ export const makeWatchActorTestHarness = Effect.fn('makeWatchActorTestHarness')(
   const canonical = (
     watchSessionId: WatchSessionId,
     fields: {
-      readonly authorityEpoch: number;
-      readonly revision: number;
       readonly status: WatchStatus;
-      readonly progress: number;
-      readonly reason?: BufferingReason;
     },
   ): WatchMessage => ({
     version: WATCH_PROTOCOL_VERSION,
     type: 'playback-state-changed',
     watchSessionId,
-    authorityEpoch: fields.authorityEpoch,
-    revision: fields.revision,
     status: fields.status,
-    ...(fields.reason !== undefined ? { reason: fields.reason } : {}),
-    progress: fields.progress,
   });
 
   return {
     operations,
     events,
     sent,
-    progressOffers,
     dependencies,
     openChannel: () => submit({ _tag: 'ChannelOpened' }),
     closeChannel: () => submit({ _tag: 'ChannelClosed' }),
@@ -212,10 +176,13 @@ export const makeWatchActorTestHarness = Effect.fn('makeWatchActorTestHarness')(
       receive({ version: WATCH_PROTOCOL_VERSION, type: 'watch-proposed', watchSessionId }),
     receiveReady: (watchSessionId: WatchSessionId) =>
       receive({ version: WATCH_PROTOCOL_VERSION, type: 'watch-ready', watchSessionId }),
-    receiveRejected: (watchSessionId: WatchSessionId, reason: RejectionReason) =>
-      receive({ version: WATCH_PROTOCOL_VERSION, type: 'watch-rejected', watchSessionId, reason }),
-    receiveStarted: (watchSessionId: WatchSessionId) =>
-      receive({ version: WATCH_PROTOCOL_VERSION, type: 'watch-started', watchSessionId }),
+    receiveRejected: (watchSessionId: WatchSessionId) =>
+      receive({
+        version: WATCH_PROTOCOL_VERSION,
+        type: 'watch-rejected',
+        watchSessionId,
+        reason: 'busy',
+      }),
     receiveCanonical: (watchSessionId: WatchSessionId, fields: Parameters<typeof canonical>[1]) =>
       receive(canonical(watchSessionId, fields)),
     receiveFailed: (watchSessionId: WatchSessionId, reason: FailureReason) =>
@@ -224,24 +191,14 @@ export const makeWatchActorTestHarness = Effect.fn('makeWatchActorTestHarness')(
       receive({ version: WATCH_PROTOCOL_VERSION, type: 'watch-ended', watchSessionId }),
     remoteStream: (stream: ProgramStreamHandle | null, version: number) =>
       submit({ _tag: 'RemoteProgramStreamChanged', stream, version }),
-    interrupt: () => submit({ _tag: 'TransportInterrupted' }),
-    restore: () => submit({ _tag: 'TransportRestored' }),
     sourceEvent: (event: WatchSourceEvent) =>
       Effect.gen(function* () {
         if (sourceDispatch === undefined) throw new Error('Source is not being observed');
         sourceDispatch(event);
         yield* settle;
       }),
-    advance: Effect.fnUntraced(function* (duration: Parameters<typeof TestClock.adjust>[0]) {
-      yield* TestClock.adjust(duration);
-      yield* settle;
-    }),
     lastSent: () => sent[sent.length - 1],
-    pendingProgress: () => pendingProgress,
     breakTransport: () => void (sendBroken = true),
-    failNextProgressOffer: () => void (failNextProgressOffer = true),
-    localPipelineFailed: (reason: 'renderer' | 'pipeline') =>
-      submit({ _tag: 'LocalPipelineFailed', reason }),
     sessionViews: () =>
       events.flatMap((event) => (event._tag === 'WatchSessionChanged' ? [event.view] : [])),
     lastView: () => {

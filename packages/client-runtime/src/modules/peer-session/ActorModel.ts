@@ -86,10 +86,6 @@ export type PeerSessionUiCommand =
   | { readonly _tag: 'WatchProposeSource'; readonly source: PreparedSourceHandle }
   | { readonly _tag: 'WatchRequestControl'; readonly control: WatchControlCommand }
   | { readonly _tag: 'WatchCancelPreparing' }
-  | {
-      readonly _tag: 'WatchLocalPipelineFailed';
-      readonly reason: 'renderer' | 'pipeline';
-    }
   | { readonly _tag: 'SendLeave' };
 
 /** Identifies the connection generation guarded by a negotiation deadline. */

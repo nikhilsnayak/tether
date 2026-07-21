@@ -17,11 +17,7 @@ it.effect('projects watch views and program streams into keep-alive atoms', () =
     const view: WatchSessionView = {
       status: 'playing',
       role: 'watcher',
-      progress: 0.5,
-      revision: 2,
-      controlsEnabled: true,
       canPresent: false,
-      bufferingReason: null,
     };
 
     yield* Effect.gen(function* () {

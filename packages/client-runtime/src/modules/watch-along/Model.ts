@@ -1,11 +1,9 @@
-import type { BufferingReason, FailureReason } from './Protocol';
+import type { FailureReason } from './Protocol';
 
-/** One-shot provisional ownership token; only `claimSource` promotes it. */
 export interface PreparedSourceHandle {
   readonly value: unknown;
 }
 
-/** Playback-capable handle produced by claiming a prepared source. */
 export interface ClaimedSourceHandle {
   readonly value: unknown;
 }
@@ -28,18 +26,12 @@ export type WatchViewStatus =
   | 'awaiting-remote-start'
   | 'loaded-paused'
   | 'playing'
-  | 'buffering'
-  | 'ended'
-  | 'awaiting-recovery-snapshot';
+  | 'ended';
 
 export interface WatchSessionView {
   readonly status: WatchViewStatus;
   readonly role: 'presenter' | 'watcher' | null;
-  readonly progress: number;
-  readonly revision: number;
-  readonly controlsEnabled: boolean;
   readonly canPresent: boolean;
-  readonly bufferingReason: BufferingReason | null;
 }
 
 export type WatchEvent =

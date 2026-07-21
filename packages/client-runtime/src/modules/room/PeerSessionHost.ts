@@ -61,7 +61,6 @@ export interface PeerSession {
     readonly propose: (source: PreparedSourceHandle) => boolean;
     readonly control: (control: WatchControlCommand) => boolean;
     readonly cancel: () => boolean;
-    readonly failPipeline: (reason: 'renderer' | 'pipeline') => boolean;
   };
   /** Host admits or rejects a knocking joiner. */
   readonly respondToJoin: (peerId: PeerId, decision: 'allow' | 'deny') => Promise<void>;
@@ -110,7 +109,6 @@ const disabledWatchPlatform = WatchAlongPlatform.of({
   play: () => disabledWatchOperation('play'),
   pause: () => disabledWatchOperation('pause'),
   seek: () => disabledWatchOperation('seek'),
-  currentProgress: () => disabledWatchOperation('current-progress'),
   observeSource: () => disabledWatchOperation('observe-source'),
   primeFirstFrame: () => disabledWatchOperation('prime-first-frame'),
   attachProgramTracks: () => disabledWatchOperation('attach-program-tracks'),
@@ -411,8 +409,6 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
       control: (control) =>
         acceptingInputs && Queue.offerUnsafe(mailbox, { _tag: 'WatchRequestControl', control }),
       cancel: () => acceptingInputs && Queue.offerUnsafe(mailbox, { _tag: 'WatchCancelPreparing' }),
-      failPipeline: (reason) =>
-        acceptingInputs && Queue.offerUnsafe(mailbox, { _tag: 'WatchLocalPipelineFailed', reason }),
     },
     respondToJoin: (peerId, decision) =>
       Effect.runPromise(

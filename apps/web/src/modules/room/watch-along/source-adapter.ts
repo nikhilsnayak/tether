@@ -4,25 +4,10 @@ import type {
   ProgramStreamHandle,
   WatchSourceEvent,
 } from '@tether/client-runtime/modules/watch-along';
-import { Data, Effect, Exit, Queue, Scope } from 'effect';
-
-import { createProgramMonitor, type ProgramMonitor } from './program-audio';
-import {
-  programAudioPreferences,
-  type ProgramAudioPreferences,
-  type ProgramAudioPreferencesStore,
-} from './program-audio-preferences';
+import { Data, Effect, Exit, Scope } from 'effect';
 
 export class WebWatchSourceError extends Data.TaggedError('WebWatchSourceError')<{
-  readonly operation:
-    | 'prepare'
-    | 'claim'
-    | 'play'
-    | 'pause'
-    | 'seek'
-    | 'progress'
-    | 'observe'
-    | 'prime';
+  readonly operation: 'prepare' | 'claim' | 'play' | 'pause' | 'seek' | 'observe' | 'prime';
   readonly cause: unknown;
 }> {}
 
@@ -30,26 +15,16 @@ export interface CapturableVideoElement extends HTMLVideoElement {
   readonly captureStream: () => MediaStream;
 }
 
-interface VisibilityDocument {
-  readonly hidden: boolean;
-  readonly addEventListener: (type: 'visibilitychange', listener: () => void) => void;
-  readonly removeEventListener: (type: 'visibilitychange', listener: () => void) => void;
-}
-
 export interface WatchSourceEnvironment {
   readonly createObjectURL: (file: File) => string;
   readonly revokeObjectURL: (url: string) => void;
   readonly createVideoElement: () => CapturableVideoElement;
-  readonly createMonitor: typeof createProgramMonitor;
-  readonly visibility: VisibilityDocument;
 }
 
 const browserWatchSourceEnvironment = (): WatchSourceEnvironment => ({
   createObjectURL: (file) => URL.createObjectURL(file),
   revokeObjectURL: (url) => URL.revokeObjectURL(url),
   createVideoElement: () => document.createElement('video') as CapturableVideoElement,
-  createMonitor: createProgramMonitor,
-  visibility: document,
 });
 
 const sourceError = (operation: WebWatchSourceError['operation'], cause: unknown) =>
@@ -98,7 +73,6 @@ export interface WebWatchSourceResource {
   readonly play: Effect.Effect<void, WebWatchSourceError>;
   readonly pause: Effect.Effect<void, WebWatchSourceError>;
   readonly seek: (progress: number) => Effect.Effect<void, WebWatchSourceError>;
-  readonly currentProgress: Effect.Effect<number, WebWatchSourceError>;
   readonly primeFirstFrame: Effect.Effect<void, WebWatchSourceError>;
   readonly observe: (
     dispatch: (input: WatchSourceEvent) => void,
@@ -120,7 +94,6 @@ export interface PreparedWebWatchSource {
 const acquireWatchSource = Effect.fn('acquireWatchSource')(function* (
   file: File,
   environment: WatchSourceEnvironment,
-  preferences: ProgramAudioPreferencesStore,
 ) {
   const objectUrl = yield* Effect.acquireRelease(
     trySource('prepare', () => environment.createObjectURL(file)),
@@ -159,98 +132,44 @@ const acquireWatchSource = Effect.fn('acquireWatchSource')(function* (
       }),
   );
   const videoTrack = stream.getVideoTracks()[0];
-  if (videoTrack === undefined || stream.getAudioTracks()[0] === undefined) {
-    return yield* sourceError(
-      'prepare',
-      'captureStream() did not expose synchronized audio and video tracks',
-    );
+  if (videoTrack === undefined) {
+    return yield* sourceError('prepare', 'captureStream() did not expose a video track');
   }
   yield* trySource('prepare', () => {
     videoTrack.contentHint = 'detail';
   });
 
-  const monitor = yield* environment
-    .createMonitor(element, preferences.get())
-    .pipe(Effect.mapError((cause) => sourceError('prepare', cause)));
-  return { element, stream, monitor };
+  return { element, stream };
 });
 
 const observeWatchSource = (
   element: CapturableVideoElement,
-  monitor: ProgramMonitor,
-  environment: WatchSourceEnvironment,
-  preferences: ProgramAudioPreferencesStore,
   dispatch: (input: WatchSourceEvent) => void,
 ): Effect.Effect<void, WebWatchSourceError, Scope.Scope> =>
   Effect.gen(function* () {
-    const preferenceUpdates = yield* Queue.sliding<ProgramAudioPreferences>(1);
-    const onBuffering = () => dispatch({ _tag: 'SourceBuffering' } as const);
-    const onProgress = () => {
-      if (!Number.isFinite(element.duration) || element.duration <= 0) return;
-      dispatch({
-        _tag: 'SourceProgress',
-        progress: Math.min(1, Math.max(0, element.currentTime / element.duration)),
-      });
-    };
-    let resumeAfterVisibility = false;
-    const onVisibility = () => {
-      if (environment.visibility.hidden) {
-        if (element.paused || element.ended) return;
-        resumeAfterVisibility = true;
-        element.pause();
-        dispatch({ _tag: 'BackgroundThrottled' });
-        return;
-      }
-      if (!resumeAfterVisibility) return;
-      resumeAfterVisibility = false;
-      dispatch({ _tag: 'ForegroundRestored' });
-    };
     const listeners = [
-      ['waiting', onBuffering],
-      ['stalled', onBuffering],
       ['playing', () => dispatch({ _tag: 'SourcePlaying' })],
       ['ended', () => dispatch({ _tag: 'SourceEnded' })],
       ['error', () => dispatch({ _tag: 'SourceFailed' })],
-      ['timeupdate', onProgress],
     ] as const;
 
     yield* Effect.acquireRelease(
       trySource('observe', () => {
         for (const [type, listener] of listeners) element.addEventListener(type, listener);
-        environment.visibility.addEventListener('visibilitychange', onVisibility);
-        return preferences.subscribe((next) => {
-          Queue.offerUnsafe(preferenceUpdates, next);
-        });
       }),
-      (unsubscribe) =>
+      () =>
         Effect.sync(() => {
-          unsubscribe();
           for (const [type, listener] of listeners) element.removeEventListener(type, listener);
-          environment.visibility.removeEventListener('visibilitychange', onVisibility);
         }),
     );
-    yield* Effect.forever(
-      Queue.take(preferenceUpdates).pipe(
-        Effect.flatMap((next) =>
-          monitor
-            .applyPreferences(next)
-            .pipe(Effect.catch(() => Effect.sync(() => dispatch({ _tag: 'SourceFailed' })))),
-        ),
-      ),
-    ).pipe(Effect.forkScoped({ startImmediately: true }));
   });
 
 export const prepareWatchSourceWith = Effect.fn('prepareWatchSourceWith')(function* (
   file: File,
   environment: WatchSourceEnvironment,
-  preferences: ProgramAudioPreferencesStore = programAudioPreferences,
 ) {
   const resourceScope = yield* Scope.make();
-  const { element, stream, monitor } = yield* acquireWatchSource(
-    file,
-    environment,
-    preferences,
-  ).pipe(
+  const { element, stream } = yield* acquireWatchSource(file, environment).pipe(
     Scope.provide(resourceScope),
     Effect.onError(() => Scope.close(resourceScope, Exit.void)),
   );
@@ -286,15 +205,10 @@ export const prepareWatchSourceWith = Effect.fn('prepareWatchSourceWith')(functi
         }
         element.currentTime = Math.min(1, Math.max(0, progress)) * element.duration;
       }),
-    currentProgress: trySource('progress', () =>
-      !Number.isFinite(element.duration) || element.duration <= 0
-        ? 0
-        : Math.min(1, Math.max(0, element.currentTime / element.duration)),
-    ),
     primeFirstFrame: trySource('prime', () => {
       element.currentTime = Number(element.currentTime);
     }),
-    observe: (dispatch) => observeWatchSource(element, monitor, environment, preferences, dispatch),
+    observe: (dispatch) => observeWatchSource(element, dispatch),
   };
 
   return {

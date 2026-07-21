@@ -320,7 +320,6 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       role: watch.role,
       capabilities: watch.capabilities,
       sendRaw: (payload) => platform.sendDataChannelMessage(dataChannel, payload),
-      bufferedAmount: () => platform.dataChannelBufferedAmount?.(dataChannel) ?? 0,
       closeWatchChannel: closeDataChannel(dataChannel),
       attach: (stream) =>
         platform
@@ -979,7 +978,6 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     }
 
     state = { ...state, peerConnectionState: 'interrupted' };
-    state.watchRuntime?.dispatch({ _tag: 'TransportInterrupted' });
     yield* Effect.logWarning('Peer connection interrupted');
     yield* eventSink.emit({ _tag: 'PeerInterrupted', peerId: state.peerId });
   });
@@ -996,7 +994,6 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     }
 
     state = { ...state, peerConnectionState: 'connected', reconnectAttempts: 0 };
-    state.watchRuntime?.dispatch({ _tag: 'TransportRestored' });
     yield* Effect.logInfo('Peer connection restored');
     yield* eventSink.emit({ _tag: 'PeerRestored', peerId: state.peerId });
     if (state.dataChannelState._tag === 'DataChannelOpen') {
@@ -1306,9 +1303,6 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
         return;
       case 'WatchCancelPreparing':
         dispatchWatchInput({ _tag: 'CancelPreparing' });
-        return;
-      case 'WatchLocalPipelineFailed':
-        dispatchWatchInput({ _tag: 'LocalPipelineFailed', reason: input.reason });
         return;
       case 'SendLeave':
         return yield* handleUiSendLeave();

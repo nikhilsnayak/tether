@@ -13,7 +13,7 @@ const peerId = PeerId.make('bbbbbbbbbbbb');
 const pose = { x: 1, z: 2, yaw: 0, action: 'walk' } as const;
 const mediaState = { cameraOn: true, microphoneOn: false } as const;
 const watchSource = { value: { id: 'prepared' } };
-const watchControl = { kind: 'seek', target: 0.5 } as const;
+const watchControl = { kind: 'play' } as const;
 
 const flushNotifications = Effect.promise(() => Promise.resolve());
 
@@ -45,10 +45,6 @@ const makeSession = (queued = true) => {
         calls.push(['watch.cancel']);
         return queued;
       },
-      failPipeline: (reason) => {
-        calls.push(['watch.failPipeline', reason]);
-        return queued;
-      },
     },
     respondToJoin: async (id, decision) => {
       calls.push(['respondToJoin', id, decision]);
@@ -72,7 +68,6 @@ describe('PeerSessionController', () => {
     assert.strictEqual(controller.watch.propose(watchSource), 'unavailable');
     assert.strictEqual(controller.watch.control(watchControl), 'unavailable');
     assert.strictEqual(controller.watch.cancel(), 'unavailable');
-    assert.strictEqual(controller.watch.failPipeline('renderer'), 'unavailable');
     const respondToJoinError = await controller.respondToJoin(peerId, 'allow').then(
       () => null,
       (error: unknown) => error,
@@ -99,7 +94,6 @@ describe('PeerSessionController', () => {
       assert.strictEqual(binding.controller.watch.propose(watchSource), 'queued');
       assert.strictEqual(binding.controller.watch.control(watchControl), 'queued');
       assert.strictEqual(binding.controller.watch.cancel(), 'queued');
-      assert.strictEqual(binding.controller.watch.failPipeline('pipeline'), 'queued');
       yield* Effect.promise(() => binding.controller.respondToJoin(peerId, 'deny'));
       yield* Effect.promise(() => binding.controller.leave());
       assert.deepStrictEqual(fixture.calls, [
@@ -109,7 +103,6 @@ describe('PeerSessionController', () => {
         ['watch.propose', watchSource],
         ['watch.control', watchControl],
         ['watch.cancel'],
-        ['watch.failPipeline', 'pipeline'],
         ['respondToJoin', peerId, 'deny'],
         ['leave'],
       ]);

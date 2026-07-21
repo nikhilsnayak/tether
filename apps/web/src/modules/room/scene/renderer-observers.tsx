@@ -28,10 +28,8 @@ export function FramePerformanceMonitor({
 
 export function ContextLossGuard({
   updateContextLost,
-  onRendererFailure,
 }: {
   readonly updateContextLost: (lost: true) => void;
-  readonly onRendererFailure: (signal: 'context-lost' | 'device-lost' | 'health-check') => void;
 }) {
   const { renderer } = useThree();
   const reported = useRef(false);
@@ -42,13 +40,11 @@ export function ContextLossGuard({
     const onDeviceLost: Renderer['onDeviceLost'] = (info) => {
       previousOnDeviceLost.call(roomRenderer, info);
       reported.current = true;
-      onRendererFailure('device-lost');
       updateContextLost(true);
     };
     const onContextLost = (event: Event) => {
       event.preventDefault();
       reported.current = true;
-      onRendererFailure('context-lost');
       updateContextLost(true);
     };
     roomRenderer.onDeviceLost = onDeviceLost;
@@ -59,13 +55,12 @@ export function ContextLossGuard({
         roomRenderer.onDeviceLost = previousOnDeviceLost;
       }
     };
-  }, [onRendererFailure, renderer, updateContextLost]);
+  }, [renderer, updateContextLost]);
   useFrame(() => {
     if (reported.current) return;
     const backend = (renderer as Renderer).backend as RendererBackendStatus | undefined;
     if (backend?.gl?.isContextLost() !== true) return;
     reported.current = true;
-    onRendererFailure('health-check');
     updateContextLost(true);
   });
   return null;

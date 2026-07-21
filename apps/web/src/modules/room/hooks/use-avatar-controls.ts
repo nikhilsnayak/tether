@@ -20,19 +20,11 @@ const shouldIgnoreKeyboardTarget = (target: EventTarget | null): boolean =>
   target instanceof Element &&
   target.closest('input, textarea, select, [contenteditable="true"], [role="dialog"]') !== null;
 
-export function useAvatarControls(
-  enabled: boolean,
-  consoleFocus?: {
-    readonly inRange: boolean;
-    readonly focused: boolean;
-    readonly enter: () => void;
-    readonly exit: () => void;
-  },
-) {
+export function useAvatarControls(enabled: boolean) {
   const heldKeys = useHeldKeys();
   const [heldControls, setHeldControls] = useState<ReadonlySet<AvatarControl>>(new Set());
   const recenterSignal = useRef(0);
-  const movementEnabled = enabled && consoleFocus?.focused !== true;
+  const movementEnabled = enabled;
   const keyboardIgnored = shouldIgnoreKeyboardTarget(document.activeElement);
   const activeKeys = movementEnabled && !keyboardIgnored ? new Set(heldKeys) : new Set<string>();
   const input: AvatarInputIntent = movementEnabled
@@ -92,26 +84,5 @@ export function useAvatarControls(
       meta: { name: 'Recenter camera', description: 'Recenter the camera behind your avatar' },
     },
   );
-  useHotkey(
-    'Enter',
-    (event) => {
-      if (shouldIgnoreKeyboardTarget(event.target)) return;
-      event.preventDefault();
-      if (consoleFocus?.focused === true) consoleFocus.exit();
-      else if (consoleFocus?.inRange === true) consoleFocus.enter();
-    },
-    {
-      enabled: enabled && (consoleFocus?.focused === true || consoleFocus?.inRange === true),
-      ignoreInputs: false,
-      preventDefault: false,
-      requireReset: true,
-      stopPropagation: false,
-      meta: {
-        name: 'Use watch console',
-        description: 'Enter or exit local watch-console focus',
-      },
-    },
-  );
-
   return { input, recenter, recenterSignal, setControlHeld };
 }

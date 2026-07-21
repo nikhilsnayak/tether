@@ -10,11 +10,7 @@ const sessionA = WatchSessionId.make('watch-aaaa-01');
 const idleView: WatchSessionView = {
   status: 'idle',
   role: null,
-  progress: 0,
-  revision: 0,
-  controlsEnabled: false,
   canPresent: true,
-  bufferingReason: null,
 };
 
 const unavailableView: WatchSessionView = { ...idleView, status: 'unavailable', canPresent: false };

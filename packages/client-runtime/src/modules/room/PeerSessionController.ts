@@ -26,7 +26,6 @@ export interface PeerSessionController {
     readonly propose: (source: PreparedSourceHandle) => PeerSessionCommandResult;
     readonly control: (control: WatchControlCommand) => PeerSessionCommandResult;
     readonly cancel: () => PeerSessionCommandResult;
-    readonly failPipeline: (reason: 'renderer' | 'pipeline') => PeerSessionCommandResult;
   };
   readonly respondToJoin: PeerSession['respondToJoin'];
   readonly leave: PeerSession['leave'];
@@ -84,7 +83,6 @@ export const makePeerSessionControllerBinding = (): PeerSessionControllerBinding
       propose: (source) => send((session) => session.watch.propose(source)),
       control: (control) => send((session) => session.watch.control(control)),
       cancel: () => send((session) => session.watch.cancel()),
-      failPipeline: (reason) => send((session) => session.watch.failPipeline(reason)),
     },
     respondToJoin: (peerId, decision) =>
       activeSession === null ? unavailable() : activeSession.respondToJoin(peerId, decision),

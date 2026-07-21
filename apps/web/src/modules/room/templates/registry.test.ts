@@ -1,4 +1,3 @@
-import { resolveRoomFeatureManifest } from '@tether/client-runtime/modules/room-template';
 import { RoomTemplateId } from '@tether/contracts/modules/room';
 import { assert, describe, it, vi } from 'vitest';
 
@@ -29,28 +28,10 @@ describe('room template registry', () => {
     assert.isTrue(roomGameplayConfigIsWithinWireBounds(DUSK_SUITE_TEMPLATE.gameplay));
   });
 
-  it('provides reachable spatial anchors for every watch-capable template', () => {
-    const templates = [DUSK_SUITE_TEMPLATE];
-    for (const template of templates) {
-      if (!resolveRoomFeatureManifest(template.id).watchAlong) continue;
-      const capability = template.watchAlong;
-      assert.isDefined(capability);
-      const closestX = Math.min(
-        template.gameplay.walkableBounds.maxX,
-        Math.max(template.gameplay.walkableBounds.minX, capability.console.position[0]),
-      );
-      const closestZ = Math.min(
-        template.gameplay.walkableBounds.maxZ,
-        Math.max(template.gameplay.walkableBounds.minZ, capability.console.position[2]),
-      );
-      assert.isAtMost(
-        Math.hypot(
-          closestX - capability.console.position[0],
-          closestZ - capability.console.position[2],
-        ),
-        capability.console.interactionRadius,
-      );
-    }
+  it('places the watch display in the room', () => {
+    const display = DUSK_SUITE_TEMPLATE.watchAlong?.display;
+    assert.isDefined(display);
+    assert.isTrue([...display.position, ...display.size].every(Number.isFinite));
   });
 
   it('loads the bundled Dusk Suite scene', async () => {

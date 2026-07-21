@@ -5,7 +5,7 @@ import type { ReactNode } from 'react';
 import type { RoomEntryState } from '../entry/room-entry-state';
 import { RoomScene } from '../scene/room-scene';
 import type { RoomTemplate } from '../templates/registry';
-import { ConsoleFocusProvider } from '../watch-along/console-focus-context';
+import { WatchPanel } from '../watch-along/watch-panel';
 import { RoomExperienceProvider } from './room-experience-context';
 
 type RoomExperienceProps = {
@@ -22,12 +22,11 @@ export function RoomExperience({ session, template, entryStage, children }: Room
   return (
     <RegistryProvider>
       <RoomExperienceProvider entryStage={entryStage}>
-        <ConsoleFocusProvider>
-          <div className='relative min-h-svh overflow-hidden'>
-            <RoomScene template={template} sessionIntent={session.intent} />
-            {children}
-          </div>
-        </ConsoleFocusProvider>
+        <div className='relative min-h-svh overflow-hidden'>
+          <RoomScene template={template} sessionIntent={session.intent} />
+          {children}
+          {template.watchAlong !== undefined && <WatchPanel />}
+        </div>
       </RoomExperienceProvider>
     </RegistryProvider>
   );

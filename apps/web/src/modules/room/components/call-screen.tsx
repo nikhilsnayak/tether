@@ -25,7 +25,6 @@ import { useScreenWakeLock } from '../hooks/use-screen-wake-lock';
 import { mediaStreamValue } from '../peer-session/platform';
 import type { InitialMediaSettings } from '../preflight/media';
 import { resolveRoomJourney, roomJourneyLabel } from '../scene/journey';
-import { useConsoleFocus } from '../watch-along/console-focus-context';
 import { CallControlButton, MediaToggleControls } from './call-controls';
 import { CallControlsToolbar } from './call-controls-toolbar';
 import { JoinRequestOverlay } from './join-request-overlay';
@@ -61,7 +60,6 @@ export function CallScreen({
 }) {
   useScreenWakeLock();
   const { active, binding, entryStage } = useRoomExperience();
-  const consoleFocus = useConsoleFocus();
   const { preferences: audioPreferences } = useProgramAudioPreferences();
   const { qualityPreference, setQualityPreference } = useRoomQualityPreference();
   const controller = binding.controller;
@@ -239,36 +237,32 @@ export function CallScreen({
             )}
           </div>
         </div>
-        {consoleFocus.tilesVisible && (
-          <div
-            ref={selfPreviewBoundaryRef}
-            className='pointer-events-none absolute inset-x-4 top-16 bottom-24'
-          >
-            <div className='pointer-events-auto'>
+        <div
+          ref={selfPreviewBoundaryRef}
+          className='pointer-events-none absolute inset-x-4 top-16 bottom-24'
+        >
+          <div className='pointer-events-auto'>
+            <DraggableMediaTile
+              boundaryRef={selfPreviewBoundaryRef}
+              initialCorner='tr'
+              tileId='self'
+            >
+              <SelfVideo stream={localStream} cameraOn={cameraOn} selfId={session.selfId} />
+            </DraggableMediaTile>
+            {(journey === 'together' || journey === 'reconnecting') && (
               <DraggableMediaTile
                 boundaryRef={selfPreviewBoundaryRef}
-                initialCorner='tr'
-                tileId='self'
+                initialCorner='tl'
+                tileId='remote'
               >
-                <SelfVideo stream={localStream} cameraOn={cameraOn} selfId={session.selfId} />
+                <RemoteVideo
+                  stream={remoteStream}
+                  cameraAvailable={view.remoteMediaState?.cameraOn === true && remoteVideoAvailable}
+                />
               </DraggableMediaTile>
-              {(journey === 'together' || journey === 'reconnecting') && (
-                <DraggableMediaTile
-                  boundaryRef={selfPreviewBoundaryRef}
-                  initialCorner='tl'
-                  tileId='remote'
-                >
-                  <RemoteVideo
-                    stream={remoteStream}
-                    cameraAvailable={
-                      view.remoteMediaState?.cameraOn === true && remoteVideoAvailable
-                    }
-                  />
-                </DraggableMediaTile>
-              )}
-            </div>
+            )}
           </div>
-        )}
+        </div>
         {view.sas !== null && !sasConfirmed && (
           <div className='pointer-events-auto'>
             <SafetyCodeCard

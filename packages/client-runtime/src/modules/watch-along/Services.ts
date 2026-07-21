@@ -8,7 +8,7 @@ import type {
   WatchCapabilities,
   WatchEvent,
 } from './Model';
-import type { ProgressSample, WatchMessage } from './Protocol';
+import type { WatchMessage } from './Protocol';
 
 export type WatchPlatformOperation =
   | 'cancel-prepared-source'
@@ -17,7 +17,6 @@ export type WatchPlatformOperation =
   | 'play'
   | 'pause'
   | 'seek'
-  | 'current-progress'
   | 'observe-source'
   | 'prime-first-frame'
   | 'attach-program-tracks'
@@ -54,9 +53,6 @@ export class WatchAlongPlatform extends Context.Service<
       source: ClaimedSourceHandle,
       progress: number,
     ) => Effect.Effect<void, WatchPlatformError>;
-    readonly currentProgress: (
-      source: ClaimedSourceHandle,
-    ) => Effect.Effect<number, WatchPlatformError>;
     readonly observeSource: (
       source: ClaimedSourceHandle,
       dispatch: (input: WatchSourceEvent) => void,
@@ -83,9 +79,6 @@ export class WatchTransport extends Context.Service<
   {
     readonly role: 'host' | 'guest';
     readonly sendDiscrete: (message: WatchMessage) => Effect.Effect<void, WatchTransportError>;
-    readonly offerLatestProgress: (
-      message: ProgressSample,
-    ) => Effect.Effect<void, WatchTransportError>;
   }
 >()('@tether/client-runtime/watch-along/WatchTransport') {}
 

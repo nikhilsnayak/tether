@@ -3,8 +3,7 @@ import { Canvas } from '@react-three/fiber/webgpu';
 import type { AvatarPose, RoomSession } from '@tether/client-runtime/modules/peer-session';
 import { peerSessionViewAtom } from '@tether/client-runtime/modules/room';
 import { watchViewAtom } from '@tether/client-runtime/modules/watch-along';
-import { Effect } from 'effect';
-import { Suspense, useEffect, useRef, useState } from 'react';
+import { Suspense, useRef, useState } from 'react';
 
 import { useReducedMotionPreference } from '@/hooks/use-reduced-motion-preference';
 
@@ -14,14 +13,7 @@ import { useRoomExperience } from '../components/room-experience-context';
 import { useAvatarControls } from '../hooks/use-avatar-controls';
 import { useRoomQualityPreference } from '../hooks/use-room-quality-preference';
 import type { RoomTemplate } from '../templates/registry';
-import { useConsoleFocus } from '../watch-along/console-focus-context';
-import { ConsoleFocusController } from '../watch-along/console-focus-controller';
-import { ReceivedProgramAudioOutput } from '../watch-along/received-program-audio-output';
-import { createWatchRendererHealth } from '../watch-along/renderer-health';
-import { prepareWatchSource } from '../watch-along/source-adapter';
-import { WatchConsole } from '../watch-along/watch-console';
-import { WatchDisplay, type WatchSeekRequest } from '../watch-along/watch-display';
-import { WatchRendererBoundary } from '../watch-along/watch-renderer-boundary';
+import { WatchDisplay } from '../watch-along/watch-display';
 import { LocalAvatarController, RemoteAvatarController } from './avatar-controllers';
 import { avatarSpawn } from './avatar-motion';
 import { avatarPresentation } from './avatar-presentation';
@@ -54,20 +46,12 @@ export function RoomScene({
   const { active, binding, entryStage } = useRoomExperience();
   const peerView = useAtomValue(peerSessionViewAtom);
   const watchView = useAtomValue(watchViewAtom);
-  const consoleFocus = useConsoleFocus();
   const { qualityPreference } = useRoomQualityPreference();
   const deviceDpr = typeof devicePixelRatio === 'number' ? devicePixelRatio : 1;
   const [adaptiveQuality, setAdaptiveQuality] = useState(() =>
     initialAdaptiveQualityState(deviceDpr),
   );
   const [contextLost, setContextLost] = useState(false);
-  const [selectionError, setSelectionError] = useState<string | null>(null);
-  const [seekRequest, setSeekRequest] = useState<WatchSeekRequest | null>(null);
-  const selectionToken = useRef(0);
-  const fileInput = useRef<HTMLInputElement>(null);
-  const [watchRendererHealth] = useState(() =>
-    createWatchRendererHealth(() => binding.controller.watch.failPipeline('renderer')),
-  );
   const surfaceRef = useRef<HTMLDivElement>(null);
   const localPoseRef = useRef<AvatarPose>(avatarSpawn(template.gameplay, sessionIntent));
   const remoteIntent: RoomSession['intent'] = sessionIntent === 'host' ? 'join' : 'host';
@@ -88,20 +72,7 @@ export function RoomScene({
   const controlsEnabled =
     presentation.localLocation === 'inside' && journey !== 'ended' && journey !== 'departed';
   const watchCapability = template.watchAlong;
-  const { input, recenter, recenterSignal, setControlHeld } = useAvatarControls(
-    controlsEnabled,
-    watchCapability !== undefined
-      ? {
-          inRange: consoleFocus.inRange,
-          focused: consoleFocus.focused,
-          enter: () => consoleFocus.dispatch({ _tag: 'Enter' }),
-          exit: () => {
-            selectionToken.current += 1;
-            consoleFocus.dispatch({ _tag: 'Exit' });
-          },
-        }
-      : undefined,
-  );
+  const { input, recenter, recenterSignal, setControlHeld } = useAvatarControls(controlsEnabled);
   const qualityTier =
     qualityPreference === 'auto'
       ? adaptiveQuality.tier
@@ -109,31 +80,6 @@ export function RoomScene({
   const quality = QUALITY_CONFIGS[qualityTier];
   const rendering = renderingQualitySettings(quality);
   const SceneEnvironment = template.scene;
-  const visibleSelectionError = watchView.status === 'idle' ? selectionError : null;
-
-  const selectWatchSource = async (file: File) => {
-    const token = ++selectionToken.current;
-    setSelectionError(null);
-
-    try {
-      const prepared = await Effect.runPromise(prepareWatchSource(file));
-      if (token !== selectionToken.current || fileInput.current === null) {
-        await prepared.cancel();
-        return;
-      }
-      if (binding.controller.watch.propose(prepared.source) !== 'queued') {
-        await prepared.cancel();
-      }
-    } catch {
-      if (token === selectionToken.current && fileInput.current !== null) {
-        setSelectionError('Unable to load video');
-      }
-    }
-  };
-
-  useEffect(() => {
-    if (watchView.role === null) watchRendererHealth.reset();
-  }, [watchRendererHealth, watchView.role]);
 
   if (contextLost) {
     return (
@@ -161,11 +107,8 @@ export function RoomScene({
       data-room-local-avatar={presentation.local}
       data-room-remote-avatar={presentation.remote}
       data-room-avatar-sync={roomEventsReady ? 'ready' : 'unavailable'}
-      data-room-display={watchCapability === undefined ? 'unavailable' : watchView.status}
       data-room-watch-display={watchCapability === undefined ? 'absent' : 'present'}
-      data-room-watch-console={watchCapability === undefined ? 'absent' : 'present'}
-      data-room-console-focus={consoleFocus.focused ? 'focused' : 'free'}
-      data-room-console-range={consoleFocus.inRange ? 'inside' : 'outside'}
+      data-room-display={watchCapability === undefined ? 'unavailable' : watchView.status}
       // isolate traps the drei Html labels' large z-index inside the scene so
       // they cannot paint over the sibling entry/call overlays.
       className='bg-card absolute inset-0 isolate touch-none overflow-hidden'
@@ -204,11 +147,6 @@ export function RoomScene({
           surfaceRef={surfaceRef}
           outside={cameraOutside}
           recenterSignal={recenterSignal}
-          focusPose={
-            consoleFocus.focused && watchCapability !== undefined
-              ? watchCapability.viewingCamera
-              : null
-          }
         />
         <LocalAvatarController
           poseRef={localPoseRef}
@@ -216,7 +154,7 @@ export function RoomScene({
           gameplay={template.gameplay}
           intent={sessionIntent}
           location={presentation.localLocation}
-          enabled={controlsEnabled && !consoleFocus.focused}
+          enabled={controlsEnabled}
           sendAvatarPose={(pose) => binding.controller.sendAvatarPose(pose) === 'queued'}
           surfaceRef={surfaceRef}
           blockerRef={remotePoseRef}
@@ -253,27 +191,8 @@ export function RoomScene({
             }
           }}
         />
-        <ContextLossGuard
-          updateContextLost={setContextLost}
-          onRendererFailure={(signal) => watchRendererHealth.fail(signal, watchView.role !== null)}
-        />
-        {watchCapability !== undefined && (
-          <WatchRendererBoundary active={watchView.role !== null} health={watchRendererHealth}>
-            <ConsoleFocusController poseRef={localPoseRef} capability={watchCapability} />
-            <WatchDisplay
-              capability={watchCapability}
-              seekRequest={seekRequest}
-              health={watchRendererHealth}
-            />
-            <WatchConsole
-              key={consoleFocus.focused ? 'focused' : 'free'}
-              capability={watchCapability}
-              error={visibleSelectionError}
-              onSelect={() => fileInput.current?.click()}
-              onSeekRequested={setSeekRequest}
-            />
-          </WatchRendererBoundary>
-        )}
+        <ContextLossGuard updateContextLost={setContextLost} />
+        {watchCapability !== undefined && <WatchDisplay capability={watchCapability} />}
         <Suspense fallback={null}>
           <SceneEnvironment
             admissionPending={admissionPending}
@@ -285,26 +204,9 @@ export function RoomScene({
           <RendererStatusObserver surfaceRef={surfaceRef} />
         </Suspense>
       </Canvas>
-      {watchCapability !== undefined && (
-        <>
-          <ReceivedProgramAudioOutput />
-          <input
-            ref={fileInput}
-            data-room-watch-file-input
-            hidden
-            type='file'
-            accept='video/*'
-            onChange={(event) => {
-              const file = event.currentTarget.files?.[0];
-              event.currentTarget.value = '';
-              if (file !== undefined && consoleFocus.focused) void selectWatchSource(file);
-            }}
-          />
-        </>
-      )}
       {presentation.localLocation === 'inside' && (
         <AvatarControls
-          disabled={!controlsEnabled || consoleFocus.focused}
+          disabled={!controlsEnabled}
           onHeldChange={setControlHeld}
           onRecenter={recenter}
         />
