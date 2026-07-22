@@ -6,11 +6,19 @@ export interface CameraFraming {
   readonly fieldOfView: number;
 }
 
+export interface CameraOrbit {
+  readonly yaw: number;
+  readonly pitch: number;
+  readonly distance: number;
+}
+
 export interface CameraFramings {
   readonly landscape: CameraFraming;
   readonly portrait: CameraFraming;
   readonly outside: CameraFraming;
 }
+
+export type ResponsiveCameraFramings = Pick<CameraFramings, 'landscape' | 'portrait'>;
 
 export interface CameraLookConfig {
   readonly yaw: readonly [minimum: number, maximum: number];
@@ -144,6 +152,26 @@ export function clampLook(
   };
 }
 
+export function cameraOrbitFromPosition(
+  position: { readonly x: number; readonly y: number; readonly z: number },
+  focus: { readonly x: number; readonly z: number },
+  cameraHeight: number,
+  distanceBounds: { readonly minimum: number; readonly maximum: number },
+): CameraOrbit {
+  const offsetX = position.x - focus.x;
+  const offsetZ = position.z - focus.z;
+  const verticalOffset = position.y - cameraHeight;
+  const horizontalDistance = Math.hypot(offsetX, offsetZ);
+  return {
+    yaw: Math.atan2(-offsetX, -offsetZ),
+    pitch: Math.min(0.45, Math.max(-0.35, Math.atan2(verticalOffset, horizontalDistance))),
+    distance: Math.min(
+      distanceBounds.maximum,
+      Math.max(distanceBounds.minimum, Math.hypot(horizontalDistance, verticalOffset)),
+    ),
+  };
+}
+
 export function selectCameraFraming(
   width: number,
   height: number,
@@ -151,6 +179,14 @@ export function selectCameraFraming(
   framings: CameraFramings,
 ): CameraFraming {
   if (outside) return framings.outside;
+  return selectResponsiveCameraFraming(width, height, framings);
+}
+
+export function selectResponsiveCameraFraming(
+  width: number,
+  height: number,
+  framings: ResponsiveCameraFramings,
+): CameraFraming {
   return width >= height ? framings.landscape : framings.portrait;
 }
 

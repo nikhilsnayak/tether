@@ -2,6 +2,11 @@ import { expect, test } from './fixtures';
 
 test.describe('real room', { tag: '@gpu' }, () => {
   test('audio output menu selects a device and toggles sound off', async ({ room }) => {
+    // This scenario deliberately spans a connected call, teardown, and a
+    // second host session. SwiftShader can make those two renderer lifecycles
+    // exceed the generic GPU-test budget even when every transition succeeds.
+    test.slow();
+
     const hostActor = await room.createActor();
     const guestActor = await room.createActor();
     const { page: host } = hostActor;

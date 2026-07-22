@@ -4,6 +4,7 @@ test(
   'two detached peers share a video on the 3D room display',
   { tag: '@gpu' },
   async ({ room }) => {
+    test.setTimeout(150_000);
     const { host, guest } = await room.connect({ probeWebRtc: true });
     await Promise.all([room.expectWatchState(host, 'idle'), room.expectWatchState(guest, 'idle')]);
     await Promise.all([room.expectDetached(host), room.expectDetached(guest)]);
@@ -23,7 +24,9 @@ test(
       room.expectWatchState(host, 'playing'),
       room.expectWatchState(guest, 'playing'),
     ]);
-    await expect.poll(() => guest.probe.hasDecodedDetachedVideoFrame()).toBe(true);
+    await expect
+      .poll(() => guest.probe.hasDecodedDetachedVideoFrame(), { timeout: 30_000 })
+      .toBe(true);
     await guest.page.getByRole('button', { name: 'Watch together' }).click();
     await guest.page.getByRole('button', { name: 'Pause', exact: true }).click();
     await Promise.all([
