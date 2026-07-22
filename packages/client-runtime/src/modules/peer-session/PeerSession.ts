@@ -26,6 +26,7 @@ import {
   type MediaStreamHandle,
   type PeerConnectionHandle,
   type PeerSessionSignal,
+  type ProgramTransceiverHandle,
   type SessionDescription,
 } from './Model';
 import { makePeerSessionMemory } from './PeerSessionMemory';
@@ -216,12 +217,16 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
   const acceptOfferAndSendAnswer = Effect.fn('@tether/client-runtime/acceptOfferAndSendAnswer')(
     function* (
       peerConnection: PeerConnectionHandle,
+      programTransceivers: ProgramTransceiverHandle | null,
       signal: Extract<PeerSessionSignal, { readonly _tag: 'SessionDescription' }>,
     ) {
       yield* platform.setRemoteDescription(peerConnection, {
         type: 'offer',
         sdp: signal.sdp,
       });
+      if (programTransceivers !== null) {
+        yield* platform.activateProgramTransceivers(programTransceivers);
+      }
 
       const created = yield* platform.createAnswer(peerConnection);
       const answer = yield* requireDescription(created, 'answer');
@@ -252,7 +257,10 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     // watch-along can start later without renegotiating a detached session.
     // Templates without the capability pay no negotiation cost.
     const programTransceivers = memory.watch.isEnabled()
-      ? yield* platform.reserveProgramTransceivers(peerConnection)
+      ? yield* platform.reserveProgramTransceivers(
+          peerConnection,
+          watch.role === 'guest' ? 'offerer' : 'answerer',
+        )
       : null;
 
     return { scope: connectionScope, peerConnection, programTransceivers };
@@ -562,6 +570,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
           }
           const answerSdp = yield* acceptOfferAndSendAnswer(
             state.generation.peerConnection,
+            state.generation.programTransceivers,
             signal,
           );
           memory.detachment.resetGeneration();

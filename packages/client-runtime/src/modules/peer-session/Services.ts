@@ -28,7 +28,12 @@ export class PeerSessionPlatform extends Context.Service<
     ) => Effect.Effect<void, PlatformError>;
     readonly reserveProgramTransceivers: (
       peerConnection: PeerConnectionHandle,
+      negotiationRole: 'offerer' | 'answerer',
     ) => Effect.Effect<ProgramTransceiverHandle, PlatformError>;
+    /** Makes remotely offered program slots send-capable before creating an answer. */
+    readonly activateProgramTransceivers: (
+      transceivers: ProgramTransceiverHandle,
+    ) => Effect.Effect<void, PlatformError>;
     readonly replaceProgramTracks: (
       transceiver: ProgramTransceiverHandle,
       stream: MediaStreamHandle | null,

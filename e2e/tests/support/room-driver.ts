@@ -259,8 +259,20 @@ export class RoomDriver {
       await new Promise<void>((resolve) => {
         const draw = () => {
           const elapsed = performance.now() - startedAt;
-          context.fillStyle = `hsl(${Math.floor(elapsed / 8) % 360} 80% 50%)`;
+          context.fillStyle = '#153e75';
           context.fillRect(0, 0, canvas.width, canvas.height);
+          context.fillStyle = '#f59e0b';
+          context.fillRect(0, 0, canvas.width / 2, canvas.height / 2);
+          context.fillRect(
+            canvas.width / 2,
+            canvas.height / 2,
+            canvas.width / 2,
+            canvas.height / 2,
+          );
+          context.fillStyle = '#f8fafc';
+          context.fillRect((elapsed / 8) % canvas.width, 0, 18, canvas.height);
+          context.font = 'bold 32px sans-serif';
+          context.fillText('WATCH', 94, 102);
           if (elapsed >= 2_000) resolve();
           else requestAnimationFrame(draw);
         };

@@ -27,8 +27,35 @@ export const webCryptoLayer = Layer.succeed(
 const peerConnectionValue = (handle: PeerConnectionHandle) => handle.value as RTCPeerConnection;
 const dataChannelValue = (handle: DataChannelHandle) => handle.value as RTCDataChannel;
 export const mediaStreamValue = (handle: MediaStreamHandle) => handle.value as MediaStream;
-const programTransceiverValue = (handle: ProgramTransceiverHandle) =>
-  handle.value as { readonly video: RTCRtpTransceiver; readonly audio: RTCRtpTransceiver };
+type BrowserProgramTransceivers = {
+  readonly video: RTCRtpTransceiver;
+  readonly audio: RTCRtpTransceiver;
+};
+
+type BrowserProgramTransceiverReservation =
+  | ({ readonly _tag: 'reserved' } & BrowserProgramTransceivers)
+  | {
+      readonly _tag: 'offered-remotely';
+      readonly peerConnection: RTCPeerConnection;
+      readonly offset: number;
+    };
+
+const resolveProgramTransceivers = (handle: ProgramTransceiverHandle) =>
+  Effect.try({
+    try: (): BrowserProgramTransceivers => {
+      const reservation = handle.value as BrowserProgramTransceiverReservation;
+      if (reservation._tag === 'reserved') return reservation;
+
+      const offered = reservation.peerConnection.getTransceivers().slice(reservation.offset);
+      const video = offered.find(({ receiver }) => receiver.track.kind === 'video');
+      const audio = offered.find(({ receiver }) => receiver.track.kind === 'audio');
+      if (video === undefined || audio === undefined) {
+        throw new Error('Remote offer did not contain reserved program transceivers');
+      }
+      return { video, audio };
+    },
+    catch: (cause) => new PlatformError({ operation: 'replace-program-tracks', cause }),
+  });
 
 export type SenderTrafficClass = 'voice-audio' | 'program-audio' | 'program-video';
 
@@ -368,23 +395,42 @@ const webPeerSessionPlatform = PeerSessionPlatform.of({
       },
       catch: (cause) => new PlatformError({ operation: 'add-local-tracks', cause }),
     }).pipe(Effect.flatten),
-  reserveProgramTransceivers: (peerConnection) =>
-    Effect.try({
-      try: () => {
-        const peer = peerConnectionValue(peerConnection);
-        const video = peer.addTransceiver('video', { direction: 'sendrecv' });
-        const audio = peer.addTransceiver('audio', { direction: 'sendrecv' });
-        const transceivers = { value: { video, audio } };
-        return Effect.all(
-          [tuneSender(video.sender, 'program-video'), tuneSender(audio.sender, 'program-audio')],
-          { concurrency: 'unbounded', discard: true },
-        ).pipe(Effect.as(transceivers));
-      },
-      catch: (cause) => new PlatformError({ operation: 'reserve-program-transceivers', cause }),
-    }).pipe(Effect.flatten),
+  reserveProgramTransceivers: (peerConnection, negotiationRole) =>
+    Effect.gen(function* () {
+      const peer = peerConnectionValue(peerConnection);
+      if (negotiationRole === 'answerer') {
+        return {
+          value: {
+            _tag: 'offered-remotely',
+            peerConnection: peer,
+            offset: peer.getTransceivers().length,
+          } satisfies BrowserProgramTransceiverReservation,
+        };
+      }
+      const { video, audio } = yield* Effect.try({
+        try: () => ({
+          video: peer.addTransceiver('video', { direction: 'sendrecv' }),
+          audio: peer.addTransceiver('audio', { direction: 'sendrecv' }),
+        }),
+        catch: (cause) => new PlatformError({ operation: 'reserve-program-transceivers', cause }),
+      });
+      yield* Effect.all(
+        [tuneSender(video.sender, 'program-video'), tuneSender(audio.sender, 'program-audio')],
+        { concurrency: 'unbounded', discard: true },
+      );
+      return {
+        value: { _tag: 'reserved', video, audio } satisfies BrowserProgramTransceiverReservation,
+      };
+    }),
+  activateProgramTransceivers: (transceiver) =>
+    Effect.gen(function* () {
+      const { video, audio } = yield* resolveProgramTransceivers(transceiver);
+      video.direction = 'sendrecv';
+      audio.direction = 'sendrecv';
+    }),
   replaceProgramTracks: (transceiver, stream) =>
     Effect.gen(function* () {
-      const { video, audio } = programTransceiverValue(transceiver);
+      const { video, audio } = yield* resolveProgramTransceivers(transceiver);
       const media = stream === null ? null : mediaStreamValue(stream);
       const videoTrack = media?.getVideoTracks()[0] ?? null;
       if (videoTrack !== null) videoTrack.contentHint = 'detail';

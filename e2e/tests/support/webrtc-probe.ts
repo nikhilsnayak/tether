@@ -7,6 +7,7 @@ type WebRtcProbeState = {
     readonly side: 'local' | 'remote';
   }>;
   readonly localStreams: MediaStream[];
+  readonly videos: HTMLVideoElement[];
   preflightPreviewStream: MediaStream | null;
   readonly peerConnections: RTCPeerConnection[];
   addIceCandidateCalls: number;
@@ -29,6 +30,7 @@ export const installWebRtcProbe = (context: BrowserContext) =>
       configurations: [],
       dataChannels: [],
       localStreams: [],
+      videos: [],
       preflightPreviewStream: null,
       peerConnections: [],
       addIceCandidateCalls: 0,
@@ -38,6 +40,14 @@ export const installWebRtcProbe = (context: BrowserContext) =>
       negotiationNeededCount: 0,
     };
     window.__tetherE2E = probe;
+
+    document.createElement = new Proxy(document.createElement.bind(document), {
+      apply(target, thisArgument, argumentsList) {
+        const element = Reflect.apply(target, thisArgument, argumentsList) as HTMLElement;
+        if (element instanceof HTMLVideoElement) probe.videos.push(element);
+        return element;
+      },
+    }) as typeof document.createElement;
 
     const NativePeerConnection = window.RTCPeerConnection;
     const InstrumentedPeerConnection = new Proxy(NativePeerConnection, {
@@ -235,5 +245,34 @@ export class WebRtcProbe {
 
   sasShownBeforeConnected() {
     return this.page.evaluate(() => window.__tetherE2E.sasShownBeforeConnected);
+  }
+
+  hasDecodedDetachedVideoFrame() {
+    return this.page.evaluate(() => {
+      for (const video of window.__tetherE2E.videos) {
+        const stream = video.srcObject as MediaStream | null;
+        if (
+          video.isConnected ||
+          video.videoWidth === 0 ||
+          video.videoHeight === 0 ||
+          stream?.getVideoTracks().length !== 1
+        ) {
+          continue;
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = 2;
+        canvas.height = 2;
+        const context = canvas.getContext('2d');
+        if (context === null) continue;
+        context.drawImage(video, 0, 0, 2, 2);
+        const pixels = context.getImageData(0, 0, 2, 2).data;
+        const colors = new Set<string>();
+        for (let index = 0; index < pixels.length; index += 4) {
+          colors.add(`${pixels[index]}:${pixels[index + 1]}:${pixels[index + 2]}`);
+        }
+        if (colors.size > 1) return true;
+      }
+      return false;
+    });
   }
 }

@@ -1,48 +1,19 @@
 import { useAtomValue } from '@effect/atom-react';
+import { useVideoTexture } from '@react-three/drei';
 import { watchProgramStreamAtom, watchViewAtom } from '@tether/client-runtime/modules/watch-along';
-import { useEffect, useState } from 'react';
-import { SRGBColorSpace, VideoTexture } from 'three';
+import { Suspense } from 'react';
 
 import type { RoomTemplate } from '../templates/registry';
 
-function SharedVideo({
+function VideoMaterial({
   stream,
   muted,
-  size,
 }: {
   readonly stream: MediaStream;
   readonly muted: boolean;
-  readonly size: readonly [number, number];
 }) {
-  const [video] = useState(() => {
-    const element = document.createElement('video');
-    element.autoplay = true;
-    element.playsInline = true;
-    return element;
-  });
-  const [texture] = useState(() => {
-    const created = new VideoTexture(video);
-    created.colorSpace = SRGBColorSpace;
-    return created;
-  });
-
-  useEffect(() => {
-    video.muted = muted;
-    video.srcObject = stream;
-    return () => {
-      video.pause();
-      video.srcObject = null;
-    };
-  }, [muted, stream, video]);
-
-  useEffect(() => () => texture.dispose(), [texture]);
-
-  return (
-    <mesh position={[0, 0, 0.006]}>
-      <planeGeometry args={[...size]} />
-      <meshBasicMaterial map={texture} toneMapped={false} />
-    </mesh>
-  );
+  const texture = useVideoTexture(stream, { muted, loop: false });
+  return <meshBasicMaterial map={texture} toneMapped={false} />;
 }
 
 export function WatchDisplay({
@@ -55,18 +26,16 @@ export function WatchDisplay({
 
   return (
     <group position={capability.display.position}>
-      {stream === null ? (
-        <mesh position={[0, 0, 0.006]}>
-          <planeGeometry args={[...capability.display.size]} />
+      <mesh position={[0, 0, 0.03]}>
+        <planeGeometry args={[...capability.display.size]} />
+        {stream === null ? (
           <meshBasicMaterial color='#080a0f' toneMapped={false} />
-        </mesh>
-      ) : (
-        <SharedVideo
-          stream={stream.value as MediaStream}
-          muted={view.role === 'presenter'}
-          size={capability.display.size}
-        />
-      )}
+        ) : (
+          <Suspense fallback={<meshBasicMaterial color='#080a0f' toneMapped={false} />}>
+            <VideoMaterial stream={stream.value as MediaStream} muted={view.role === 'presenter'} />
+          </Suspense>
+        )}
+      </mesh>
     </group>
   );
 }

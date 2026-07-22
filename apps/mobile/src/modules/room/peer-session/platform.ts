@@ -299,6 +299,7 @@ const nativePeerSessionPlatform = PeerSessionPlatform.of({
       },
       catch: (cause) => new PlatformError({ operation: 'reserve-program-transceivers', cause }),
     }),
+  activateProgramTransceivers: () => Effect.void,
   replaceProgramTracks: (transceiver, stream) =>
     Effect.tryPromise({
       try: async () => {

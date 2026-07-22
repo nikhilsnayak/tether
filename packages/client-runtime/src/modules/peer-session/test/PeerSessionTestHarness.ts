@@ -162,6 +162,7 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
         operations.push('reserveProgramTransceivers');
         return { value: {} };
       }),
+    activateProgramTransceivers: () => Effect.void,
     replaceProgramTracks: (_, stream) =>
       Effect.sync(() => {
         operations.push(`replaceProgramTracks:${stream === null ? 'clear' : 'set'}`);

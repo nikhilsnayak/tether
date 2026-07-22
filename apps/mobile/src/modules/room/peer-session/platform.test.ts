@@ -288,7 +288,7 @@ describe('native peer-session platform', () => {
       Effect.gen(function* () {
         const platform = yield* PeerSessionPlatform;
         const peerConnection = yield* platform.acquirePeerConnection([]);
-        const transceiver = yield* platform.reserveProgramTransceivers(peerConnection);
+        const transceiver = yield* platform.reserveProgramTransceivers(peerConnection, 'offerer');
 
         yield* platform.replaceProgramTracks(transceiver, harness.localMedia);
         yield* platform.replaceProgramTracks(transceiver, null);

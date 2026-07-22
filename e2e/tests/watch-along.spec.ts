@@ -22,6 +22,7 @@ test(
       room.expectWatchState(host, 'playing'),
       room.expectWatchState(guest, 'playing'),
     ]);
+    await expect.poll(() => guest.probe.hasDecodedDetachedVideoFrame()).toBe(true);
     await guest.page.getByRole('button', { name: 'Pause', exact: true }).click();
     await Promise.all([
       room.expectWatchState(host, 'loaded-paused'),
