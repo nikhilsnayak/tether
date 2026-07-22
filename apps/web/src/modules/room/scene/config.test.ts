@@ -11,6 +11,7 @@ import {
   resolveQualityTier,
   sampleAdaptiveQuality,
   selectCameraFraming,
+  selectResponsiveCameraFraming,
   shouldAnimateCamera,
 } from './config';
 
@@ -37,6 +38,8 @@ describe('scene configuration', () => {
     assert.strictEqual(selectCameraFraming(390, 844, false, framings), portrait);
     assert.strictEqual(selectCameraFraming(900, 600, true, framings), outside);
     assert.strictEqual(selectCameraFraming(390, 844, true, framings), outside);
+    assert.strictEqual(selectResponsiveCameraFraming(900, 600, { landscape, portrait }), landscape);
+    assert.strictEqual(selectResponsiveCameraFraming(390, 844, { landscape, portrait }), portrait);
   });
 
   it('disables camera travel for reduced motion', () => {

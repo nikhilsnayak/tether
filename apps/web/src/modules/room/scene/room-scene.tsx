@@ -70,6 +70,10 @@ export function RoomScene({
   const [spatialJourney, setSpatialJourney] = useState(journey);
   const presentation = avatarPresentation(sessionIntent, spatialJourney);
   const cameraOutside = presentation.localLocation === 'outside';
+  const watchCameraRequested =
+    watchView.status === 'loaded-paused' ||
+    watchView.status === 'playing' ||
+    watchView.status === 'ended';
   const controlsEnabled =
     presentation.localLocation === 'inside' && journey !== 'ended' && journey !== 'departed';
   const watchCapability = template.watchAlong;
@@ -149,6 +153,7 @@ export function RoomScene({
           outside={cameraOutside}
           recenterSignal={recenterSignal}
           cameraYawRef={cameraYawRef}
+          watchFraming={watchCameraRequested}
         />
         <LocalAvatarController
           poseRef={localPoseRef}

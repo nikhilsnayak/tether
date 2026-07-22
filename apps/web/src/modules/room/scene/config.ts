@@ -12,6 +12,8 @@ export interface CameraFramings {
   readonly outside: CameraFraming;
 }
 
+export type ResponsiveCameraFramings = Pick<CameraFramings, 'landscape' | 'portrait'>;
+
 export interface CameraLookConfig {
   readonly yaw: readonly [minimum: number, maximum: number];
   readonly pitch: readonly [minimum: number, maximum: number];
@@ -151,6 +153,14 @@ export function selectCameraFraming(
   framings: CameraFramings,
 ): CameraFraming {
   if (outside) return framings.outside;
+  return selectResponsiveCameraFraming(width, height, framings);
+}
+
+export function selectResponsiveCameraFraming(
+  width: number,
+  height: number,
+  framings: ResponsiveCameraFramings,
+): CameraFraming {
   return width >= height ? framings.landscape : framings.portrait;
 }
 

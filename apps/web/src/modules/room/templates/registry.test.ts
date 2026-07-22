@@ -29,9 +29,15 @@ describe('room template registry', () => {
   });
 
   it('places the watch display in the room', () => {
-    const display = DUSK_SUITE_TEMPLATE.watchAlong?.display;
-    assert.isDefined(display);
+    const watchAlong = DUSK_SUITE_TEMPLATE.watchAlong;
+    if (watchAlong === undefined) assert.fail('Dusk Suite should support watch along');
+    const display = watchAlong.display;
     assert.isTrue([...display.position, ...display.size].every(Number.isFinite));
+    assert.isTrue(
+      [watchAlong.camera.landscape, watchAlong.camera.portrait].every((framing) =>
+        [...framing.position, ...framing.target, framing.fieldOfView].every(Number.isFinite),
+      ),
+    );
   });
 
   it('loads the bundled Dusk Suite scene', async () => {

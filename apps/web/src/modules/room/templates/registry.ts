@@ -7,6 +7,7 @@ import type {
   CameraLookConfig,
   QualityConfig,
   ResolvedQualityTier,
+  ResponsiveCameraFramings,
 } from '../scene/config';
 import type { RoomJourneyCue } from '../scene/journey';
 
@@ -31,6 +32,7 @@ export interface RoomTemplate {
     readonly look: CameraLookConfig;
   };
   readonly watchAlong?: {
+    readonly camera: ResponsiveCameraFramings;
     readonly display: {
       readonly position: [number, number, number];
       readonly size: readonly [number, number];
@@ -79,6 +81,10 @@ export const DUSK_SUITE_TEMPLATE: RoomTemplate = {
     },
   },
   watchAlong: {
+    camera: {
+      landscape: { position: [0, 3.2, 4], target: [0, 2.35, -4.61], fieldOfView: 40 },
+      portrait: { position: [0, 4.2, 9.5], target: [0, 2.35, -4.61], fieldOfView: 55 },
+    },
     display: { position: [0, 2.35, -4.61], size: [6.5, 3.66] },
   },
 };

@@ -17,6 +17,16 @@ test(
       room.expectWatchState(host, 'loaded-paused'),
       room.expectWatchState(guest, 'loaded-paused'),
     ]);
+    const hostScene = host.page.getByLabel('Dusk Suite room scene');
+    const guestScene = guest.page.getByLabel('Dusk Suite room scene');
+    await Promise.all([
+      expect(hostScene).toHaveAttribute('data-room-camera-mode', 'watch'),
+      expect(guestScene).toHaveAttribute('data-room-camera-mode', 'watch'),
+    ]);
+    await hostScene.dispatchEvent('wheel', { deltaY: 100 });
+    await expect(hostScene).toHaveAttribute('data-room-camera-mode', 'avatar');
+    await host.page.keyboard.press('r');
+    await expect(hostScene).toHaveAttribute('data-room-camera-mode', 'watch');
     await host.page.getByRole('button', { name: 'Watch together' }).click();
     await host.page.getByRole('button', { name: 'Play', exact: true }).click();
     await Promise.all([
@@ -32,6 +42,10 @@ test(
     ]);
     await host.page.getByRole('button', { name: 'Stop', exact: true }).click();
     await Promise.all([room.expectWatchState(host, 'idle'), room.expectWatchState(guest, 'idle')]);
+    await Promise.all([
+      expect(hostScene).toHaveAttribute('data-room-camera-mode', 'avatar'),
+      expect(guestScene).toHaveAttribute('data-room-camera-mode', 'avatar'),
+    ]);
 
     expect(await host.probe.negotiationNeededCount()).toBe(negotiationCounts[0]);
     expect(await guest.probe.negotiationNeededCount()).toBe(negotiationCounts[1]);
