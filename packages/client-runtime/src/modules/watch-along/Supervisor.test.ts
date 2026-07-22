@@ -164,6 +164,76 @@ describe('watch runtime', () => {
     ),
   );
 
+  it.effect('releases an active source once when transport fails', () =>
+    Effect.scoped(
+      withCrypto(
+        Effect.gen(function* () {
+          const operations: string[] = [];
+          const events: WatchEvent[] = [];
+          const sent: WatchMessage[] = [];
+          const terminations: string[] = [];
+          let sendBroken = false;
+          const runtime = yield* startWatchRuntime({
+            role: 'host',
+            capabilities,
+            sendRaw: (payload) =>
+              sendBroken
+                ? Effect.fail('send-failed')
+                : Effect.sync(() => sent.push(JSON.parse(payload))),
+            closeWatchChannel: Effect.sync(() => operations.push('close-channel')),
+            attach: () => Effect.sync(() => operations.push('attach')),
+            clear: Effect.sync(() => operations.push('clear')),
+            platform: platform(operations),
+            sink: WatchEventSink.of({
+              emit: (event) => Effect.sync(() => void events.push(event)),
+            }),
+            onTerminated: (reason) => Effect.sync(() => void terminations.push(reason)),
+          });
+
+          runtime.dispatch({ _tag: 'ChannelOpened' });
+          runtime.dispatch({
+            _tag: 'RemoteMessage',
+            message: { version: WATCH_PROTOCOL_VERSION, type: 'hello', ...capabilities },
+          });
+          yield* eventually(() =>
+            events.some((event) => event._tag === 'WatchAvailabilityChanged' && event.available),
+          );
+          runtime.dispatch({
+            _tag: 'ProposeLocalSource',
+            source: { _tag: 'PreparedSource', value: 'prepared' },
+          });
+          yield* eventually(() => sent.some((message) => message.type === 'watch-proposed'));
+          const proposal = sent.find((message) => message.type === 'watch-proposed');
+          assert.isDefined(proposal);
+          runtime.dispatch({
+            _tag: 'RemoteMessage',
+            message: {
+              version: WATCH_PROTOCOL_VERSION,
+              type: 'watch-ready',
+              watchSessionId: proposal.watchSessionId,
+            },
+          });
+          yield* eventually(() => operations.includes('attach'));
+
+          sendBroken = true;
+          runtime.dispatch({ _tag: 'RequestControl', control: { kind: 'play' } });
+          yield* eventually(() => !runtime.isAlive());
+
+          assert.deepStrictEqual(terminations, ['actor-failed']);
+          assert.strictEqual(operations.filter((operation) => operation === 'release').length, 1);
+          assert.strictEqual(operations.filter((operation) => operation === 'clear').length, 1);
+          assert.strictEqual(
+            operations.filter((operation) => operation === 'close-channel').length,
+            1,
+          );
+          assert.isTrue(
+            events.some((event) => event._tag === 'WatchFailed' && event.reason === 'pipeline'),
+          );
+        }),
+      ),
+    ),
+  );
+
   it.effect('fails closed when actor output cannot be encoded', () =>
     Effect.scoped(
       withCrypto(

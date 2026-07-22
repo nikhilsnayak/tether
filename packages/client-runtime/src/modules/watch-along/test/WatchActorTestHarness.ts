@@ -168,6 +168,7 @@ export const makeWatchActorTestHarness = Effect.fn('makeWatchActorTestHarness')(
     events,
     sent,
     dependencies,
+    handleInput: actor.handleInput,
     input: submit,
     enqueue: (input: WatchActorInput) => Queue.offer(mailbox, input),
     settle,

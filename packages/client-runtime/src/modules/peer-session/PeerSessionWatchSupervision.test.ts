@@ -187,6 +187,80 @@ describe('peer-session watch supervision', () => {
     ),
   );
 
+  it.effect('keeps room events alive after watch transport failure', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const sent: string[] = [];
+        let failWatch = false;
+        const fixture = yield* makePeerSessionTestHarness(undefined, undefined, {
+          sendDataChannelMessage: (dataChannel, message) => {
+            const label = (dataChannel.value as TestDataChannel).label;
+            sent.push(`${label}:${message}`);
+            return failWatch && label === WATCH_CONTROL_CHANNEL_LABEL
+              ? Effect.fail(new PlatformError({ operation: 'send-message', cause: 'failed' }))
+              : Effect.void;
+          },
+        });
+        yield* fixture.openRoom(bob);
+        yield* fixture.openRoomEvents();
+        yield* fixture.openWatchChannel();
+        yield* eventually(() =>
+          sent.some(
+            (message) =>
+              message.startsWith(`${WATCH_CONTROL_CHANNEL_LABEL}:`) &&
+              message.includes('"type":"hello"'),
+          ),
+        );
+        yield* fixture.receiveWatchMessage({
+          version: WATCH_PROTOCOL_VERSION,
+          type: 'hello',
+          ...capabilities,
+        });
+        yield* eventually(() =>
+          fixture.watchEvents.some(
+            (event) => event._tag === 'WatchAvailabilityChanged' && event.available,
+          ),
+        );
+        yield* fixture.actor({
+          _tag: 'WatchProposeSource',
+          source: { _tag: 'PreparedSource', value: { id: 'source' } },
+        });
+        yield* eventually(() =>
+          sent.some((message) => message.includes('"type":"watch-proposed"')),
+        );
+        const proposed = sent.find((message) => message.includes('"type":"watch-proposed"'));
+        assert.isDefined(proposed);
+        const proposal = JSON.parse(proposed.slice(proposed.indexOf(':') + 1)) as WatchMessage;
+        assert.strictEqual(proposal.type, 'watch-proposed');
+        if (proposal.type !== 'watch-proposed') return;
+        yield* fixture.receiveWatchMessage({
+          version: WATCH_PROTOCOL_VERSION,
+          type: 'watch-ready',
+          watchSessionId: proposal.watchSessionId,
+        });
+        yield* eventually(() => fixture.operations.includes('replaceProgramTracks:set'));
+
+        failWatch = true;
+        yield* fixture.actor({ _tag: 'WatchRequestControl', control: { kind: 'play' } });
+        yield* eventually(() => fixture.localInputs.length === 1);
+        const terminated = fixture.localInputs[0];
+        assert.isDefined(terminated);
+        assert.strictEqual(terminated.reason, 'actor-failed');
+        yield* fixture.actor(terminated);
+
+        yield* fixture.sendChat('call survived watch failure');
+        assert.isTrue(
+          sent.some(
+            (message) =>
+              message.startsWith('room-events-v1:') &&
+              message.includes('call survived watch failure'),
+          ),
+        );
+        assert.include(fixture.operations, `closeDataChannel:${WATCH_CONTROL_CHANNEL_LABEL}`);
+      }),
+    ),
+  );
+
   it.effect(
     'activates answerer transceivers and seeds a late watch runtime with remote media',
     () =>

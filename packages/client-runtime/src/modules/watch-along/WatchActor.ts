@@ -21,6 +21,7 @@ import {
   WatchEventSink,
   WatchLocalCapabilities,
   WatchTransport,
+  isWatchPlatformError,
 } from './Services';
 
 interface SessionBase {
@@ -157,7 +158,7 @@ export const makeWatchActor = Effect.fnUntraced(function* (dispatch: WatchActorI
     if (state._tag !== 'Active') return;
     if (state.session.role === 'presenter') {
       yield* updatePresenter(state.session, control).pipe(
-        Effect.catch(() => reset('idle', 'source')),
+        Effect.catchIf(isWatchPlatformError, () => reset('idle', 'source')),
       );
       return;
     }
@@ -195,7 +196,7 @@ export const makeWatchActor = Effect.fnUntraced(function* (dispatch: WatchActorI
       yield* events.emit({ _tag: 'WatchProgramStreamReady', stream });
       yield* emitView();
     }).pipe(
-      Effect.catch(() =>
+      Effect.catchIf(isWatchPlatformError, () =>
         Effect.gen(function* () {
           yield* Scope.close(sourceScope, Exit.void);
           yield* Scope.close(preparing.scope, Exit.void);
@@ -205,7 +206,7 @@ export const makeWatchActor = Effect.fnUntraced(function* (dispatch: WatchActorI
             type: 'watch-failed',
             watchSessionId,
             reason: 'source',
-          }).pipe(Effect.ignore);
+          });
           state = { _tag: 'Idle' };
           yield* events.emit({ _tag: 'WatchFailed', reason: 'source' });
           yield* emitView();
@@ -289,7 +290,7 @@ export const makeWatchActor = Effect.fnUntraced(function* (dispatch: WatchActorI
           state.session.watchSessionId === message.watchSessionId
         ) {
           return yield* updatePresenter(state.session, message.control).pipe(
-            Effect.catch(() => reset('idle', 'source')),
+            Effect.catchIf(isWatchPlatformError, () => reset('idle', 'source')),
           );
         }
         return;
@@ -366,7 +367,7 @@ export const makeWatchActor = Effect.fnUntraced(function* (dispatch: WatchActorI
             version: WATCH_PROTOCOL_VERSION,
             type: 'watch-ended',
             watchSessionId: state.watchSessionId,
-          }).pipe(Effect.ignore);
+          });
           return yield* reset('idle');
         }
         return;

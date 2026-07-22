@@ -2,7 +2,7 @@ import { assert, describe, it } from '@effect/vitest';
 import { Deferred, Effect } from 'effect';
 
 import { WATCH_PROTOCOL_VERSION, WatchSessionId } from './Protocol';
-import { WatchPlatformError } from './Services';
+import { WatchPlatformError, WatchTransportError } from './Services';
 import {
   makeWatchActorTestHarness,
   preparedSource,
@@ -11,6 +11,12 @@ import {
 } from './test/WatchActorTestHarness';
 
 const sessionId = WatchSessionId.make('watch-test-01');
+
+const expectTransportFailure = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  effect.pipe(
+    Effect.flip,
+    Effect.map((error) => assert.instanceOf(error, WatchTransportError)),
+  );
 
 describe('minimal watch actor', () => {
   it.effect('presents a source and applies shared playback controls', () =>
@@ -181,6 +187,161 @@ describe('minimal watch actor', () => {
         assert.include(presenter.operations, 'cancelPreparedSource');
       }),
     ),
+  );
+
+  it.effect('propagates transport failures from every local presenter control', () =>
+    Effect.gen(function* () {
+      for (const control of [
+        { kind: 'play' },
+        { kind: 'pause' },
+        { kind: 'replay' },
+        { kind: 'eject' },
+      ] as const) {
+        const operations = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const watch = yield* makeWatchActorTestHarness();
+            yield* watch.receiveHello();
+            yield* watch.propose();
+            const proposal = watch.lastSent();
+            if (proposal?.type !== 'watch-proposed') return watch.operations;
+            yield* watch.receiveReady(proposal.watchSessionId);
+
+            watch.breakTransport();
+            yield* expectTransportFailure(watch.handleInput({ _tag: 'RequestControl', control }));
+            return watch.operations;
+          }),
+        );
+
+        assert.strictEqual(
+          operations.filter((operation) => operation === 'closeSourceScope').length,
+          1,
+          control.kind,
+        );
+      }
+    }),
+  );
+
+  it.effect('propagates transport failures from remote controls and presenter startup', () =>
+    Effect.gen(function* () {
+      const remoteControlOperations = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const watch = yield* makeWatchActorTestHarness();
+          yield* watch.receiveHello();
+          yield* watch.propose();
+          const proposal = watch.lastSent();
+          if (proposal?.type !== 'watch-proposed') return watch.operations;
+          yield* watch.receiveReady(proposal.watchSessionId);
+
+          watch.breakTransport();
+          yield* expectTransportFailure(
+            watch.handleInput({
+              _tag: 'RemoteMessage',
+              message: {
+                version: WATCH_PROTOCOL_VERSION,
+                type: 'control-requested',
+                watchSessionId: proposal.watchSessionId,
+                control: { kind: 'play' },
+              },
+            }),
+          );
+          return watch.operations;
+        }),
+      );
+      assert.strictEqual(
+        remoteControlOperations.filter((operation) => operation === 'closeSourceScope').length,
+        1,
+      );
+
+      const startupOperations = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const watch = yield* makeWatchActorTestHarness();
+          yield* watch.receiveHello();
+          yield* watch.propose();
+          const proposal = watch.lastSent();
+          if (proposal?.type !== 'watch-proposed') return watch.operations;
+
+          watch.breakTransport();
+          yield* expectTransportFailure(
+            watch.handleInput({
+              _tag: 'RemoteMessage',
+              message: {
+                version: WATCH_PROTOCOL_VERSION,
+                type: 'watch-ready',
+                watchSessionId: proposal.watchSessionId,
+              },
+            }),
+          );
+          return watch.operations;
+        }),
+      );
+      assert.strictEqual(
+        startupOperations.filter((operation) => operation === 'closeSourceScope').length,
+        1,
+      );
+    }),
+  );
+
+  it.effect('requires proposal-ready, cancellation, and startup-failure terminal delivery', () =>
+    Effect.gen(function* () {
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const watcher = yield* makeWatchActorTestHarness();
+          yield* watcher.receiveHello();
+          watcher.breakTransport();
+          yield* expectTransportFailure(
+            watcher.handleInput({
+              _tag: 'RemoteMessage',
+              message: {
+                version: WATCH_PROTOCOL_VERSION,
+                type: 'watch-proposed',
+                watchSessionId: sessionId,
+              },
+            }),
+          );
+        }),
+      );
+
+      const cancellationOperations = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const presenter = yield* makeWatchActorTestHarness();
+          yield* presenter.receiveHello();
+          yield* presenter.propose();
+          presenter.breakTransport();
+          yield* expectTransportFailure(presenter.handleInput({ _tag: 'Cancel' }));
+          return presenter.operations;
+        }),
+      );
+      assert.strictEqual(
+        cancellationOperations.filter((operation) => operation === 'cancelPreparedSource').length,
+        1,
+      );
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const startup = yield* makeWatchActorTestHarness({
+            overrides: {
+              claimSource: () =>
+                Effect.fail(new WatchPlatformError({ operation: 'claim-source', cause: 'failed' })),
+            },
+          });
+          yield* startup.receiveHello();
+          yield* startup.propose();
+          const proposal = startup.lastSent();
+          if (proposal?.type !== 'watch-proposed') return;
+          startup.breakTransport();
+          yield* expectTransportFailure(
+            startup.handleInput({
+              _tag: 'RemoteMessage',
+              message: {
+                version: WATCH_PROTOCOL_VERSION,
+                type: 'watch-ready',
+                watchSessionId: proposal.watchSessionId,
+              },
+            }),
+          );
+        }),
+      );
+    }),
   );
 
   it.effect('honors cancellation queued while a proposal becomes active', () =>
