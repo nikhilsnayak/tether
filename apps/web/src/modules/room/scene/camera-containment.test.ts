@@ -61,6 +61,16 @@ describe('camera containment', () => {
     expect(resolved).toEqual({ x: ground.maxX - 1, y: origin.y, z: origin.z });
   });
 
+  it('moves a zero-length clearance correction toward the room interior', () => {
+    const origin = { x: ground.maxX, y: 1.05, z: 0 };
+
+    expect(resolveCameraClearance(origin, origin, 1, ground, vertical)).toEqual({
+      x: ground.maxX - 1,
+      y: origin.y,
+      z: origin.z,
+    });
+  });
+
   it.each([
     ['minimum x', { x: ground.minX, y: 1.05, z: 0 }, { x: ground.minX - 1, y: 1.05, z: 0 }],
     ['maximum x', { x: ground.maxX, y: 1.05, z: 0 }, { x: ground.maxX + 1, y: 1.05, z: 0 }],

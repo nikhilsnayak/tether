@@ -73,7 +73,9 @@ export const resolveCameraClearance = (
   let z = desired.z - origin.z;
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const scale = clearance / Math.hypot(x, y, z);
+    const offsetLength = Math.hypot(x, y, z);
+    if (offsetLength < 1e-6) break;
+    const scale = clearance / offsetLength;
     const candidate = {
       x: origin.x + x * scale,
       y: origin.y + y * scale,
