@@ -60,6 +60,7 @@ export class FakeWatchVideo {
   error: MediaError | null = null;
   playCount = 0;
   pauseCount = 0;
+  loadCount = 0;
   captureCount = 0;
   removeSourceCount = 0;
   currentTimeWriteCount = 0;
@@ -104,7 +105,9 @@ export class FakeWatchVideo {
     this.paused = true;
   }
 
-  load() {}
+  load() {
+    this.loadCount++;
+  }
 
   removeAttribute(name: string) {
     if (name !== 'src') return;

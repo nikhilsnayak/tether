@@ -49,11 +49,10 @@ test.describe('high-quality renderer', () => {
       await room.createRoom(actor);
       const scene = page.getByLabel('Dusk Suite room scene');
       await expect(scene).toHaveAttribute('data-room-quality-tier', 'high');
+      // Renderer readiness is published from inside the same Suspense boundary
+      // as the lazy room scene, so the scene module has finished loading here.
       await room.expectRendererReady(actor);
       await expect(scene.locator('canvas')).toBeVisible();
-      // Allow late lazy imports to request their assets before inspecting the
-      // complete request list.
-      await page.waitForTimeout(1_000);
       expect(externalAssets).toEqual([]);
     },
   );

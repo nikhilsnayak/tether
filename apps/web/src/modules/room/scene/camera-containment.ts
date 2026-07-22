@@ -56,39 +56,22 @@ const isContained = (
   point.z >= ground.minZ &&
   point.z <= ground.maxZ;
 
-/**
- * Places the camera at the requested clearance without crossing a room bound.
- * Blocked direction components are discarded so the camera slides along a
- * wall. A fully blocked direction falls back toward the room interior.
- */
-export const resolveCameraClearance = (
-  origin: CameraPoint,
-  desired: CameraPoint,
-  clearance: number,
+const slideAlongBlockedBounds = (
+  direction: CameraPoint,
+  candidate: CameraPoint,
   ground: GroundBounds,
   vertical: CameraVerticalBounds,
+): CameraPoint => ({
+  x: candidate.x < ground.minX || candidate.x > ground.maxX ? 0 : direction.x,
+  y: candidate.y < vertical.minY || candidate.y > vertical.maxY ? 0 : direction.y,
+  z: candidate.z < ground.minZ || candidate.z > ground.maxZ ? 0 : direction.z,
+});
+
+const resolveInwardClearance = (
+  origin: CameraPoint,
+  clearance: number,
+  ground: GroundBounds,
 ): CameraPoint => {
-  let x = desired.x - origin.x;
-  let y = desired.y - origin.y;
-  let z = desired.z - origin.z;
-
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const offsetLength = Math.hypot(x, y, z);
-    if (offsetLength < 1e-6) break;
-    const scale = clearance / offsetLength;
-    const candidate = {
-      x: origin.x + x * scale,
-      y: origin.y + y * scale,
-      z: origin.z + z * scale,
-    };
-    if (isContained(candidate, ground, vertical)) return candidate;
-
-    if (candidate.x < ground.minX || candidate.x > ground.maxX) x = 0;
-    if (candidate.y < vertical.minY || candidate.y > vertical.maxY) y = 0;
-    if (candidate.z < ground.minZ || candidate.z > ground.maxZ) z = 0;
-    if (x === 0 && y === 0 && z === 0) break;
-  }
-
   const inwardX =
     origin.x - ground.minX > ground.maxX - origin.x
       ? ground.minX - origin.x
@@ -108,4 +91,38 @@ export const resolveCameraClearance = (
         y: origin.y,
         z: origin.z + Math.sign(inwardZ) * Math.min(clearance, Math.abs(inwardZ)),
       };
+};
+
+/**
+ * Places the camera at the requested clearance without crossing a room bound.
+ * Blocked direction components are discarded so the camera slides along a
+ * wall. A fully blocked direction falls back toward the room interior.
+ */
+export const resolveCameraClearance = (
+  origin: CameraPoint,
+  desired: CameraPoint,
+  clearance: number,
+  ground: GroundBounds,
+  vertical: CameraVerticalBounds,
+): CameraPoint => {
+  let direction = {
+    x: desired.x - origin.x,
+    y: desired.y - origin.y,
+    z: desired.z - origin.z,
+  };
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const offsetLength = Math.hypot(direction.x, direction.y, direction.z);
+    if (offsetLength < 1e-6) break;
+    const scale = clearance / offsetLength;
+    const candidate = {
+      x: origin.x + direction.x * scale,
+      y: origin.y + direction.y * scale,
+      z: origin.z + direction.z * scale,
+    };
+    if (isContained(candidate, ground, vertical)) return candidate;
+    direction = slideAlongBlockedBounds(direction, candidate, ground, vertical);
+  }
+
+  return resolveInwardClearance(origin, clearance, ground);
 };

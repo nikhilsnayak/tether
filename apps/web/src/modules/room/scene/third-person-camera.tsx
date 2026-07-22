@@ -98,6 +98,26 @@ export function ThirdPersonCamera({
   useEffect(() => {
     const element = surfaceRef.current;
     if (element === null) return;
+    const handlePinchMove = (event: PointerEvent): boolean => {
+      if (event.pointerType !== 'touch' || !touchPointers.current.has(event.pointerId)) {
+        return false;
+      }
+      touchPointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (touchPointers.current.size < 2) return false;
+      const [first, second] = [...touchPointers.current.values()];
+      if (first === undefined || second === undefined) return true;
+      const nextDistance = Math.hypot(first.x - second.x, first.y - second.y);
+      if (pinchDistance.current !== null) {
+        if (Math.abs(nextDistance - pinchDistance.current) >= 1) releaseWatchFraming();
+        distance.current = MathUtils.clamp(
+          distance.current - (nextDistance - pinchDistance.current) * 0.012,
+          template.gameplay.camera.minimumDistance,
+          template.gameplay.camera.maximumDistance,
+        );
+      }
+      pinchDistance.current = nextDistance;
+      return true;
+    };
     const pointerDown = (event: PointerEvent) => {
       if ((event.target as Element).closest('[data-room-scene-ignore-gesture]') !== null) return;
       if (event.pointerType === 'touch') {
@@ -116,27 +136,7 @@ export function ThirdPersonCamera({
       element.setPointerCapture(event.pointerId);
     };
     const pointerMove = (event: PointerEvent) => {
-      if (event.pointerType === 'touch' && touchPointers.current.has(event.pointerId)) {
-        touchPointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
-        if (touchPointers.current.size >= 2) {
-          const [first, second] = [...touchPointers.current.values()];
-          if (first !== undefined && second !== undefined) {
-            const nextDistance = Math.hypot(first.x - second.x, first.y - second.y);
-            if (pinchDistance.current !== null) {
-              if (Math.abs(nextDistance - pinchDistance.current) >= 1) {
-                releaseWatchFraming();
-              }
-              distance.current = MathUtils.clamp(
-                distance.current - (nextDistance - pinchDistance.current) * 0.012,
-                template.gameplay.camera.minimumDistance,
-                template.gameplay.camera.maximumDistance,
-              );
-            }
-            pinchDistance.current = nextDistance;
-          }
-          return;
-        }
-      }
+      if (handlePinchMove(event)) return;
       const current = drag.current;
       if (current === null || current.pointerId !== event.pointerId) return;
       if (Math.hypot(event.clientX - current.x, event.clientY - current.y) >= 1) {

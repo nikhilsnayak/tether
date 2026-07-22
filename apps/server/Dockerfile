@@ -4,7 +4,7 @@ WORKDIR /app
 
 FROM base AS pruner
 
-RUN bun install --global turbo@2.10.0
+RUN bun install --global --ignore-scripts turbo@2.10.0
 
 COPY . .
 

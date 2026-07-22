@@ -86,12 +86,14 @@ describe('web watch source', () => {
       video.muted = false;
       const fixture = yield* makeWatchSourceTestFixture(video);
       assert.strictEqual(fixture.video.captureCount, 1);
+      assert.strictEqual(fixture.video.loadCount, 1);
       assert.isTrue(fixture.video.muted);
       assert.strictEqual(fixture.stream.videoTrack?.contentHint, 'detail');
 
       yield* Effect.promise(fixture.prepared.cancel);
       yield* Effect.promise(fixture.prepared.cancel);
       assert.deepStrictEqual(fixture.revoked, ['blob:watch-source']);
+      assert.strictEqual(fixture.video.loadCount, 2);
       assert.strictEqual(fixture.stream.videoTrack?.stopCount, 1);
       assert.strictEqual(fixture.stream.audioTrack?.stopCount, 1);
     });

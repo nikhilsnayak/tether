@@ -34,10 +34,7 @@ export function RoomExperienceProvider({
 }) {
   const [binding] = useState(makePeerSessionControllerBinding);
   const active = useSyncExternalStore(binding.subscribe, binding.getSnapshot);
+  const value = { active, binding, entryStage, watchAlongEnabled };
 
-  return (
-    <RoomExperienceContext value={{ active, binding, entryStage, watchAlongEnabled }}>
-      {children}
-    </RoomExperienceContext>
-  );
+  return <RoomExperienceContext value={value}>{children}</RoomExperienceContext>;
 }
