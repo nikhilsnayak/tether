@@ -190,7 +190,7 @@ describe('avatar motion', () => {
     ).toBe(false);
   });
 
-  it('sends turning-in-place yaw changes at the normal cadence', () => {
+  it('sends an idle yaw correction at the normal cadence', () => {
     const idle = { x: 0, z: 0, yaw: 0, action: 'idle' } as const;
     const turned = { ...idle, yaw: 0.25 };
 

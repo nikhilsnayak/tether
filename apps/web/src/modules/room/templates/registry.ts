@@ -51,7 +51,7 @@ export const DUSK_SUITE_TEMPLATE: RoomTemplate = {
   scene: lazy(loadDuskSuiteScene),
   gameplay: {
     walkableBounds: { minX: -4.35, maxX: 4.35, minZ: -3.35, maxZ: 4.35 },
-    // Dusk Suite's display console and doorway sit beyond the walkable center bounds.
+    // Dusk Suite's wall display and doorway sit beyond the walkable center bounds.
     obstacles: [],
     spawns: {
       host: { x: -1.25, z: 0.8, yaw: Math.PI / 2 },

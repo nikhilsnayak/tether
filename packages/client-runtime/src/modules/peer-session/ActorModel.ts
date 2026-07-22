@@ -62,8 +62,8 @@ export type PeerSessionActorState =
       readonly iceGatheringComplete: boolean;
       readonly dataChannelState: DataChannelState;
       /**
-       * The watch-control channel handle once provisioned; open/close semantics
-       * belong to the watch actor. Present only when watch-along is enabled.
+       * Generation-scoped watch-control transport. The peer session owns its
+       * lifecycle while the supervised watch runtime owns payload semantics.
        */
       readonly watchChannel: DataChannelHandle | null;
       /** Stream assembled from the generation's reserved remote transceivers. */

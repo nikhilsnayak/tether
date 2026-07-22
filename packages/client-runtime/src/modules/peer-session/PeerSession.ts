@@ -287,9 +287,9 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       Scope.provide(generation.scope),
     );
 
-  // The offerer opens the watch-control channel alongside room-events when the
-  // template enables watch-along. Its open/close/message events are ignored
-  // until plan 006 supervises the watch actor; this only provisions transport.
+  // The offerer provisions watch control beside room events. Once opened, the
+  // generation supervises a watch runtime over this channel and its reserved
+  // program transceivers.
   const openWatchChannelIfEnabled = Effect.fnUntraced(function* (
     generation: PeerConnectionGeneration,
   ) {
@@ -714,9 +714,9 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       return;
     }
 
-    // The watch-control channel is a parallel handle; accepting it never
-    // touches the room-events DataChannelState. Its events are ignored until
-    // plan 006 supervises the watch actor.
+    // Watch control is a parallel, generation-scoped handle. Accepting it does
+    // not alter the room-events DataChannelState; opening it starts the
+    // supervised watch runtime through the ordinary channel event path.
     if (
       label === WATCH_CONTROL_CHANNEL_LABEL &&
       memory.watch.isEnabled() &&
