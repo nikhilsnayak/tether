@@ -296,7 +296,8 @@ export const makeWatchActor = Effect.fnUntraced(function* (dispatch: WatchActorI
       case 'watch-ended':
       case 'watch-failed':
         if (
-          (state._tag === 'Awaiting' && state.watchSessionId === message.watchSessionId) ||
+          ((state._tag === 'Preparing' || state._tag === 'Awaiting') &&
+            state.watchSessionId === message.watchSessionId) ||
           (state._tag === 'Active' && state.session.watchSessionId === message.watchSessionId)
         ) {
           return yield* reset('idle', message.type === 'watch-failed' ? message.reason : undefined);

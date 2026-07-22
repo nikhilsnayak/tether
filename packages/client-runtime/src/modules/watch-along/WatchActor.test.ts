@@ -159,6 +159,30 @@ describe('minimal watch actor', () => {
     ),
   );
 
+  it.effect('releases local preparation when the awaiting watcher cancels', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const presenter = yield* makeWatchActorTestHarness();
+        const watcher = yield* makeWatchActorTestHarness();
+        yield* presenter.receiveHello();
+        yield* watcher.receiveHello();
+        yield* presenter.propose();
+        const proposal = presenter.lastSent();
+        if (proposal?.type !== 'watch-proposed') return;
+
+        yield* watcher.peerProposes(proposal.watchSessionId);
+        yield* watcher.cancel();
+        const ended = watcher.lastSent();
+        if (ended?.type !== 'watch-ended') return;
+        yield* presenter.receive(ended);
+
+        assert.strictEqual(watcher.lastView()?.status, 'idle');
+        assert.strictEqual(presenter.lastView()?.status, 'idle');
+        assert.include(presenter.operations, 'cancelPreparedSource');
+      }),
+    ),
+  );
+
   it.effect('honors cancellation queued while a proposal becomes active', () =>
     Effect.scoped(
       Effect.gen(function* () {
