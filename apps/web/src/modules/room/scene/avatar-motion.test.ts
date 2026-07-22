@@ -80,7 +80,9 @@ describe('avatar motion', () => {
       0.05,
       config,
     );
-    expect(strafe).toMatchObject({ x: 0.1, z: 0, action: 'walk' });
+    expect(strafe).toMatchObject({ x: -0.1, z: 0, action: 'walk' });
+    expect(strafe.yaw).toBeLessThan(0);
+    expect(strafe.yaw).toBeGreaterThan(-Math.PI / 2);
   });
 
   it('normalizes diagonal input to the configured movement speed', () => {
