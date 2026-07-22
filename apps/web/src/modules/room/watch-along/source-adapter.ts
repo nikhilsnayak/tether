@@ -112,8 +112,7 @@ const acquireWatchSource = Effect.fn('acquireWatchSource')(function* (
   yield* trySource('prepare', () => {
     element.preload = 'auto';
     element.playsInline = true;
-    element.muted = false;
-    element.volume = 1;
+    element.muted = true;
   });
   if (file.type !== '' && element.canPlayType(file.type) === '') {
     return yield* sourceError('prepare', `Unsupported media type: ${file.type}`);

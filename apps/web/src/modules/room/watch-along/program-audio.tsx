@@ -1,5 +1,5 @@
 import { useAtomValue } from '@effect/atom-react';
-import { watchProgramStreamAtom, watchViewAtom } from '@tether/client-runtime/modules/watch-along';
+import { watchProgramStreamAtom } from '@tether/client-runtime/modules/watch-along';
 import { useEffect, useRef } from 'react';
 
 import { attachAudioStream, setAudioSink } from '../components/audio-element';
@@ -8,11 +8,9 @@ import { programMediaStreamValue } from './platform';
 
 export function ProgramAudio() {
   const streamHandle = useAtomValue(watchProgramStreamAtom);
-  const view = useAtomValue(watchViewAtom);
   const { preferences } = useProgramAudioPreferences();
   const audioRef = useRef<HTMLAudioElement>(null);
-  const stream =
-    view.role === 'watcher' && streamHandle !== null ? programMediaStreamValue(streamHandle) : null;
+  const stream = streamHandle !== null ? programMediaStreamValue(streamHandle) : null;
 
   useEffect(() => {
     const element = audioRef.current;

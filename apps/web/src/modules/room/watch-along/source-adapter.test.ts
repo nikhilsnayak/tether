@@ -78,8 +78,11 @@ describe('web watch source', () => {
   it.effect('captures one audio/video stream and releases it once', () => {
     installMediaReadyConstant();
     return Effect.gen(function* () {
-      const fixture = yield* makeWatchSourceTestFixture();
+      const video = new FakeWatchVideo();
+      video.muted = false;
+      const fixture = yield* makeWatchSourceTestFixture(video);
       assert.strictEqual(fixture.video.captureCount, 1);
+      assert.isTrue(fixture.video.muted);
       assert.strictEqual(fixture.stream.videoTrack?.contentHint, 'detail');
 
       yield* Effect.promise(fixture.prepared.cancel);
