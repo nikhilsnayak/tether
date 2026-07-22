@@ -171,6 +171,12 @@ export function ThirdPersonCamera({
       template.gameplay.camera.height + Math.sin(orbit.current.pitch) * distance.current,
       followed.current.z - Math.cos(yaw) * horizontalDistance,
     );
+    avatarOrigin.current.set(
+      poseRef.current.x,
+      template.gameplay.camera.targetHeight,
+      poseRef.current.z,
+    );
+    cameraOffset.current.copy(desiredPosition.current).sub(avatarOrigin.current);
     cameraOrigin.current.set(
       followed.current.x,
       template.gameplay.camera.targetHeight,
@@ -186,15 +192,9 @@ export function ThirdPersonCamera({
       .sub(cameraOrigin.current)
       .multiplyScalar(containmentScale)
       .add(cameraOrigin.current);
-    camera.position.lerp(desiredPosition.current, followAlpha);
-    avatarOrigin.current.set(
-      poseRef.current.x,
-      template.gameplay.camera.targetHeight,
-      poseRef.current.z,
-    );
-    cameraOffset.current.copy(camera.position).sub(avatarOrigin.current);
-    if (cameraOffset.current.lengthSq() < CAMERA_AVATAR_CLEARANCE ** 2) {
-      if (cameraOffset.current.lengthSq() < 1e-6) {
+    const targetDistanceSq = desiredPosition.current.distanceToSquared(avatarOrigin.current);
+    if (targetDistanceSq < CAMERA_AVATAR_CLEARANCE ** 2) {
+      if (targetDistanceSq >= 1e-6) {
         cameraOffset.current.copy(desiredPosition.current).sub(avatarOrigin.current);
       }
       desiredPosition.current.copy(avatarOrigin.current).add(cameraOffset.current);
@@ -205,8 +205,9 @@ export function ThirdPersonCamera({
         template.gameplay.walkableBounds,
         CAMERA_VERTICAL_BOUNDS,
       );
-      camera.position.set(clearancePosition.x, clearancePosition.y, clearancePosition.z);
+      desiredPosition.current.set(clearancePosition.x, clearancePosition.y, clearancePosition.z);
     }
+    camera.position.lerp(desiredPosition.current, followAlpha);
     target.current.copy(cameraOrigin.current);
     camera.lookAt(target.current);
     const nowMs = performance.now();
