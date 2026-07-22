@@ -118,6 +118,16 @@ export const makeWatchActor = Effect.fnUntraced(function* (dispatch: WatchActorI
     yield* emitView();
   });
 
+  const failPresenter = Effect.fnUntraced(function* (session: PresenterSession) {
+    yield* send({
+      version: WATCH_PROTOCOL_VERSION,
+      type: 'watch-failed',
+      watchSessionId: session.watchSessionId,
+      reason: 'source',
+    });
+    yield* reset('idle');
+  });
+
   const updatePresenter = Effect.fnUntraced(function* (
     session: PresenterSession,
     control: WatchControlCommand,
@@ -146,8 +156,9 @@ export const makeWatchActor = Effect.fnUntraced(function* (dispatch: WatchActorI
   const requestControl = Effect.fnUntraced(function* (control: WatchControlCommand) {
     if (state._tag !== 'Active') return;
     if (state.session.role === 'presenter') {
-      yield* updatePresenter(state.session, control).pipe(
-        Effect.catchIf(isWatchPlatformError, () => reset('idle')),
+      const session = state.session;
+      yield* updatePresenter(session, control).pipe(
+        Effect.catchIf(isWatchPlatformError, () => failPresenter(session)),
       );
       return;
     }
@@ -276,8 +287,9 @@ export const makeWatchActor = Effect.fnUntraced(function* (dispatch: WatchActorI
           state.session.role === 'presenter' &&
           state.session.watchSessionId === message.watchSessionId
         ) {
-          return yield* updatePresenter(state.session, message.control).pipe(
-            Effect.catchIf(isWatchPlatformError, () => reset('idle')),
+          const session = state.session;
+          return yield* updatePresenter(session, message.control).pipe(
+            Effect.catchIf(isWatchPlatformError, () => failPresenter(session)),
           );
         }
         return;

@@ -532,8 +532,26 @@ describe('minimal watch actor', () => {
         const localProposal = localControl.lastSent();
         if (localProposal?.type !== 'watch-proposed') return;
         yield* localControl.receiveReady(localProposal.watchSessionId);
+
+        const watcher = yield* makeWatchActorTestHarness();
+        yield* watcher.receiveHello();
+        yield* watcher.peerProposes(localProposal.watchSessionId);
+        yield* watcher.receiveCanonical(localProposal.watchSessionId, {
+          status: 'loaded-paused',
+        });
+
         yield* localControl.requestControl({ kind: 'play' });
         assert.strictEqual(localControl.lastView()?.status, 'idle');
+        const localFailure = localControl.lastSent();
+        assert.deepStrictEqual(localFailure, {
+          version: WATCH_PROTOCOL_VERSION,
+          type: 'watch-failed',
+          watchSessionId: localProposal.watchSessionId,
+          reason: 'source',
+        });
+        if (localFailure?.type !== 'watch-failed') return;
+        yield* watcher.receive(localFailure);
+        assert.strictEqual(watcher.lastView()?.status, 'idle');
 
         const remoteControl = yield* makeWatchActorTestHarness({
           overrides: {
@@ -552,6 +570,12 @@ describe('minimal watch actor', () => {
           control: { kind: 'play' },
         });
         assert.strictEqual(remoteControl.lastView()?.status, 'idle');
+        assert.deepStrictEqual(remoteControl.lastSent(), {
+          version: WATCH_PROTOCOL_VERSION,
+          type: 'watch-failed',
+          watchSessionId: remoteProposal.watchSessionId,
+          reason: 'source',
+        });
       }),
     ),
   );
