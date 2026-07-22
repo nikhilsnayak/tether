@@ -4,7 +4,7 @@ import { useEffect, useRef, type RefObject } from 'react';
 import { MathUtils, Vector3 } from 'three';
 
 import type { RoomTemplate } from '../templates/registry';
-import { cameraContainmentScale } from './camera-containment';
+import { cameraContainmentScale, resolveCameraClearance } from './camera-containment';
 import { clampLook, selectCameraFraming } from './config';
 
 const WORLD_UP = new Vector3(0, 1, 0);
@@ -197,18 +197,15 @@ export function ThirdPersonCamera({
       if (cameraOffset.current.lengthSq() < 0.000_001) {
         cameraOffset.current.copy(desiredPosition.current).sub(avatarOrigin.current);
       }
-      cameraOffset.current.setLength(CAMERA_AVATAR_CLEARANCE);
       desiredPosition.current.copy(avatarOrigin.current).add(cameraOffset.current);
-      const clearanceContainmentScale = cameraContainmentScale(
+      const clearancePosition = resolveCameraClearance(
         avatarOrigin.current,
         desiredPosition.current,
+        CAMERA_AVATAR_CLEARANCE,
         template.gameplay.walkableBounds,
         CAMERA_VERTICAL_BOUNDS,
       );
-      camera.position
-        .copy(cameraOffset.current)
-        .multiplyScalar(clearanceContainmentScale)
-        .add(avatarOrigin.current);
+      camera.position.set(clearancePosition.x, clearancePosition.y, clearancePosition.z);
     }
     target.current.copy(cameraOrigin.current);
     camera.lookAt(target.current);
