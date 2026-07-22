@@ -5,7 +5,6 @@ import type { ReactNode } from 'react';
 import type { RoomEntryState } from '../entry/room-entry-state';
 import { RoomScene } from '../scene/room-scene';
 import type { RoomTemplate } from '../templates/registry';
-import { WatchPanel } from '../watch-along/watch-panel';
 import { RoomExperienceProvider } from './room-experience-context';
 
 type RoomExperienceProps = {
@@ -21,11 +20,13 @@ type RoomExperienceProps = {
 export function RoomExperience({ session, template, entryStage, children }: RoomExperienceProps) {
   return (
     <RegistryProvider>
-      <RoomExperienceProvider entryStage={entryStage}>
+      <RoomExperienceProvider
+        entryStage={entryStage}
+        watchAlongEnabled={template.watchAlong !== undefined}
+      >
         <div className='relative min-h-svh overflow-hidden'>
           <RoomScene template={template} sessionIntent={session.intent} />
           {children}
-          {template.watchAlong !== undefined && <WatchPanel />}
         </div>
       </RoomExperienceProvider>
     </RegistryProvider>

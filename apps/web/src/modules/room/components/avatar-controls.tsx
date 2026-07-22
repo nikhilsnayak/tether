@@ -46,7 +46,7 @@ export function AvatarControls({
     <div
       data-room-scene-ignore-gesture
       aria-label='Avatar controls'
-      className='absolute bottom-24 left-3 z-20 hidden grid-cols-3 gap-1 sm:bottom-28 sm:left-4 [@media(pointer:coarse)]:grid'
+      className='absolute bottom-32 left-3 z-20 hidden grid-cols-3 gap-1 sm:bottom-28 sm:left-4 [@media(pointer:coarse)]:grid'
       // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role
       role='group'
     >

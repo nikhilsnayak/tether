@@ -5,9 +5,11 @@ import { MessageSquare, PhoneOff } from 'lucide-react';
 import { useState } from 'react';
 
 import type { QualityPreference } from '../scene/config';
+import { WatchPanel } from '../watch-along/watch-panel';
 import { AudioOutputControl } from './audio-output-control';
 import { CallControlButton, MediaToggleControls } from './call-controls';
 import { ChatDrawer } from './chat-drawer';
+import { useRoomExperience } from './room-experience-context';
 import { RoomQualityControl } from './room-quality-control';
 
 export function CallControlsToolbar({
@@ -29,6 +31,7 @@ export function CallControlsToolbar({
   readonly onSendMessage: (message: string) => boolean;
   readonly onLeave: () => void;
 }) {
+  const { watchAlongEnabled } = useRoomExperience();
   const view = useAtomValue(peerSessionViewAtom);
   const [chatOpen, setChatOpen] = useState(false);
   const [readCount, setReadCount] = useState(view.messages.length);
@@ -44,7 +47,7 @@ export function CallControlsToolbar({
         data-room-scene-ignore-gesture
         className={cn(
           'border-border/80 bg-background/75 absolute bottom-2 left-1/2 z-20 grid max-w-[calc(100%-1rem)] -translate-x-1/2 gap-1 rounded-2xl border p-1.5 shadow-2xl ring-1 ring-white/10 backdrop-blur-xl sm:bottom-4 sm:gap-2 sm:p-2',
-          'grid-cols-6',
+          watchAlongEnabled ? 'grid-cols-4 sm:grid-cols-7' : 'grid-cols-3 sm:grid-cols-6',
         )}
       >
         <MediaToggleControls
@@ -55,6 +58,7 @@ export function CallControlsToolbar({
         />
         <AudioOutputControl />
         <RoomQualityControl preference={qualityPreference} onChange={onQualityChange} />
+        {watchAlongEnabled && <WatchPanel />}
         <CallControlButton
           label={hasUnread ? 'Open chat (unread messages)' : 'Open chat'}
           caption='chat'

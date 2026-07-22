@@ -10,6 +10,7 @@ interface RoomExperienceContextValue {
   readonly active: boolean;
   readonly binding: PeerSessionControllerBinding;
   readonly entryStage: RoomEntryState['_tag'];
+  readonly watchAlongEnabled: boolean;
 }
 
 const RoomExperienceContext = createContext<RoomExperienceContextValue | null>(null);
@@ -24,16 +25,18 @@ export function useRoomExperience(): RoomExperienceContextValue {
 
 export function RoomExperienceProvider({
   entryStage,
+  watchAlongEnabled,
   children,
 }: {
   readonly entryStage: RoomEntryState['_tag'];
+  readonly watchAlongEnabled: boolean;
   readonly children: ReactNode;
 }) {
   const [binding] = useState(makePeerSessionControllerBinding);
   const active = useSyncExternalStore(binding.subscribe, binding.getSnapshot);
 
   return (
-    <RoomExperienceContext value={{ active, binding, entryStage }}>
+    <RoomExperienceContext value={{ active, binding, entryStage, watchAlongEnabled }}>
       {children}
     </RoomExperienceContext>
   );

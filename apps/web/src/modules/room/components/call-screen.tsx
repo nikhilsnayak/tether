@@ -239,7 +239,7 @@ export function CallScreen({
         </div>
         <div
           ref={selfPreviewBoundaryRef}
-          className='pointer-events-none absolute inset-x-4 top-16 bottom-24'
+          className='pointer-events-none absolute inset-x-4 top-16 bottom-32 sm:bottom-24'
         >
           <div className='pointer-events-auto'>
             <DraggableMediaTile
