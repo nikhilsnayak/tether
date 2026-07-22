@@ -334,7 +334,7 @@ export const makeWatchActor = Effect.fnUntraced(function* (dispatch: WatchActorI
         return yield* reset('unavailable');
       case 'RemoteMessage':
         return yield* handleRemote(input.message);
-      case 'ProposeLocalSource':
+      case 'ProposeLocalSource': {
         if (state._tag !== 'Idle' || !capabilities.canPresentLocalFile) {
           return yield* platform.cancelPreparedSource(input.source).pipe(Effect.ignore);
         }
@@ -355,6 +355,7 @@ export const makeWatchActor = Effect.fnUntraced(function* (dispatch: WatchActorI
           watchSessionId: state.watchSessionId,
         });
         return yield* emitView();
+      }
       case 'RequestControl':
         return yield* requestControl(input.control);
       case 'Cancel':

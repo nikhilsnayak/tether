@@ -523,7 +523,7 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
     const channels = dataChannels.filter(
       (candidate) => (candidate.value as TestDataChannel).label === WATCH_CONTROL_CHANNEL_LABEL,
     );
-    const channel = channels[channels.length - 1];
+    const channel = channels.at(-1);
     if (channel === undefined) throw new Error('Watch channel has not been provisioned');
     return channel;
   };

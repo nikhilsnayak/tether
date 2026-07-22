@@ -135,6 +135,101 @@ export function ThirdPersonCamera({
     };
   }, [outside, surfaceRef, template]);
 
+  const updateOutsideCamera = (delta: number, framing: ReturnType<typeof selectCameraFraming>) => {
+    // Outside the room the guest may only glance around within tight bounds so
+    // they cannot rotate the view to peek inside before being admitted.
+    outsideLook.current = clampLook(
+      outsideLook.current.yaw,
+      outsideLook.current.pitch,
+      template.camera.look,
+    );
+    desiredPosition.current.set(...framing.position);
+    camera.position.lerp(desiredPosition.current, reducedMotion ? 1 : 1 - Math.exp(-delta * 6));
+    lookDirection.current
+      .set(...framing.target)
+      .sub(desiredPosition.current)
+      .normalize()
+      .applyAxisAngle(WORLD_UP, outsideLook.current.yaw);
+    lookRight.current.crossVectors(lookDirection.current, WORLD_UP).normalize();
+    lookDirection.current.applyAxisAngle(lookRight.current, outsideLook.current.pitch);
+    target.current.copy(desiredPosition.current).add(lookDirection.current);
+    camera.lookAt(target.current);
+  };
+
+  const updateInsideCamera = (delta: number) => {
+    if (wasOutside.current) orbit.current = { yaw: poseRef.current.yaw, pitch: 0 };
+    cameraYawRef.current = orbit.current.yaw;
+    const followAlpha = reducedMotion
+      ? 1
+      : 1 - Math.exp(-delta / template.gameplay.camera.followSeconds);
+    desiredFollow.current.set(poseRef.current.x, 0, poseRef.current.z);
+    followed.current.lerp(desiredFollow.current, followAlpha);
+    const yaw = orbit.current.yaw;
+    const horizontalDistance = distance.current * Math.cos(orbit.current.pitch);
+    desiredPosition.current.set(
+      followed.current.x - Math.sin(yaw) * horizontalDistance,
+      template.gameplay.camera.height + Math.sin(orbit.current.pitch) * distance.current,
+      followed.current.z - Math.cos(yaw) * horizontalDistance,
+    );
+    cameraOrigin.current.set(
+      followed.current.x,
+      template.gameplay.camera.targetHeight,
+      followed.current.z,
+    );
+    const containmentScale = cameraContainmentScale(
+      cameraOrigin.current,
+      desiredPosition.current,
+      template.gameplay.walkableBounds,
+      CAMERA_VERTICAL_BOUNDS,
+    );
+    desiredPosition.current
+      .sub(cameraOrigin.current)
+      .multiplyScalar(containmentScale)
+      .add(cameraOrigin.current);
+    camera.position.lerp(desiredPosition.current, followAlpha);
+    avatarOrigin.current.set(
+      poseRef.current.x,
+      template.gameplay.camera.targetHeight,
+      poseRef.current.z,
+    );
+    cameraOffset.current.copy(camera.position).sub(avatarOrigin.current);
+    if (cameraOffset.current.lengthSq() < CAMERA_AVATAR_CLEARANCE ** 2) {
+      if (cameraOffset.current.lengthSq() < 0.000_001) {
+        cameraOffset.current.copy(desiredPosition.current).sub(avatarOrigin.current);
+      }
+      cameraOffset.current.setLength(CAMERA_AVATAR_CLEARANCE);
+      desiredPosition.current.copy(avatarOrigin.current).add(cameraOffset.current);
+      const clearanceContainmentScale = cameraContainmentScale(
+        avatarOrigin.current,
+        desiredPosition.current,
+        template.gameplay.walkableBounds,
+        CAMERA_VERTICAL_BOUNDS,
+      );
+      camera.position
+        .copy(cameraOffset.current)
+        .multiplyScalar(clearanceContainmentScale)
+        .add(avatarOrigin.current);
+    }
+    target.current.copy(cameraOrigin.current);
+    camera.lookAt(target.current);
+    const nowMs = performance.now();
+    if (nowMs - lastDiagnosticAtMs.current >= 100 && surfaceRef.current !== null) {
+      surfaceRef.current.dataset.roomCameraDistance = camera.position
+        .distanceTo(avatarOrigin.current)
+        .toFixed(3);
+      lastDiagnosticAtMs.current = nowMs;
+    }
+  };
+
+  const updateFieldOfView = (fieldOfView: number) => {
+    if ('fov' in camera) {
+      if (camera.fov !== fieldOfView) {
+        camera.fov = fieldOfView;
+        camera.updateProjectionMatrix();
+      }
+    }
+  };
+
   useFrame((_, delta) => {
     if (previousRecenterSignal.current !== recenterSignal.current) {
       orbit.current = { yaw: poseRef.current.yaw, pitch: 0 };
@@ -143,97 +238,10 @@ export function ThirdPersonCamera({
     }
 
     const framing = selectCameraFraming(size.width, size.height, outside, template.camera);
-    if (outside) {
-      // Outside the room the guest may only glance around within tight bounds so
-      // they cannot rotate the view to peek inside before being admitted.
-      outsideLook.current = clampLook(
-        outsideLook.current.yaw,
-        outsideLook.current.pitch,
-        template.camera.look,
-      );
-      desiredPosition.current.set(...framing.position);
-      camera.position.lerp(desiredPosition.current, reducedMotion ? 1 : 1 - Math.exp(-delta * 6));
-      lookDirection.current
-        .set(...framing.target)
-        .sub(desiredPosition.current)
-        .normalize()
-        .applyAxisAngle(WORLD_UP, outsideLook.current.yaw);
-      lookRight.current.crossVectors(lookDirection.current, WORLD_UP).normalize();
-      lookDirection.current.applyAxisAngle(lookRight.current, outsideLook.current.pitch);
-      target.current.copy(desiredPosition.current).add(lookDirection.current);
-      camera.lookAt(target.current);
-    } else {
-      if (wasOutside.current) orbit.current = { yaw: poseRef.current.yaw, pitch: 0 };
-      cameraYawRef.current = orbit.current.yaw;
-      const followAlpha = reducedMotion
-        ? 1
-        : 1 - Math.exp(-delta / template.gameplay.camera.followSeconds);
-      desiredFollow.current.set(poseRef.current.x, 0, poseRef.current.z);
-      followed.current.lerp(desiredFollow.current, followAlpha);
-      const yaw = orbit.current.yaw;
-      const horizontalDistance = distance.current * Math.cos(orbit.current.pitch);
-      desiredPosition.current.set(
-        followed.current.x - Math.sin(yaw) * horizontalDistance,
-        template.gameplay.camera.height + Math.sin(orbit.current.pitch) * distance.current,
-        followed.current.z - Math.cos(yaw) * horizontalDistance,
-      );
-      cameraOrigin.current.set(
-        followed.current.x,
-        template.gameplay.camera.targetHeight,
-        followed.current.z,
-      );
-      const containmentScale = cameraContainmentScale(
-        cameraOrigin.current,
-        desiredPosition.current,
-        template.gameplay.walkableBounds,
-        CAMERA_VERTICAL_BOUNDS,
-      );
-      desiredPosition.current
-        .sub(cameraOrigin.current)
-        .multiplyScalar(containmentScale)
-        .add(cameraOrigin.current);
-      camera.position.lerp(desiredPosition.current, followAlpha);
-      avatarOrigin.current.set(
-        poseRef.current.x,
-        template.gameplay.camera.targetHeight,
-        poseRef.current.z,
-      );
-      cameraOffset.current.copy(camera.position).sub(avatarOrigin.current);
-      if (cameraOffset.current.lengthSq() < CAMERA_AVATAR_CLEARANCE ** 2) {
-        if (cameraOffset.current.lengthSq() < 0.000_001) {
-          cameraOffset.current.copy(desiredPosition.current).sub(avatarOrigin.current);
-        }
-        cameraOffset.current.setLength(CAMERA_AVATAR_CLEARANCE);
-        desiredPosition.current.copy(avatarOrigin.current).add(cameraOffset.current);
-        const clearanceContainmentScale = cameraContainmentScale(
-          avatarOrigin.current,
-          desiredPosition.current,
-          template.gameplay.walkableBounds,
-          CAMERA_VERTICAL_BOUNDS,
-        );
-        camera.position
-          .copy(cameraOffset.current)
-          .multiplyScalar(clearanceContainmentScale)
-          .add(avatarOrigin.current);
-      }
-      target.current.copy(cameraOrigin.current);
-      camera.lookAt(target.current);
-      const nowMs = performance.now();
-      if (nowMs - lastDiagnosticAtMs.current >= 100 && surfaceRef.current !== null) {
-        surfaceRef.current.dataset.roomCameraDistance = camera.position
-          .distanceTo(avatarOrigin.current)
-          .toFixed(3);
-        lastDiagnosticAtMs.current = nowMs;
-      }
-    }
+    if (outside) updateOutsideCamera(delta, framing);
+    else updateInsideCamera(delta);
     wasOutside.current = outside;
-    if ('fov' in camera) {
-      const fieldOfView = framing.fieldOfView;
-      if (camera.fov !== fieldOfView) {
-        camera.fov = fieldOfView;
-        camera.updateProjectionMatrix();
-      }
-    }
+    updateFieldOfView(framing.fieldOfView);
   });
 
   return null;

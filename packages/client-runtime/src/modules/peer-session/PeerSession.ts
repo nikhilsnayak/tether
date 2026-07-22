@@ -256,12 +256,14 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     // Reserve idle audio/video program slots in the initial negotiation so
     // watch-along can start later without renegotiating a detached session.
     // Templates without the capability pay no negotiation cost.
-    const programTransceivers = memory.watch.isEnabled()
-      ? yield* platform.reserveProgramTransceivers(
-          peerConnection,
-          watch.role === 'guest' ? 'offerer' : 'answerer',
-        )
-      : null;
+    let programTransceivers: ProgramTransceiverHandle | null = null;
+    if (memory.watch.isEnabled()) {
+      const negotiationRole = watch.role === 'guest' ? 'offerer' : 'answerer';
+      programTransceivers = yield* platform.reserveProgramTransceivers(
+        peerConnection,
+        negotiationRole,
+      );
+    }
 
     return { scope: connectionScope, peerConnection, programTransceivers };
   });
@@ -1054,7 +1056,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     data: unknown,
   ) {
     if (state._tag === 'PeerKnown' && state.watchChannel === dataChannel) {
-      if (state.watchRuntime === null || !state.watchRuntime.isAlive()) return;
+      if (!state.watchRuntime?.isAlive()) return;
       const decoded = decodeWatchMessage(data);
       if (Result.isFailure(decoded)) return;
       state.watchRuntime.dispatch({ _tag: 'RemoteMessage', message: decoded.success });

@@ -206,15 +206,17 @@ export const makeWatchActorTestHarness = Effect.fn('makeWatchActorTestHarness')(
         sourceDispatch(event);
         yield* settle;
       }),
-    lastSent: () => sent[sent.length - 1],
-    breakTransport: () => void (sendBroken = true),
+    lastSent: () => sent.at(-1),
+    breakTransport: () => {
+      sendBroken = true;
+    },
     sessionViews: () =>
       events.flatMap((event) => (event._tag === 'WatchSessionChanged' ? [event.view] : [])),
     lastView: () => {
       const views = events.flatMap((event) =>
         event._tag === 'WatchSessionChanged' ? [event.view] : [],
       );
-      return views[views.length - 1];
+      return views.at(-1);
     },
   };
 });
