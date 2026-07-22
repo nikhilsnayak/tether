@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { cameraClearanceScale, cameraContainmentScale } from './camera-containment';
+import { cameraContainmentScale } from './camera-containment';
 
 const ground = { minX: -4.35, maxX: 4.35, minZ: -3.35, maxZ: 4.35 };
 const vertical = { minY: 0.8, maxY: 4.2 };
@@ -48,20 +48,12 @@ describe('camera containment', () => {
     ).toBe(0);
   });
 
-  it('keeps a minimum boom when containment reaches the avatar target', () => {
+  it('keeps a clearance correction inside the room boundary', () => {
     const origin = { x: ground.maxX, y: 1.05, z: 0 };
-    const desired = { x: 6, y: 2.55, z: 0 };
-    const scale = cameraClearanceScale(origin, desired, 0, 1);
-    const distance = Math.hypot(
-      (desired.x - origin.x) * scale,
-      (desired.y - origin.y) * scale,
-      (desired.z - origin.z) * scale,
-    );
+    const clearancePosition = { x: ground.maxX + 1, y: 1.05, z: 0 };
+    const scale = cameraContainmentScale(origin, clearancePosition, ground, vertical);
+    const resolvedX = origin.x + (clearancePosition.x - origin.x) * scale;
 
-    expect(distance).toBeCloseTo(1);
-  });
-
-  it('does not expand a camera boom already within the minimum distance', () => {
-    expect(cameraClearanceScale({ x: 0, y: 1, z: 0 }, { x: 0.25, y: 1, z: 0 }, 0.5, 1)).toBe(1);
+    expect(resolvedX).toBe(ground.maxX);
   });
 });

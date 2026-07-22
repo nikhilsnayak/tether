@@ -4,7 +4,7 @@ import { useEffect, useRef, type RefObject } from 'react';
 import { MathUtils, Vector3 } from 'three';
 
 import type { RoomTemplate } from '../templates/registry';
-import { cameraClearanceScale, cameraContainmentScale } from './camera-containment';
+import { cameraContainmentScale } from './camera-containment';
 import { clampLook, selectCameraFraming } from './config';
 
 const WORLD_UP = new Vector3(0, 1, 0);
@@ -188,15 +188,9 @@ export function ThirdPersonCamera({
         template.gameplay.walkableBounds,
         CAMERA_VERTICAL_BOUNDS,
       );
-      const clearanceScale = cameraClearanceScale(
-        cameraOrigin.current,
-        desiredPosition.current,
-        containmentScale,
-        CAMERA_AVATAR_CLEARANCE,
-      );
       desiredPosition.current
         .sub(cameraOrigin.current)
-        .multiplyScalar(clearanceScale)
+        .multiplyScalar(containmentScale)
         .add(cameraOrigin.current);
       camera.position.lerp(desiredPosition.current, followAlpha);
       avatarOrigin.current.set(
@@ -210,7 +204,17 @@ export function ThirdPersonCamera({
           cameraOffset.current.copy(desiredPosition.current).sub(avatarOrigin.current);
         }
         cameraOffset.current.setLength(CAMERA_AVATAR_CLEARANCE);
-        camera.position.copy(avatarOrigin.current).add(cameraOffset.current);
+        desiredPosition.current.copy(avatarOrigin.current).add(cameraOffset.current);
+        const clearanceContainmentScale = cameraContainmentScale(
+          avatarOrigin.current,
+          desiredPosition.current,
+          template.gameplay.walkableBounds,
+          CAMERA_VERTICAL_BOUNDS,
+        );
+        camera.position
+          .copy(cameraOffset.current)
+          .multiplyScalar(clearanceContainmentScale)
+          .add(avatarOrigin.current);
       }
       target.current.copy(cameraOrigin.current);
       camera.lookAt(target.current);
