@@ -1,6 +1,6 @@
 import { useFrame, useThree } from '@react-three/fiber/webgpu';
 import type { AvatarPose } from '@tether/client-runtime/modules/peer-session';
-import { useEffect, useRef, type RefObject } from 'react';
+import { useEffect, useEffectEvent, useRef, type RefObject } from 'react';
 import { MathUtils, Matrix4, Quaternion, Vector3, type Camera } from 'three';
 
 import type { RoomTemplate } from '../templates/registry';
@@ -77,26 +77,27 @@ export function ThirdPersonCamera({
   const cameraHandoff = useRef<CameraHandoff | null>(null);
   const lastDiagnosticAtMs = useRef(0);
 
+  const releaseWatchFraming = useEffectEvent(() => {
+    if (!watchFraming || watchFramingSuppressed.current) return;
+    followed.current.set(poseRef.current.x, 0, poseRef.current.z);
+    const nextOrbit = cameraOrbitFromPosition(
+      camera.position,
+      poseRef.current,
+      template.gameplay.camera.height,
+      {
+        minimum: template.gameplay.camera.minimumDistance,
+        maximum: template.gameplay.camera.maximumDistance,
+      },
+    );
+    orbit.current = { yaw: nextOrbit.yaw, pitch: nextOrbit.pitch };
+    distance.current = nextOrbit.distance;
+    watchFramingSuppressed.current = true;
+    cameraHandoff.current = captureCameraHandoff(camera, template.camera.landscape.fieldOfView);
+  });
+
   useEffect(() => {
     const element = surfaceRef.current;
     if (element === null) return;
-    const releaseWatchFraming = () => {
-      if (!watchFraming || watchFramingSuppressed.current) return;
-      followed.current.set(poseRef.current.x, 0, poseRef.current.z);
-      const nextOrbit = cameraOrbitFromPosition(
-        camera.position,
-        poseRef.current,
-        template.gameplay.camera.height,
-        {
-          minimum: template.gameplay.camera.minimumDistance,
-          maximum: template.gameplay.camera.maximumDistance,
-        },
-      );
-      orbit.current = { yaw: nextOrbit.yaw, pitch: nextOrbit.pitch };
-      distance.current = nextOrbit.distance;
-      watchFramingSuppressed.current = true;
-      cameraHandoff.current = captureCameraHandoff(camera, template.camera.landscape.fieldOfView);
-    };
     const pointerDown = (event: PointerEvent) => {
       if ((event.target as Element).closest('[data-room-scene-ignore-gesture]') !== null) return;
       if (event.pointerType === 'touch') {
@@ -186,7 +187,7 @@ export function ThirdPersonCamera({
       element.removeEventListener('pointercancel', pointerUp);
       element.removeEventListener('wheel', wheel);
     };
-  }, [camera, outside, poseRef, surfaceRef, template, watchFraming]);
+  }, [camera, outside, poseRef, surfaceRef, template]);
 
   const lookAt = (point: Vector3, alpha: number) => {
     lookMatrix.current.lookAt(camera.position, point, camera.up);
