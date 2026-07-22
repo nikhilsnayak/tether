@@ -68,9 +68,9 @@ export function WatchPanel() {
 
   const TriggerIcon =
     view.status === 'playing'
-      ? Play
+      ? Pause
       : view.status === 'loaded-paused'
-        ? Pause
+        ? Play
         : view.status === 'preparing-local' || view.status === 'awaiting-remote-start'
           ? LoaderCircle
           : Clapperboard;
