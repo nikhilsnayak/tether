@@ -194,7 +194,7 @@ export function ThirdPersonCamera({
     );
     cameraOffset.current.copy(camera.position).sub(avatarOrigin.current);
     if (cameraOffset.current.lengthSq() < CAMERA_AVATAR_CLEARANCE ** 2) {
-      if (cameraOffset.current.lengthSq() < 0.000_001) {
+      if (cameraOffset.current.lengthSq() < 1e-6) {
         cameraOffset.current.copy(desiredPosition.current).sub(avatarOrigin.current);
       }
       desiredPosition.current.copy(avatarOrigin.current).add(cameraOffset.current);
