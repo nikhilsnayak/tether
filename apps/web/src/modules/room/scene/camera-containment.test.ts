@@ -94,4 +94,30 @@ describe('camera containment', () => {
 
     expect(resolved).toEqual({ x: ground.maxX, y: origin.y, z: 1 });
   });
+
+  it.each([
+    [
+      { minX: 0, maxX: 0.5, minZ: 0, maxZ: 0.4 },
+      { x: 0.5, y: 1.05, z: 0.4 },
+      { x: 0, y: 1.05, z: 0.4 },
+    ],
+    [
+      { minX: 0, maxX: 0.4, minZ: 0, maxZ: 0.5 },
+      { x: 0.4, y: 1.05, z: 0.5 },
+      { x: 0.4, y: 1.05, z: 0 },
+    ],
+  ] as const)(
+    'clamps fallback clearance to narrow ground bounds',
+    (narrowGround, origin, expected) => {
+      const resolved = resolveCameraClearance(
+        origin,
+        { x: origin.x + 1, y: origin.y, z: origin.z + 1 },
+        1,
+        narrowGround,
+        vertical,
+      );
+
+      expect(resolved).toEqual(expected);
+    },
+  );
 });

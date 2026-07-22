@@ -96,6 +96,14 @@ export const resolveCameraClearance = (
       ? ground.minZ - origin.z
       : ground.maxZ - origin.z;
   return Math.abs(inwardX) > Math.abs(inwardZ)
-    ? { x: origin.x + Math.sign(inwardX) * clearance, y: origin.y, z: origin.z }
-    : { x: origin.x, y: origin.y, z: origin.z + Math.sign(inwardZ) * clearance };
+    ? {
+        x: origin.x + Math.sign(inwardX) * Math.min(clearance, Math.abs(inwardX)),
+        y: origin.y,
+        z: origin.z,
+      }
+    : {
+        x: origin.x,
+        y: origin.y,
+        z: origin.z + Math.sign(inwardZ) * Math.min(clearance, Math.abs(inwardZ)),
+      };
 };
