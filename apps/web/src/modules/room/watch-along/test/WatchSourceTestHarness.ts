@@ -65,6 +65,7 @@ export class FakeWatchVideo {
   currentTimeWriteCount = 0;
   canPlay = 'probably';
   playFailure: unknown = null;
+  currentTimeFailure: unknown = null;
   captureFailure: unknown = null;
   private time = 0;
 
@@ -78,6 +79,7 @@ export class FakeWatchVideo {
 
   set currentTime(value: number) {
     this.currentTimeWriteCount++;
+    if (this.currentTimeFailure !== null) throw this.currentTimeFailure;
     this.time = value;
   }
 

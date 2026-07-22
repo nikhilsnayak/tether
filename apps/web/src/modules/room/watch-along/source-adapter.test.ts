@@ -221,12 +221,11 @@ describe('web watch source', () => {
         const source = yield* platform.claimSource(fixture.prepared.source);
         const events: WatchSourceEvent[] = [];
         yield* platform.observeSource(source, (event) => events.push(event));
-        fixture.video.emit('playing');
         fixture.video.emit('ended');
         fixture.video.emit('error');
         assert.deepStrictEqual(
           events.map((event) => event._tag),
-          ['SourcePlaying', 'SourceEnded', 'SourceFailed'],
+          ['SourceEnded', 'SourceFailed'],
         );
       }).pipe(Effect.provide(webWatchAlongPlatformLayer)),
     );
@@ -264,7 +263,7 @@ describe('web watch source', () => {
       cancel: Effect.void,
       play: Effect.fail(sourceFailure),
       pause: Effect.fail(sourceFailure),
-      seek: () => Effect.fail(sourceFailure),
+      replay: Effect.fail(sourceFailure),
       observe: () => Effect.fail(sourceFailure),
       primeFirstFrame: Effect.fail(sourceFailure),
     };
@@ -282,7 +281,7 @@ describe('web watch source', () => {
         platform.programStream(invalidClaimed).pipe(Effect.flip),
         platform.play(source).pipe(Effect.flip),
         platform.pause(source).pipe(Effect.flip),
-        platform.seek(source, 0).pipe(Effect.flip),
+        platform.replay(source).pipe(Effect.flip),
         platform.observeSource(source, () => {}).pipe(Effect.flip),
         platform.primeFirstFrame(source).pipe(Effect.flip),
         platform.attachProgramTracks({ value: {} } satisfies ProgramStreamHandle).pipe(Effect.flip),
@@ -296,7 +295,7 @@ describe('web watch source', () => {
           'program-stream',
           'play',
           'pause',
-          'seek',
+          'replay',
           'observe-source',
           'prime-first-frame',
           'attach-program-tracks',
@@ -325,20 +324,46 @@ describe('web watch source', () => {
     );
   });
 
-  it.effect('maps unavailable source duration to a seek failure', () => {
+  it.effect('replays from zero when source duration is unknown', () => {
     installMediaReadyConstant();
     const video = new FakeWatchVideo();
-    video.duration = 0;
+    video.duration = Number.NaN;
+    video.currentTime = 42;
 
     return Effect.scoped(
       Effect.gen(function* () {
         const fixture = yield* makeWatchSourceTestFixture(video);
         const platform = yield* WatchAlongPlatform;
         const source = yield* platform.claimSource(fixture.prepared.source);
-        const error = yield* platform.seek(source, 0.5).pipe(Effect.flip);
+        yield* platform.replay(source);
 
-        assert.instanceOf(error, WatchPlatformError);
-        assert.strictEqual(error.operation, 'seek');
+        assert.strictEqual(video.currentTime, 0);
+        assert.strictEqual(video.playCount, 1);
+      }).pipe(Effect.provide(webWatchAlongPlatformLayer)),
+    );
+  });
+
+  it.effect('maps replay reset and play failures to one operation', () => {
+    installMediaReadyConstant();
+    const resetFailure = new FakeWatchVideo();
+    resetFailure.currentTimeFailure = new Error('seek failed');
+    const playFailure = new FakeWatchVideo();
+    playFailure.playFailure = new Error('play failed');
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const platform = yield* WatchAlongPlatform;
+        const resetFixture = yield* makeWatchSourceTestFixture(resetFailure);
+        const resetSource = yield* platform.claimSource(resetFixture.prepared.source);
+        const resetError = yield* platform.replay(resetSource).pipe(Effect.flip);
+        const playFixture = yield* makeWatchSourceTestFixture(playFailure);
+        const playSource = yield* platform.claimSource(playFixture.prepared.source);
+        const playError = yield* platform.replay(playSource).pipe(Effect.flip);
+
+        assert.instanceOf(resetError, WatchPlatformError);
+        assert.strictEqual(resetError.operation, 'replay');
+        assert.instanceOf(playError, WatchPlatformError);
+        assert.strictEqual(playError.operation, 'replay');
       }).pipe(Effect.provide(webWatchAlongPlatformLayer)),
     );
   });

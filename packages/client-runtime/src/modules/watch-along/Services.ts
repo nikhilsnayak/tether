@@ -16,7 +16,7 @@ export type WatchPlatformOperation =
   | 'program-stream'
   | 'play'
   | 'pause'
-  | 'seek'
+  | 'replay'
   | 'observe-source'
   | 'prime-first-frame'
   | 'attach-program-tracks'
@@ -49,10 +49,7 @@ export class WatchAlongPlatform extends Context.Service<
     ) => Effect.Effect<ProgramStreamHandle, WatchPlatformError>;
     readonly play: (source: ClaimedSourceHandle) => Effect.Effect<void, WatchPlatformError>;
     readonly pause: (source: ClaimedSourceHandle) => Effect.Effect<void, WatchPlatformError>;
-    readonly seek: (
-      source: ClaimedSourceHandle,
-      progress: number,
-    ) => Effect.Effect<void, WatchPlatformError>;
+    readonly replay: (source: ClaimedSourceHandle) => Effect.Effect<void, WatchPlatformError>;
     readonly observeSource: (
       source: ClaimedSourceHandle,
       dispatch: (input: WatchSourceEvent) => void,
@@ -73,11 +70,10 @@ export class WatchLocalCapabilities extends Context.Service<
   WatchCapabilities
 >()('@tether/client-runtime/watch-along/WatchLocalCapabilities') {}
 
-/** Priority-aware `watch-control-v1` channel; exposes arbitration role only. */
+/** Serialized `watch-control-v1` message transport. */
 export class WatchTransport extends Context.Service<
   WatchTransport,
   {
-    readonly role: 'host' | 'guest';
     readonly sendDiscrete: (message: WatchMessage) => Effect.Effect<void, WatchTransportError>;
   }
 >()('@tether/client-runtime/watch-along/WatchTransport') {}

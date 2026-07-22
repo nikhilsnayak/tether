@@ -2,9 +2,8 @@ import { assert, it } from '@effect/vitest';
 import { Effect, Layer } from 'effect';
 import { AtomRegistry } from 'effect/unstable/reactivity';
 
-import type { ProgramStreamHandle, WatchSessionView } from './Model';
+import { initialWatchSessionView, type ProgramStreamHandle, type WatchSessionView } from './Model';
 import { WatchEventSink } from './Services';
-import { initialWatchSessionView } from './View';
 import { watchEventSinkLayer, watchProgramStreamAtom, watchViewAtom } from './WatchAtoms';
 
 it.effect('projects watch views and program streams into keep-alive atoms', () =>
@@ -22,10 +21,8 @@ it.effect('projects watch views and program streams into keep-alive atoms', () =
 
     yield* Effect.gen(function* () {
       const sink = yield* WatchEventSink;
-      yield* sink.emit({ _tag: 'WatchAvailabilityChanged', available: true });
       yield* sink.emit({ _tag: 'WatchSessionChanged', view });
       yield* sink.emit({ _tag: 'WatchProgramStreamReady', stream });
-      yield* sink.emit({ _tag: 'WatchFailed', reason: 'pipeline' });
       assert.deepStrictEqual(registry.get(watchViewAtom), view);
       assert.strictEqual(registry.get(watchProgramStreamAtom), stream);
 

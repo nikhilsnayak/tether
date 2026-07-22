@@ -1,5 +1,3 @@
-import type { FailureReason } from './Protocol';
-
 export interface PreparedSourceHandle {
   readonly _tag: 'PreparedSource';
   readonly value: unknown;
@@ -36,9 +34,13 @@ export interface WatchSessionView {
   readonly canPresent: boolean;
 }
 
+export const initialWatchSessionView: WatchSessionView = {
+  status: 'unavailable',
+  role: null,
+  canPresent: false,
+};
+
 export type WatchEvent =
-  | { readonly _tag: 'WatchAvailabilityChanged'; readonly available: boolean }
   | { readonly _tag: 'WatchSessionChanged'; readonly view: WatchSessionView }
   | { readonly _tag: 'WatchProgramStreamReady'; readonly stream: ProgramStreamHandle }
-  | { readonly _tag: 'WatchProgramStreamCleared' }
-  | { readonly _tag: 'WatchFailed'; readonly reason: FailureReason };
+  | { readonly _tag: 'WatchProgramStreamCleared' };

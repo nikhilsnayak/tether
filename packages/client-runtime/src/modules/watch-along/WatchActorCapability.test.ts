@@ -35,10 +35,7 @@ describe('watch actor — capability exchange', () => {
         assert.deepStrictEqual(h.events, []);
 
         yield* h.receiveHello();
-        assert.deepStrictEqual(h.events, [
-          { _tag: 'WatchAvailabilityChanged', available: true },
-          { _tag: 'WatchSessionChanged', view: idleView },
-        ]);
+        assert.deepStrictEqual(h.events, [{ _tag: 'WatchSessionChanged', view: idleView }]);
       }),
     ),
   );
@@ -114,7 +111,6 @@ describe('watch actor — capability exchange', () => {
         yield* h.closeChannel();
 
         assert.deepStrictEqual(h.events.slice(before), [
-          { _tag: 'WatchAvailabilityChanged', available: false },
           { _tag: 'WatchSessionChanged', view: unavailableView },
         ]);
       }),

@@ -1,9 +1,13 @@
 import { Effect, Layer } from 'effect';
 import { Atom, AtomRegistry } from 'effect/unstable/reactivity';
 
-import type { ProgramStreamHandle, WatchEvent, WatchSessionView } from './Model';
+import {
+  initialWatchSessionView,
+  type ProgramStreamHandle,
+  type WatchEvent,
+  type WatchSessionView,
+} from './Model';
 import { WatchEventSink } from './Services';
-import { initialWatchSessionView, reduceWatchView } from './View';
 
 export const watchViewAtom = Atom.make<WatchSessionView>(initialWatchSessionView).pipe(
   Atom.keepAlive,
@@ -20,10 +24,7 @@ const emitWatchEvent = (event: WatchEvent) => {
     case 'WatchProgramStreamCleared':
       return Atom.update(watchProgramStreamAtom, () => null);
     case 'WatchSessionChanged':
-      return Atom.update(watchViewAtom, (view) => reduceWatchView(view, event));
-    case 'WatchAvailabilityChanged':
-    case 'WatchFailed':
-      return Effect.void;
+      return Atom.update(watchViewAtom, () => event.view);
   }
 };
 

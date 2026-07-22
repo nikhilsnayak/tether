@@ -7,7 +7,7 @@ import type {
 import { Data, Effect, Exit, Scope } from 'effect';
 
 export class WebWatchSourceError extends Data.TaggedError('WebWatchSourceError')<{
-  readonly operation: 'prepare' | 'claim' | 'play' | 'pause' | 'seek' | 'observe' | 'prime';
+  readonly operation: 'prepare' | 'claim' | 'play' | 'pause' | 'replay' | 'observe' | 'prime';
   readonly cause: unknown;
 }> {}
 
@@ -79,7 +79,7 @@ export interface WebWatchSourceResource {
   readonly cancel: Effect.Effect<void>;
   readonly play: Effect.Effect<void, WebWatchSourceError>;
   readonly pause: Effect.Effect<void, WebWatchSourceError>;
-  readonly seek: (progress: number) => Effect.Effect<void, WebWatchSourceError>;
+  readonly replay: Effect.Effect<void, WebWatchSourceError>;
   readonly primeFirstFrame: Effect.Effect<void, WebWatchSourceError>;
   readonly observe: (
     dispatch: (input: WatchSourceEvent) => void,
@@ -154,7 +154,6 @@ const observeWatchSource = (
 ): Effect.Effect<void, WebWatchSourceError, Scope.Scope> =>
   Effect.gen(function* () {
     const listeners = [
-      ['playing', () => dispatch({ _tag: 'SourcePlaying' })],
       ['ended', () => dispatch({ _tag: 'SourceEnded' })],
       ['error', () => dispatch({ _tag: 'SourceFailed' })],
     ] as const;
@@ -207,13 +206,9 @@ export const prepareWatchSourceWith = Effect.fn('prepareWatchSourceWith')(functi
     cancel: Effect.suspend(() => (ownership === 'prepared' ? close : Effect.void)),
     play: trySourcePromise('play', () => element.play()),
     pause: trySource('pause', () => element.pause()),
-    seek: (progress) =>
-      trySource('seek', () => {
-        if (!Number.isFinite(element.duration) || element.duration <= 0) {
-          throw new Error('Source duration is unavailable');
-        }
-        element.currentTime = Math.min(1, Math.max(0, progress)) * element.duration;
-      }),
+    replay: trySource('replay', () => {
+      element.currentTime = 0;
+    }).pipe(Effect.andThen(trySourcePromise('replay', () => element.play()))),
     primeFirstFrame: trySource('prime', () => {
       element.currentTime = Number(element.currentTime);
     }),

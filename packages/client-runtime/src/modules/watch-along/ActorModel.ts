@@ -1,10 +1,7 @@
 import type { PreparedSourceHandle, ProgramStreamHandle } from './Model';
 import type { WatchControlCommand, WatchMessage } from './Protocol';
 
-export type WatchSourceEvent =
-  | { readonly _tag: 'SourcePlaying' }
-  | { readonly _tag: 'SourceEnded' }
-  | { readonly _tag: 'SourceFailed' };
+export type WatchSourceEvent = { readonly _tag: 'SourceEnded' } | { readonly _tag: 'SourceFailed' };
 
 export type WatchActorInput =
   | { readonly _tag: 'ChannelOpened' }

@@ -45,7 +45,6 @@ export const programStreamHandle: ProgramStreamHandle = { value: { id: 'program'
 export const remoteStreamHandle: ProgramStreamHandle = { value: { id: 'remote-program' } };
 
 export interface WatchHarnessOptions {
-  readonly role?: 'host' | 'guest';
   readonly capabilities?: Partial<WatchCapabilities>;
   readonly overrides?: Partial<WatchAlongPlatform['Service']>;
 }
@@ -59,7 +58,6 @@ export const hello = (capabilities: WatchCapabilities): WatchMessage => ({
 export const makeWatchActorTestHarness = Effect.fn('makeWatchActorTestHarness')(function* (
   options: WatchHarnessOptions = {},
 ) {
-  const role = options.role ?? 'host';
   const capabilities: WatchCapabilities = { ...allCapabilities, ...options.capabilities };
 
   const operations: Array<string> = [];
@@ -84,7 +82,7 @@ export const makeWatchActorTestHarness = Effect.fn('makeWatchActorTestHarness')(
       }),
     play: () => Effect.sync(() => operations.push('play')),
     pause: () => Effect.sync(() => operations.push('pause')),
-    seek: (_source, progress) => Effect.sync(() => operations.push(`seek:${progress}`)),
+    replay: () => Effect.sync(() => operations.push('replay')),
     observeSource: (_source, dispatch) =>
       Effect.acquireRelease(
         Effect.sync(() => {
@@ -101,7 +99,6 @@ export const makeWatchActorTestHarness = Effect.fn('makeWatchActorTestHarness')(
 
   let sendBroken = false;
   const transport = WatchTransport.of({
-    role,
     sendDiscrete: (message) =>
       sendBroken
         ? Effect.fail(new WatchTransportError({ cause: 'broken' }))

@@ -231,7 +231,7 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
     programStream: () => Effect.succeed({ value: { id: 'watch-program-stream' } }),
     play: () => Effect.sync(() => operations.push('watch:play')),
     pause: () => Effect.sync(() => operations.push('watch:pause')),
-    seek: () => Effect.sync(() => operations.push('watch:seek')),
+    replay: () => Effect.sync(() => operations.push('watch:replay')),
     observeSource: () => Effect.void,
     primeFirstFrame: () => Effect.void,
     attachProgramTracks: () => Effect.void,

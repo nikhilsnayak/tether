@@ -12,7 +12,7 @@ import { Effect, Exit, type Layer, Scope } from 'effect';
 export interface WatchAlongSourceFixture {
   readonly source: PreparedSourceHandle;
   readonly expectedStreamValue: unknown;
-  readonly emit: (event: 'playing' | 'ended' | 'error') => void;
+  readonly emit: (event: 'ended' | 'error') => void;
   readonly observations: {
     readonly releaseCount: () => number;
     readonly playCount: () => number;
@@ -73,18 +73,17 @@ export const describeWatchAlongPlatformContract = (
           .observeSource(claimed, (event) => events.push(event))
           .pipe(Scope.provide(sourceScope));
         yield* platform.play(claimed);
-        yield* platform.seek(claimed, 0.25);
+        yield* platform.replay(claimed);
         yield* platform.pause(claimed);
         yield* platform.primeFirstFrame(claimed);
-        fixture.emit('playing');
         fixture.emit('ended');
         fixture.emit('error');
 
         assert.deepStrictEqual(
           events.map((event) => event._tag),
-          ['SourcePlaying', 'SourceEnded', 'SourceFailed'],
+          ['SourceEnded', 'SourceFailed'],
         );
-        assert.strictEqual(fixture.observations.playCount(), 1);
+        assert.strictEqual(fixture.observations.playCount(), 2);
         assert.strictEqual(fixture.observations.pauseCount(), 1);
         assert.strictEqual(fixture.observations.primedCount(), 1);
 

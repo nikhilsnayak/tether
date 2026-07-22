@@ -62,10 +62,10 @@ export const webWatchAlongPlatform = WatchAlongPlatform.of({
       Effect.flatMap((resource) => resource.pause),
       Effect.mapError((cause) => mapSourceError('pause', cause)),
     ),
-  seek: (source, progress) =>
-    claimedResource('seek', source).pipe(
-      Effect.flatMap((resource) => resource.seek(progress)),
-      Effect.mapError((cause) => mapSourceError('seek', cause)),
+  replay: (source) =>
+    claimedResource('replay', source).pipe(
+      Effect.flatMap((resource) => resource.replay),
+      Effect.mapError((cause) => mapSourceError('replay', cause)),
     ),
   observeSource: (source, dispatch) =>
     claimedResource('observe-source', source).pipe(

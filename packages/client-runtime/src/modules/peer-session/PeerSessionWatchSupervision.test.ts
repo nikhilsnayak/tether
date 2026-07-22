@@ -44,7 +44,7 @@ const openCompatibleWatch = Effect.fnUntraced(function* (
   });
   yield* eventually(() =>
     fixture.watchEvents.some(
-      (event) => event._tag === 'WatchAvailabilityChanged' && event.available,
+      (event) => event._tag === 'WatchSessionChanged' && event.view.status === 'idle',
     ),
   );
 });
@@ -296,7 +296,7 @@ describe('peer-session watch supervision', () => {
         });
         yield* eventually(() =>
           fixture.watchEvents.some(
-            (event) => event._tag === 'WatchAvailabilityChanged' && event.available,
+            (event) => event._tag === 'WatchSessionChanged' && event.view.status === 'idle',
           ),
         );
         yield* fixture.actor({
@@ -372,7 +372,7 @@ describe('peer-session watch supervision', () => {
         });
         yield* eventually(() =>
           fixture.watchEvents.some(
-            (event) => event._tag === 'WatchAvailabilityChanged' && event.available,
+            (event) => event._tag === 'WatchSessionChanged' && event.view.status === 'idle',
           ),
         );
 
@@ -467,7 +467,7 @@ describe('peer-session watch supervision', () => {
         );
         assert.isTrue(
           fixture.watchEvents.some(
-            (event) => event._tag === 'WatchAvailabilityChanged' && !event.available,
+            (event) => event._tag === 'WatchSessionChanged' && event.view.status === 'unavailable',
           ),
         );
 
@@ -687,10 +687,12 @@ describe('peer-session watch supervision', () => {
           watchSessionId: proposal.watchSessionId,
         });
         yield* eventually(() =>
-          fixture.watchEvents.some(
-            (event) => event._tag === 'WatchFailed' && event.reason === 'source',
-          ),
+          fixture.operations.some((operation) => operation.includes('"type":"watch-failed"')),
         );
+        const view = fixture.watchEvents
+          .filter((event) => event._tag === 'WatchSessionChanged')
+          .at(-1);
+        assert.strictEqual(view?.view.status, 'idle');
       }),
     ),
   );

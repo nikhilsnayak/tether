@@ -38,9 +38,13 @@ describe('minimal watch actor', () => {
           stream: programStreamHandle,
         });
 
+        const sentBeforePlay = watch.sent.length;
+        const viewsBeforePlay = watch.sessionViews().length;
         yield* watch.requestControl({ kind: 'play' });
         assert.strictEqual(watch.lastView()?.status, 'playing');
         assert.include(watch.operations, 'play');
+        assert.strictEqual(watch.sent.length, sentBeforePlay + 1);
+        assert.strictEqual(watch.sessionViews().length, viewsBeforePlay + 1);
         yield* watch.requestControl({ kind: 'pause' });
         assert.strictEqual(watch.lastView()?.status, 'loaded-paused');
         yield* watch.requestControl({ kind: 'eject' });
@@ -53,7 +57,7 @@ describe('minimal watch actor', () => {
   it.effect('receives a remote stream and forwards controls to its presenter', () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const watch = yield* makeWatchActorTestHarness({ role: 'guest' });
+        const watch = yield* makeWatchActorTestHarness();
         yield* watch.openChannel();
         yield* watch.receiveHello();
         yield* watch.remoteStream(remoteStreamHandle, 1);
@@ -415,9 +419,12 @@ describe('minimal watch actor', () => {
         assert.strictEqual(watch.lastView()?.status, 'preparing-local');
         yield* watch.receiveReady(proposal.watchSessionId);
 
+        const sentBeforeReplay = watch.sent.length;
+        const viewsBeforeReplay = watch.sessionViews().length;
         yield* watch.requestControl({ kind: 'replay' });
-        assert.include(watch.operations, 'seek:0');
-        assert.include(watch.operations, 'play');
+        assert.include(watch.operations, 'replay');
+        assert.strictEqual(watch.sent.length, sentBeforeReplay + 1);
+        assert.strictEqual(watch.sessionViews().length, viewsBeforeReplay + 1);
         yield* watch.receive({
           version: WATCH_PROTOCOL_VERSION,
           type: 'control-requested',
@@ -433,8 +440,6 @@ describe('minimal watch actor', () => {
         });
         assert.strictEqual(watch.lastView()?.status, 'loaded-paused');
 
-        yield* watch.sourceEvent({ _tag: 'SourcePlaying' });
-        assert.strictEqual(watch.lastView()?.status, 'playing');
         yield* watch.sourceEvent({ _tag: 'SourceEnded' });
         assert.strictEqual(watch.lastView()?.status, 'ended');
         yield* watch.receiveEnded(sessionId);
@@ -476,7 +481,6 @@ describe('minimal watch actor', () => {
         assert.strictEqual(watch.lastView()?.status, 'playing');
         yield* watch.receiveFailed(sessionId, 'attachment');
         assert.strictEqual(watch.lastView()?.status, 'idle');
-        assert.deepInclude(watch.events, { _tag: 'WatchFailed', reason: 'attachment' });
       }),
     ),
   );
@@ -517,7 +521,6 @@ describe('minimal watch actor', () => {
         if (startupProposal?.type !== 'watch-proposed') return;
         yield* startup.receiveReady(startupProposal.watchSessionId);
         assert.strictEqual(startup.lastView()?.status, 'idle');
-        assert.deepInclude(startup.events, { _tag: 'WatchFailed', reason: 'source' });
 
         const localControl = yield* makeWatchActorTestHarness({
           overrides: {

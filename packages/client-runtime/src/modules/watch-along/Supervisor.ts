@@ -1,7 +1,7 @@
 import { Cause, Crypto, Deferred, Effect, Exit, Fiber, Queue, Result, Scope } from 'effect';
 
 import type { WatchActorInput } from './ActorModel';
-import type { WatchCapabilities } from './Model';
+import { initialWatchSessionView, type WatchCapabilities } from './Model';
 import { encodeWatchMessage } from './Protocol';
 import {
   WatchAlongPlatform,
@@ -11,7 +11,6 @@ import {
   WatchTransport,
   WatchTransportError,
 } from './Services';
-import { initialWatchSessionView } from './View';
 import { makeWatchActor } from './WatchActor';
 
 export type WatchRuntimeShutdownReason = 'transport-interrupted' | 'overloaded';
@@ -27,7 +26,6 @@ export interface WatchRuntime {
 }
 
 export interface StartWatchRuntimeDependencies {
-  readonly role: 'host' | 'guest';
   readonly capabilities: WatchCapabilities;
   readonly sendRaw: (payload: string) => Effect.Effect<void, unknown>;
   readonly closeWatchChannel: Effect.Effect<void, unknown>;
@@ -62,7 +60,6 @@ export const startWatchRuntime = Effect.fnUntraced(function* (deps: StartWatchRu
   let requestedTermination: WatchRuntimeShutdownReason | null = null;
 
   const transport = WatchTransport.of({
-    role: deps.role,
     sendDiscrete: (message) => {
       const encoded = encodeWatchMessage(message);
       if (Result.isFailure(encoded)) {
@@ -116,13 +113,9 @@ export const startWatchRuntime = Effect.fnUntraced(function* (deps: StartWatchRu
     yield* bestEffort(deps.clear);
     yield* bestEffort(Scope.close(actorScope, Exit.void));
     yield* bestEffort(deps.sink.emit({ _tag: 'WatchProgramStreamCleared' }));
-    yield* bestEffort(deps.sink.emit({ _tag: 'WatchAvailabilityChanged', available: false }));
     yield* bestEffort(
       deps.sink.emit({ _tag: 'WatchSessionChanged', view: initialWatchSessionView }),
     );
-    if (reason === 'actor-failed') {
-      yield* bestEffort(deps.sink.emit({ _tag: 'WatchFailed', reason: 'pipeline' }));
-    }
     if (reason !== 'generation-closed') {
       yield* bestEffort(deps.closeWatchChannel);
     }

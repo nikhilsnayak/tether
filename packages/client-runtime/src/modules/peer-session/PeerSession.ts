@@ -334,7 +334,6 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
 
     const { generation, remoteSharedStream, remoteProgramStreamVersion } = state;
     const runtime = yield* startWatchRuntime({
-      role: watch.role,
       capabilities: watch.capabilities,
       sendRaw: (payload) => platform.sendDataChannelMessage(dataChannel, payload),
       closeWatchChannel: closeDataChannel(dataChannel),

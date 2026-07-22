@@ -30,7 +30,7 @@ const platform = (operations: string[]): WatchAlongPlatform['Service'] => ({
   programStream: () => Effect.succeed({ value: 'program' }),
   play: () => Effect.sync(() => operations.push('play')),
   pause: () => Effect.sync(() => operations.push('pause')),
-  seek: () => Effect.void,
+  replay: () => Effect.void,
   observeSource: () => Effect.void,
   primeFirstFrame: () => Effect.void,
   attachProgramTracks: () => Effect.void,
@@ -52,7 +52,6 @@ describe('watch runtime', () => {
           const sent: WatchMessage[] = [];
           const terminations: string[] = [];
           const runtime = yield* startWatchRuntime({
-            role: 'host',
             capabilities,
             sendRaw: (payload) => Effect.sync(() => sent.push(JSON.parse(payload))),
             closeWatchChannel: Effect.sync(() => operations.push('close-channel')),
@@ -71,7 +70,9 @@ describe('watch runtime', () => {
             message: { version: WATCH_PROTOCOL_VERSION, type: 'hello', ...capabilities },
           });
           yield* eventually(() =>
-            events.some((event) => event._tag === 'WatchAvailabilityChanged' && event.available),
+            events.some(
+              (event) => event._tag === 'WatchSessionChanged' && event.view.status === 'idle',
+            ),
           );
           runtime.dispatch({
             _tag: 'ProposeLocalSource',
@@ -110,7 +111,6 @@ describe('watch runtime', () => {
           const operations: string[] = [];
           const events: WatchEvent[] = [];
           const runtime = yield* startWatchRuntime({
-            role: 'guest',
             capabilities,
             sendRaw: () => Effect.void,
             closeWatchChannel: Effect.sync(() => operations.push('close-channel')),
@@ -119,7 +119,7 @@ describe('watch runtime', () => {
             platform: platform(operations),
             sink: WatchEventSink.of({
               emit: (event) =>
-                event._tag === 'WatchAvailabilityChanged' && event.available
+                event._tag === 'WatchSessionChanged' && event.view.status === 'idle'
                   ? Effect.die('sink-defect')
                   : Effect.sync(() => void events.push(event)),
             }),
@@ -132,7 +132,6 @@ describe('watch runtime', () => {
           });
           yield* eventually(() => !runtime.isAlive());
           assert.include(operations, 'close-channel');
-          assert.isTrue(events.some((event) => event._tag === 'WatchFailed'));
           assert.isFalse(runtime.dispatch({ _tag: 'ChannelOpened' }));
         }),
       ),
@@ -147,7 +146,6 @@ describe('watch runtime', () => {
           const events: WatchEvent[] = [];
           const terminations: string[] = [];
           const runtime = yield* startWatchRuntime({
-            role: 'host',
             capabilities,
             sendRaw: () => Effect.void,
             closeWatchChannel: Effect.sync(() => operations.push('close-channel')),
@@ -171,7 +169,6 @@ describe('watch runtime', () => {
             operations.filter((operation) => operation === 'close-channel').length,
             1,
           );
-          assert.isFalse(events.some((event) => event._tag === 'WatchFailed'));
         }),
       ),
     ),
@@ -184,7 +181,6 @@ describe('watch runtime', () => {
           const operations: string[] = [];
           const sent: WatchMessage[] = [];
           const runtime = yield* startWatchRuntime({
-            role: 'host',
             capabilities,
             sendRaw: (payload) => Effect.sync(() => sent.push(JSON.parse(payload))),
             closeWatchChannel: Effect.sync(() => operations.push('close-channel')),
@@ -227,7 +223,6 @@ describe('watch runtime', () => {
           const cancelled: string[] = [];
           const terminations: string[] = [];
           const runtime = yield* startWatchRuntime({
-            role: 'host',
             capabilities,
             sendRaw: () => Effect.void,
             closeWatchChannel: Effect.sync(() => operations.push('close-channel')),
@@ -248,7 +243,9 @@ describe('watch runtime', () => {
             message: { version: WATCH_PROTOCOL_VERSION, type: 'hello', ...capabilities },
           });
           yield* eventually(() =>
-            events.some((event) => event._tag === 'WatchAvailabilityChanged' && event.available),
+            events.some(
+              (event) => event._tag === 'WatchSessionChanged' && event.view.status === 'idle',
+            ),
           );
 
           for (let index = 0; index < 64; index++) {
@@ -283,7 +280,6 @@ describe('watch runtime', () => {
           const terminations: string[] = [];
           let actorBlocked = false;
           const runtime = yield* startWatchRuntime({
-            role: 'host',
             capabilities,
             sendRaw: () =>
               Effect.sync(() => {
@@ -337,7 +333,6 @@ describe('watch runtime', () => {
           const sent: WatchMessage[] = [];
           const terminations: string[] = [];
           const runtime = yield* startWatchRuntime({
-            role: 'host',
             capabilities,
             sendRaw: (payload) => Effect.sync(() => sent.push(JSON.parse(payload))),
             closeWatchChannel: Effect.sync(() => operations.push('close-channel')),
@@ -354,7 +349,9 @@ describe('watch runtime', () => {
             message: { version: WATCH_PROTOCOL_VERSION, type: 'hello', ...capabilities },
           });
           yield* eventually(() =>
-            events.some((event) => event._tag === 'WatchAvailabilityChanged' && event.available),
+            events.some(
+              (event) => event._tag === 'WatchSessionChanged' && event.view.status === 'idle',
+            ),
           );
           runtime.dispatch({
             _tag: 'ProposeLocalSource',
@@ -399,7 +396,6 @@ describe('watch runtime', () => {
           const presenterEvents: WatchEvent[] = [];
           const sent: WatchMessage[] = [];
           const presenter = yield* startWatchRuntime({
-            role: 'host',
             capabilities,
             sendRaw: (payload) => Effect.sync(() => sent.push(JSON.parse(payload))),
             closeWatchChannel: Effect.sync(() => presenterOperations.push('close-channel')),
@@ -446,7 +442,6 @@ describe('watch runtime', () => {
           const watcherOperations: string[] = [];
           const watcherEvents: WatchEvent[] = [];
           const watcher = yield* startWatchRuntime({
-            role: 'guest',
             capabilities,
             sendRaw: () => Effect.void,
             closeWatchChannel: Effect.sync(() => watcherOperations.push('close-channel')),
@@ -510,7 +505,6 @@ describe('watch runtime', () => {
         Effect.gen(function* () {
           const operations: string[] = [];
           const runtime = yield* startWatchRuntime({
-            role: 'host',
             capabilities,
             sendRaw: () => Effect.fail('send-failed'),
             closeWatchChannel: Effect.sync(() => operations.push('close-channel')),
@@ -539,7 +533,6 @@ describe('watch runtime', () => {
           const terminations: string[] = [];
           let sendBroken = false;
           const runtime = yield* startWatchRuntime({
-            role: 'host',
             capabilities,
             sendRaw: (payload) =>
               sendBroken
@@ -561,7 +554,9 @@ describe('watch runtime', () => {
             message: { version: WATCH_PROTOCOL_VERSION, type: 'hello', ...capabilities },
           });
           yield* eventually(() =>
-            events.some((event) => event._tag === 'WatchAvailabilityChanged' && event.available),
+            events.some(
+              (event) => event._tag === 'WatchSessionChanged' && event.view.status === 'idle',
+            ),
           );
           runtime.dispatch({
             _tag: 'ProposeLocalSource',
@@ -591,9 +586,6 @@ describe('watch runtime', () => {
             operations.filter((operation) => operation === 'close-channel').length,
             1,
           );
-          assert.isTrue(
-            events.some((event) => event._tag === 'WatchFailed' && event.reason === 'pipeline'),
-          );
         }),
       ),
     ),
@@ -606,7 +598,6 @@ describe('watch runtime', () => {
           const operations: string[] = [];
           const watchSessionId = WatchSessionId.make('invalid-output-session');
           const runtime = yield* startWatchRuntime({
-            role: 'guest',
             capabilities,
             sendRaw: () => Effect.void,
             closeWatchChannel: Effect.sync(() => operations.push('close-channel')),
@@ -658,7 +649,6 @@ describe('watch runtime', () => {
           const generation = yield* Scope.fork(parent);
           const terminations: string[] = [];
           const runtime = yield* startWatchRuntime({
-            role: 'host',
             capabilities,
             sendRaw: () => Effect.void,
             closeWatchChannel: Effect.die('close-defect'),
@@ -685,7 +675,6 @@ describe('watch runtime', () => {
           const generation = yield* Scope.fork(parent);
           const operations: string[] = [];
           const runtime = yield* startWatchRuntime({
-            role: 'host',
             capabilities,
             sendRaw: () => Effect.never,
             closeWatchChannel: Effect.void,

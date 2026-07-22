@@ -10,7 +10,6 @@ import type {
 import {
   WATCH_PROTOCOL_VERSION,
   WatchSessionId,
-  type FailureReason,
   type PlaybackStateChanged,
   type WatchControlCommand,
   type WatchMessage,
@@ -113,16 +112,9 @@ export const makeWatchActor = Effect.fnUntraced(function* (dispatch: WatchActorI
     yield* events.emit({ _tag: 'WatchProgramStreamCleared' }).pipe(Effect.ignore);
   });
 
-  const reset = Effect.fnUntraced(function* (
-    next: 'idle' | 'unavailable',
-    failure?: FailureReason,
-  ) {
+  const reset = Effect.fnUntraced(function* (next: 'idle' | 'unavailable') {
     yield* releaseSession();
     state = next === 'idle' ? { _tag: 'Idle' } : { _tag: 'Unavailable' };
-    if (failure !== undefined) yield* events.emit({ _tag: 'WatchFailed', reason: failure });
-    if (next === 'unavailable') {
-      yield* events.emit({ _tag: 'WatchAvailabilityChanged', available: false });
-    }
     yield* emitView();
   });
 
@@ -141,10 +133,7 @@ export const makeWatchActor = Effect.fnUntraced(function* (dispatch: WatchActorI
 
     if (control.kind === 'play') yield* platform.play(session.source);
     if (control.kind === 'pause') yield* platform.pause(session.source);
-    if (control.kind === 'replay') {
-      yield* platform.seek(session.source, 0);
-      yield* platform.play(session.source);
-    }
+    if (control.kind === 'replay') yield* platform.replay(session.source);
     const next: PresenterSession = {
       ...session,
       status: control.kind === 'pause' ? 'loaded-paused' : 'playing',
@@ -158,7 +147,7 @@ export const makeWatchActor = Effect.fnUntraced(function* (dispatch: WatchActorI
     if (state._tag !== 'Active') return;
     if (state.session.role === 'presenter') {
       yield* updatePresenter(state.session, control).pipe(
-        Effect.catchIf(isWatchPlatformError, () => reset('idle', 'source')),
+        Effect.catchIf(isWatchPlatformError, () => reset('idle')),
       );
       return;
     }
@@ -208,7 +197,6 @@ export const makeWatchActor = Effect.fnUntraced(function* (dispatch: WatchActorI
             reason: 'source',
           });
           state = { _tag: 'Idle' };
-          yield* events.emit({ _tag: 'WatchFailed', reason: 'source' });
           yield* emitView();
         }),
       ),
@@ -251,7 +239,6 @@ export const makeWatchActor = Effect.fnUntraced(function* (dispatch: WatchActorI
           (capabilities.canPresentLocalFile || message.canPresentLocalFile);
         if (!compatible) return;
         state = { _tag: 'Idle' };
-        yield* events.emit({ _tag: 'WatchAvailabilityChanged', available: true });
         return yield* emitView();
       }
       case 'watch-proposed':
@@ -290,7 +277,7 @@ export const makeWatchActor = Effect.fnUntraced(function* (dispatch: WatchActorI
           state.session.watchSessionId === message.watchSessionId
         ) {
           return yield* updatePresenter(state.session, message.control).pipe(
-            Effect.catchIf(isWatchPlatformError, () => reset('idle', 'source')),
+            Effect.catchIf(isWatchPlatformError, () => reset('idle')),
           );
         }
         return;
@@ -301,7 +288,7 @@ export const makeWatchActor = Effect.fnUntraced(function* (dispatch: WatchActorI
             state.watchSessionId === message.watchSessionId) ||
           (state._tag === 'Active' && state.session.watchSessionId === message.watchSessionId)
         ) {
-          return yield* reset('idle', message.type === 'watch-failed' ? message.reason : undefined);
+          return yield* reset('idle');
         }
         return;
     }
@@ -316,11 +303,11 @@ export const makeWatchActor = Effect.fnUntraced(function* (dispatch: WatchActorI
         watchSessionId: state.session.watchSessionId,
         reason: 'source',
       });
-      return yield* reset('idle', 'source');
+      return yield* reset('idle');
     }
     const next = {
       ...state.session,
-      status: input._tag === 'SourceEnded' ? ('ended' as const) : ('playing' as const),
+      status: 'ended' as const,
     };
     state = { _tag: 'Active', session: next };
     yield* send(playbackMessage(next));
@@ -383,7 +370,6 @@ export const makeWatchActor = Effect.fnUntraced(function* (dispatch: WatchActorI
           );
         }
         return;
-      case 'SourcePlaying':
       case 'SourceEnded':
       case 'SourceFailed':
         return yield* handleSourceEvent(input);
