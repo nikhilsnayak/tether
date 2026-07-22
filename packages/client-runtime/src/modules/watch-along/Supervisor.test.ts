@@ -139,6 +139,198 @@ describe('watch runtime', () => {
     ),
   );
 
+  it.effect('shuts down an idle runtime once when transport is interrupted', () =>
+    Effect.scoped(
+      withCrypto(
+        Effect.gen(function* () {
+          const operations: string[] = [];
+          const events: WatchEvent[] = [];
+          const terminations: string[] = [];
+          const runtime = yield* startWatchRuntime({
+            role: 'host',
+            capabilities,
+            sendRaw: () => Effect.void,
+            closeWatchChannel: Effect.sync(() => operations.push('close-channel')),
+            attach: () => Effect.void,
+            clear: Effect.sync(() => operations.push('clear')),
+            platform: platform(operations),
+            sink: WatchEventSink.of({
+              emit: (event) => Effect.sync(() => void events.push(event)),
+            }),
+            onTerminated: (reason) => Effect.sync(() => void terminations.push(reason)),
+          });
+
+          yield* runtime.shutdown('transport-interrupted');
+          yield* runtime.shutdown('transport-interrupted');
+
+          assert.isFalse(runtime.isAlive());
+          assert.isFalse(runtime.dispatch({ _tag: 'ChannelOpened' }));
+          assert.deepStrictEqual(terminations, ['transport-interrupted']);
+          assert.strictEqual(operations.filter((operation) => operation === 'clear').length, 1);
+          assert.strictEqual(
+            operations.filter((operation) => operation === 'close-channel').length,
+            1,
+          );
+          assert.isFalse(events.some((event) => event._tag === 'WatchFailed'));
+        }),
+      ),
+    ),
+  );
+
+  it.effect('cancels a preparing source when transport is interrupted', () =>
+    Effect.scoped(
+      withCrypto(
+        Effect.gen(function* () {
+          const operations: string[] = [];
+          const sent: WatchMessage[] = [];
+          const runtime = yield* startWatchRuntime({
+            role: 'host',
+            capabilities,
+            sendRaw: (payload) => Effect.sync(() => sent.push(JSON.parse(payload))),
+            closeWatchChannel: Effect.sync(() => operations.push('close-channel')),
+            attach: () => Effect.void,
+            clear: Effect.sync(() => operations.push('clear')),
+            platform: platform(operations),
+            sink: WatchEventSink.of({ emit: () => Effect.void }),
+            onTerminated: () => Effect.void,
+          });
+
+          runtime.dispatch({ _tag: 'ChannelOpened' });
+          runtime.dispatch({
+            _tag: 'RemoteMessage',
+            message: { version: WATCH_PROTOCOL_VERSION, type: 'hello', ...capabilities },
+          });
+          runtime.dispatch({
+            _tag: 'ProposeLocalSource',
+            source: { _tag: 'PreparedSource', value: 'prepared' },
+          });
+          yield* eventually(() => sent.some((message) => message.type === 'watch-proposed'));
+
+          yield* runtime.shutdown('transport-interrupted');
+
+          assert.strictEqual(operations.filter((operation) => operation === 'cancel').length, 1);
+          assert.strictEqual(
+            operations.filter((operation) => operation === 'close-channel').length,
+            1,
+          );
+        }),
+      ),
+    ),
+  );
+
+  it.effect('releases presenter and watcher state when transport is interrupted', () =>
+    Effect.scoped(
+      withCrypto(
+        Effect.gen(function* () {
+          const presenterOperations: string[] = [];
+          const presenterEvents: WatchEvent[] = [];
+          const sent: WatchMessage[] = [];
+          const presenter = yield* startWatchRuntime({
+            role: 'host',
+            capabilities,
+            sendRaw: (payload) => Effect.sync(() => sent.push(JSON.parse(payload))),
+            closeWatchChannel: Effect.sync(() => presenterOperations.push('close-channel')),
+            attach: () => Effect.sync(() => presenterOperations.push('attach')),
+            clear: Effect.sync(() => presenterOperations.push('clear')),
+            platform: platform(presenterOperations),
+            sink: WatchEventSink.of({
+              emit: (event) => Effect.sync(() => void presenterEvents.push(event)),
+            }),
+            onTerminated: () => Effect.void,
+          });
+          presenter.dispatch({
+            _tag: 'RemoteMessage',
+            message: { version: WATCH_PROTOCOL_VERSION, type: 'hello', ...capabilities },
+          });
+          presenter.dispatch({
+            _tag: 'ProposeLocalSource',
+            source: { _tag: 'PreparedSource', value: 'prepared' },
+          });
+          yield* eventually(() => sent.some((message) => message.type === 'watch-proposed'));
+          const proposal = sent.find((message) => message.type === 'watch-proposed');
+          assert.isDefined(proposal);
+          presenter.dispatch({
+            _tag: 'RemoteMessage',
+            message: {
+              version: WATCH_PROTOCOL_VERSION,
+              type: 'watch-ready',
+              watchSessionId: proposal.watchSessionId,
+            },
+          });
+          yield* eventually(() => presenterOperations.includes('attach'));
+
+          yield* presenter.shutdown('transport-interrupted');
+
+          assert.strictEqual(
+            presenterOperations.filter((operation) => operation === 'release').length,
+            1,
+          );
+          assert.strictEqual(
+            presenterOperations.filter((operation) => operation === 'clear').length,
+            1,
+          );
+
+          const watcherOperations: string[] = [];
+          const watcherEvents: WatchEvent[] = [];
+          const watcher = yield* startWatchRuntime({
+            role: 'guest',
+            capabilities,
+            sendRaw: () => Effect.void,
+            closeWatchChannel: Effect.sync(() => watcherOperations.push('close-channel')),
+            attach: () => Effect.void,
+            clear: Effect.sync(() => watcherOperations.push('clear')),
+            platform: platform(watcherOperations),
+            sink: WatchEventSink.of({
+              emit: (event) => Effect.sync(() => void watcherEvents.push(event)),
+            }),
+            onTerminated: () => Effect.void,
+          });
+          const watchSessionId = WatchSessionId.make('watcher-session');
+          watcher.dispatch({
+            _tag: 'RemoteMessage',
+            message: { version: WATCH_PROTOCOL_VERSION, type: 'hello', ...capabilities },
+          });
+          watcher.dispatch({
+            _tag: 'RemoteProgramStreamChanged',
+            stream: { value: 'remote-program' },
+            version: 1,
+          });
+          watcher.dispatch({
+            _tag: 'RemoteMessage',
+            message: {
+              version: WATCH_PROTOCOL_VERSION,
+              type: 'watch-proposed',
+              watchSessionId,
+            },
+          });
+          watcher.dispatch({
+            _tag: 'RemoteMessage',
+            message: {
+              version: WATCH_PROTOCOL_VERSION,
+              type: 'playback-state-changed',
+              watchSessionId,
+              status: 'loaded-paused',
+            },
+          });
+          yield* eventually(() =>
+            watcherEvents.some((event) => event._tag === 'WatchProgramStreamReady'),
+          );
+
+          yield* watcher.shutdown('transport-interrupted');
+
+          assert.strictEqual(
+            watcherEvents.filter((event) => event._tag === 'WatchProgramStreamCleared').length,
+            1,
+          );
+          assert.strictEqual(
+            watcherOperations.filter((operation) => operation === 'close-channel').length,
+            1,
+          );
+        }),
+      ),
+    ),
+  );
+
   it.effect('maps transport rejection into an isolated actor failure', () =>
     Effect.scoped(
       withCrypto(

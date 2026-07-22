@@ -72,6 +72,8 @@ export type PeerSessionActorState =
       readonly remoteProgramStreamVersion: number;
       /** Child actor supervised by this generation, once its channel opens. */
       readonly watchRuntime: WatchRuntime | null;
+      /** Prevents watch from being provisioned again after fail-closed termination. */
+      readonly watchTerminated: boolean;
       readonly reconnectAttempts: number;
     }
   | { readonly _tag: 'TransportLost'; readonly peerId: PeerId };

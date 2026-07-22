@@ -261,6 +261,138 @@ describe('peer-session watch supervision', () => {
     ),
   );
 
+  it.effect('ends presenter watch once on interruption without ending the call', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makePeerSessionTestHarness();
+        yield* fixture.openRoom(bob);
+        yield* fixture.connectionConnected();
+        yield* fixture.openRoomEvents();
+        yield* openCompatibleWatch(fixture);
+        yield* fixture.actor({
+          _tag: 'WatchProposeSource',
+          source: { _tag: 'PreparedSource', value: { id: 'source' } },
+        });
+        yield* eventually(() =>
+          fixture.operations.some((operation) => operation.includes('"type":"watch-proposed"')),
+        );
+        const proposal = proposalFrom(fixture.operations);
+        yield* fixture.receiveWatchMessage({
+          version: WATCH_PROTOCOL_VERSION,
+          type: 'watch-ready',
+          watchSessionId: proposal.watchSessionId,
+        });
+        yield* eventually(() => fixture.operations.includes('replaceProgramTracks:set'));
+
+        yield* fixture.connectionInterrupted({ value: { id: 'stale-connection' } });
+        assert.strictEqual(fixture.localInputs.length, 0);
+
+        yield* fixture.connectionInterrupted();
+        yield* fixture.connectionInterrupted();
+
+        assert.strictEqual(fixture.localInputs.length, 1);
+        const terminated = fixture.localInputs[0];
+        assert.isDefined(terminated);
+        assert.strictEqual(terminated.reason, 'transport-interrupted');
+        assert.strictEqual(
+          fixture.operations.filter((operation) => operation === 'watch:releaseSource').length,
+          1,
+        );
+        assert.strictEqual(
+          fixture.operations.filter((operation) => operation === 'replaceProgramTracks:clear')
+            .length,
+          1,
+        );
+        assert.strictEqual(
+          fixture.operations.filter(
+            (operation) => operation === `closeDataChannel:${WATCH_CONTROL_CHANNEL_LABEL}`,
+          ).length,
+          1,
+        );
+        assert.isTrue(
+          fixture.watchEvents.some(
+            (event) => event._tag === 'WatchAvailabilityChanged' && !event.available,
+          ),
+        );
+
+        yield* fixture.actor(terminated);
+        yield* fixture.connectionRestored();
+        const helloCount = fixture.operations.filter((operation) =>
+          operation.includes('"type":"hello"'),
+        ).length;
+        yield* fixture.openWatchChannel();
+        yield* fixture.actor({
+          _tag: 'WatchProposeSource',
+          source: { _tag: 'PreparedSource', value: { id: 'after-restore' } },
+        });
+        assert.strictEqual(
+          fixture.operations.filter((operation) => operation.includes('"type":"hello"')).length,
+          helloCount,
+        );
+        assert.include(fixture.operations, 'watch:cancelPreparedSource');
+
+        yield* fixture.sendChat('call survived interruption');
+        assert.isTrue(
+          fixture.operations.some(
+            (operation) =>
+              operation.includes('chat-message') &&
+              operation.includes('call survived interruption'),
+          ),
+        );
+
+        yield* fixture.connectionFailed();
+        assert.strictEqual(
+          fixture.operations.filter(
+            (operation) => operation === `createDataChannel:${WATCH_CONTROL_CHANNEL_LABEL}`,
+          ).length,
+          2,
+        );
+      }),
+    ),
+  );
+
+  it.effect('clears watcher playback on interruption while keeping recovery alive', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makePeerSessionTestHarness();
+        yield* fixture.openRoom(bob);
+        yield* fixture.connectionConnected();
+        yield* openCompatibleWatch(fixture);
+        const stream = { value: { id: 'remote-program' } };
+        yield* fixture.actor({
+          _tag: 'RemoteSharedTrackReceived',
+          peerConnection: fixture.peerConnection,
+          stream,
+        });
+        yield* fixture.receiveWatchMessage({
+          version: WATCH_PROTOCOL_VERSION,
+          type: 'watch-proposed',
+          watchSessionId: 'watch-interrupted',
+        });
+        yield* fixture.receiveWatchMessage({
+          version: WATCH_PROTOCOL_VERSION,
+          type: 'playback-state-changed',
+          watchSessionId: 'watch-interrupted',
+          status: 'playing',
+        });
+        yield* eventually(() =>
+          fixture.watchEvents.some((event) => event._tag === 'WatchProgramStreamReady'),
+        );
+
+        yield* fixture.connectionInterrupted();
+
+        assert.strictEqual(fixture.localInputs[0]?.reason, 'transport-interrupted');
+        assert.strictEqual(
+          fixture.watchEvents.filter((event) => event._tag === 'WatchProgramStreamCleared').length,
+          1,
+        );
+        yield* fixture.connectionRestored();
+        yield* fixture.sendMediaState({ cameraOn: true, microphoneOn: true });
+        assert.isTrue(fixture.events.some((event) => event._tag === 'PeerRestored'));
+      }),
+    ),
+  );
+
   it.effect(
     'activates answerer transceivers and seeds a late watch runtime with remote media',
     () =>

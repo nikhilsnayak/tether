@@ -550,6 +550,29 @@ describe('peer-session actor — recovery and ownership', () => {
     ).pipe(Effect.orDie),
   );
 
+  it.effect('keeps interruption recovery alive when an unopened watch channel cannot close', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const failedClose = yield* makePeerSessionTestHarness(undefined, undefined, {
+          closeDataChannel: () =>
+            Effect.fail(new PlatformError({ operation: 'close-data-channel', cause: 'failed' })),
+        });
+        yield* failedClose.openRoom(bob);
+        yield* failedClose.connectionConnected();
+        yield* failedClose.connectionInterrupted();
+        assert.isTrue(failedClose.events.some((event) => event._tag === 'PeerInterrupted'));
+
+        const unsupportedClose = yield* makePeerSessionTestHarness(undefined, undefined, {
+          closeDataChannel: undefined,
+        });
+        yield* unsupportedClose.openRoom(bob);
+        yield* unsupportedClose.connectionConnected();
+        yield* unsupportedClose.connectionInterrupted();
+        assert.isTrue(unsupportedClose.events.some((event) => event._tag === 'PeerInterrupted'));
+      }),
+    ).pipe(Effect.orDie),
+  );
+
   it.effect('ignores a disconnection before the peer connection is established', () =>
     Effect.scoped(
       Effect.gen(function* () {

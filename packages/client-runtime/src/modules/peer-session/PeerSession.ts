@@ -11,7 +11,7 @@ import {
   type WatchEventSink,
   WatchPlatformError,
 } from '../watch-along/Services';
-import { startWatchRuntime } from '../watch-along/Supervisor';
+import { startWatchRuntime, type WatchRuntimeTerminationReason } from '../watch-along/Supervisor';
 import type {
   PeerConnectionGeneration,
   PeerSessionActorState,
@@ -310,7 +310,8 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     if (
       state._tag !== 'PeerKnown' ||
       state.watchChannel !== dataChannel ||
-      state.watchRuntime !== null
+      state.watchRuntime !== null ||
+      state.watchTerminated
     ) {
       return;
     }
@@ -436,6 +437,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
         remoteSharedStream: null,
         remoteProgramStreamVersion: 0,
         watchRuntime: null,
+        watchTerminated: false,
         reconnectAttempts: reconnectAttempts + 1,
       };
       yield* armNegotiationDeadline(generation);
@@ -470,6 +472,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       remoteSharedStream: null,
       remoteProgramStreamVersion: 0,
       watchRuntime: null,
+      watchTerminated: false,
       reconnectAttempts: reconnectAttempts + 1,
     };
   });
@@ -522,6 +525,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       remoteSharedStream: null,
       remoteProgramStreamVersion: 0,
       watchRuntime: null,
+      watchTerminated: false,
       reconnectAttempts: 0,
     };
   });
@@ -545,6 +549,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       remoteSharedStream: null,
       remoteProgramStreamVersion: 0,
       watchRuntime: null,
+      watchTerminated: false,
       reconnectAttempts: 0,
     };
     yield* armNegotiationDeadline(generation);
@@ -722,7 +727,8 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     if (
       label === WATCH_CONTROL_CHANNEL_LABEL &&
       memory.watch.isEnabled() &&
-      state.watchChannel === null
+      state.watchChannel === null &&
+      !state.watchTerminated
     ) {
       state = { ...state, watchChannel: dataChannel };
       yield* platform
@@ -988,7 +994,14 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       return;
     }
 
-    state = { ...state, peerConnectionState: 'interrupted' };
+    const runtime = state.watchRuntime;
+    const watchChannel = state.watchChannel;
+    state = { ...state, peerConnectionState: 'interrupted', watchTerminated: true };
+    if (runtime !== null) {
+      yield* runtime.shutdown('transport-interrupted');
+    } else if (watchChannel !== null && platform.closeDataChannel !== undefined) {
+      yield* platform.closeDataChannel(watchChannel).pipe(Effect.catchCause(() => Effect.void));
+    }
     yield* Effect.logWarning('Peer connection interrupted');
     yield* eventSink.emit({ _tag: 'PeerInterrupted', peerId: state.peerId });
   });
@@ -1210,12 +1223,19 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     yield* cancelPreparedSource(source);
   });
 
-  const handleWatchRuntimeTerminated = (peerConnection: PeerConnectionHandle) =>
+  const handleWatchRuntimeTerminated = (
+    peerConnection: PeerConnectionHandle,
+    reason: WatchRuntimeTerminationReason,
+  ) =>
     Effect.sync(() => {
       if (state._tag !== 'PeerKnown' || state.generation.peerConnection !== peerConnection) {
         return;
       }
-      state = { ...state, watchRuntime: null };
+      state = {
+        ...state,
+        watchRuntime: null,
+        watchTerminated: state.watchTerminated || reason !== 'generation-closed',
+      };
     });
 
   const handleUiSendLeave = Effect.fnUntraced(function* () {
@@ -1300,7 +1320,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       case 'RetryPendingAvatarPose':
         return yield* handleRetryPendingAvatarPose(input.peerConnection, input.dataChannel);
       case 'WatchRuntimeTerminated':
-        return yield* handleWatchRuntimeTerminated(input.peerConnection);
+        return yield* handleWatchRuntimeTerminated(input.peerConnection, input.reason);
       case 'SendMessage':
         return yield* handleUiSendMessage(input.message);
       case 'SendAvatarPose':

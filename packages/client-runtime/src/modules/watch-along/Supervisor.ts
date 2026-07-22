@@ -1,4 +1,4 @@
-import { Cause, Crypto, Effect, Exit, Queue, Result, Scope } from 'effect';
+import { Cause, Crypto, Effect, Exit, Fiber, Queue, Result, Scope } from 'effect';
 
 import type { WatchActorInput } from './ActorModel';
 import type { WatchCapabilities } from './Model';
@@ -14,11 +14,16 @@ import {
 import { initialWatchSessionView } from './View';
 import { makeWatchActor } from './WatchActor';
 
-export type WatchRuntimeTerminationReason = 'generation-closed' | 'actor-failed';
+export type WatchRuntimeShutdownReason = 'transport-interrupted';
+export type WatchRuntimeTerminationReason =
+  | 'generation-closed'
+  | 'actor-failed'
+  | WatchRuntimeShutdownReason;
 
 export interface WatchRuntime {
   readonly dispatch: (input: WatchActorInput) => boolean;
   readonly isAlive: () => boolean;
+  readonly shutdown: (reason: WatchRuntimeShutdownReason) => Effect.Effect<void>;
 }
 
 export interface StartWatchRuntimeDependencies {
@@ -51,6 +56,7 @@ export const startWatchRuntime = Effect.fnUntraced(function* (deps: StartWatchRu
   const queue = yield* Queue.unbounded<QueuedInput>();
   let alive = true;
   let finalized = false;
+  let requestedTermination: WatchRuntimeShutdownReason | null = null;
 
   const transport = WatchTransport.of({
     role: deps.role,
@@ -108,6 +114,8 @@ export const startWatchRuntime = Effect.fnUntraced(function* (deps: StartWatchRu
     );
     if (reason === 'actor-failed') {
       yield* bestEffort(deps.sink.emit({ _tag: 'WatchFailed', reason: 'pipeline' }));
+    }
+    if (reason !== 'generation-closed') {
       yield* bestEffort(deps.closeWatchChannel);
     }
     yield* bestEffort(deps.onTerminated(reason));
@@ -118,13 +126,24 @@ export const startWatchRuntime = Effect.fnUntraced(function* (deps: StartWatchRu
   ).pipe(
     Effect.onExit((exit) =>
       finalize(
-        Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)
-          ? 'actor-failed'
-          : 'generation-closed',
+        requestedTermination ??
+          (Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)
+            ? 'actor-failed'
+            : 'generation-closed'),
       ),
     ),
   );
-  yield* actorLoop.pipe(Effect.forkScoped({ startImmediately: true }));
+  const actorFiber = yield* actorLoop.pipe(Effect.forkScoped({ startImmediately: true }));
 
-  return { dispatch, isAlive: () => alive } satisfies WatchRuntime;
+  const shutdown = Effect.fnUntraced(function* (reason: WatchRuntimeShutdownReason) {
+    if (!alive) {
+      yield* Fiber.await(actorFiber);
+      return;
+    }
+    alive = false;
+    requestedTermination = reason;
+    yield* Fiber.interrupt(actorFiber);
+  });
+
+  return { dispatch, isAlive: () => alive, shutdown } satisfies WatchRuntime;
 });
