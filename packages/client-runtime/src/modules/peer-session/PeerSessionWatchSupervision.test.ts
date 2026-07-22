@@ -7,6 +7,7 @@ import { WATCH_PROTOCOL_VERSION, type WatchMessage } from '../watch-along/Protoc
 import { WatchPlatformError } from '../watch-along/Services';
 import type { DataChannelHandle, PeerConnectionHandle } from './Model';
 import { PlatformError } from './Platform';
+import { ROOM_EVENTS_CHANNEL_LABEL } from './RoomEvents';
 import {
   bob,
   makePeerSessionTestHarness,
@@ -334,6 +335,84 @@ describe('peer-session watch supervision', () => {
           ),
         );
         assert.include(fixture.operations, `closeDataChannel:${WATCH_CONTROL_CHANNEL_LABEL}`);
+      }),
+    ),
+  );
+
+  it.effect('keeps room events alive when the watch mailbox overloads', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const sent: Array<{ readonly label: string; readonly message: string }> = [];
+        let blockWatch = false;
+        let actorBlocked = false;
+        const fixture = yield* makePeerSessionTestHarness(undefined, undefined, {
+          sendDataChannelMessage: (dataChannel, message) => {
+            const label = (dataChannel.value as TestDataChannel).label;
+            if (blockWatch && label === WATCH_CONTROL_CHANNEL_LABEL) {
+              return Effect.sync(() => {
+                actorBlocked = true;
+              }).pipe(Effect.andThen(Effect.never));
+            }
+            return Effect.sync(() => void sent.push({ label, message }));
+          },
+        });
+        yield* fixture.openRoom(bob);
+        yield* fixture.openRoomEvents();
+        yield* fixture.openWatchChannel();
+        yield* eventually(() =>
+          sent.some(
+            ({ label, message }) =>
+              label === WATCH_CONTROL_CHANNEL_LABEL && message.includes('"type":"hello"'),
+          ),
+        );
+        yield* fixture.receiveWatchMessage({
+          version: WATCH_PROTOCOL_VERSION,
+          type: 'hello',
+          ...capabilities,
+        });
+        yield* eventually(() =>
+          fixture.watchEvents.some(
+            (event) => event._tag === 'WatchAvailabilityChanged' && event.available,
+          ),
+        );
+
+        blockWatch = true;
+        yield* fixture.actor({
+          _tag: 'WatchProposeSource',
+          source: { _tag: 'PreparedSource', value: { id: 'blocked-source' } },
+        });
+        yield* eventually(() => actorBlocked);
+        for (let index = 0; index <= 64; index++) {
+          yield* fixture.receiveWatchMessage({
+            version: WATCH_PROTOCOL_VERSION,
+            type: 'hello',
+            ...capabilities,
+          });
+        }
+        yield* eventually(() => fixture.localInputs[0]?.reason === 'overloaded');
+
+        yield* fixture.actor({
+          _tag: 'WatchProposeSource',
+          source: { _tag: 'PreparedSource', value: { id: 'rejected-source' } },
+        });
+        assert.strictEqual(
+          fixture.operations.filter((operation) => operation === 'watch:cancelPreparedSource')
+            .length,
+          2,
+        );
+        assert.include(fixture.operations, `closeDataChannel:${WATCH_CONTROL_CHANNEL_LABEL}`);
+
+        const terminated = fixture.localInputs[0];
+        assert.isDefined(terminated);
+        yield* fixture.actor(terminated);
+        yield* fixture.sendChat('call survived watch overload');
+        assert.isTrue(
+          sent.some(
+            ({ label, message }) =>
+              label === ROOM_EVENTS_CHANNEL_LABEL &&
+              message.includes('call survived watch overload'),
+          ),
+        );
       }),
     ),
   );

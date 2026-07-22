@@ -218,6 +218,179 @@ describe('watch runtime', () => {
     ),
   );
 
+  it.effect('fails closed at the exact mailbox capacity while idle', () =>
+    Effect.scoped(
+      withCrypto(
+        Effect.gen(function* () {
+          const operations: string[] = [];
+          const events: WatchEvent[] = [];
+          const cancelled: string[] = [];
+          const terminations: string[] = [];
+          const runtime = yield* startWatchRuntime({
+            role: 'host',
+            capabilities,
+            sendRaw: () => Effect.void,
+            closeWatchChannel: Effect.sync(() => operations.push('close-channel')),
+            attach: () => Effect.void,
+            clear: Effect.sync(() => operations.push('clear')),
+            platform: {
+              ...platform(operations),
+              cancelPreparedSource: (source) =>
+                Effect.sync(() => cancelled.push(source.value as string)),
+            },
+            sink: WatchEventSink.of({
+              emit: (event) => Effect.sync(() => void events.push(event)),
+            }),
+            onTerminated: (reason) => Effect.sync(() => void terminations.push(reason)),
+          });
+          runtime.dispatch({
+            _tag: 'RemoteMessage',
+            message: { version: WATCH_PROTOCOL_VERSION, type: 'hello', ...capabilities },
+          });
+          yield* eventually(() =>
+            events.some((event) => event._tag === 'WatchAvailabilityChanged' && event.available),
+          );
+
+          for (let index = 0; index < 64; index++) {
+            assert.isTrue(runtime.dispatch({ _tag: 'RequestControl', control: { kind: 'play' } }));
+          }
+          assert.isFalse(
+            runtime.dispatch({
+              _tag: 'ProposeLocalSource',
+              source: { _tag: 'PreparedSource', value: 'rejected' },
+            }),
+          );
+          assert.isFalse(runtime.dispatch({ _tag: 'ChannelOpened' }));
+
+          yield* eventually(() => terminations.length === 1);
+          assert.deepStrictEqual(terminations, ['overloaded']);
+          assert.deepStrictEqual(cancelled, []);
+          assert.strictEqual(
+            operations.filter((operation) => operation === 'close-channel').length,
+            1,
+          );
+        }),
+      ),
+    ),
+  );
+
+  it.effect('cancels queued proposals when a suspended actor overloads', () =>
+    Effect.scoped(
+      withCrypto(
+        Effect.gen(function* () {
+          const operations: string[] = [];
+          const cancelled: string[] = [];
+          const terminations: string[] = [];
+          let actorBlocked = false;
+          const runtime = yield* startWatchRuntime({
+            role: 'host',
+            capabilities,
+            sendRaw: () =>
+              Effect.sync(() => {
+                actorBlocked = true;
+              }).pipe(Effect.andThen(Effect.never)),
+            closeWatchChannel: Effect.sync(() => operations.push('close-channel')),
+            attach: () => Effect.void,
+            clear: Effect.sync(() => operations.push('clear')),
+            platform: {
+              ...platform(operations),
+              cancelPreparedSource: (source) =>
+                Effect.sync(() => cancelled.push(source.value as string)),
+            },
+            sink: WatchEventSink.of({ emit: () => Effect.void }),
+            onTerminated: (reason) => Effect.sync(() => void terminations.push(reason)),
+          });
+          assert.isTrue(runtime.dispatch({ _tag: 'ChannelOpened' }));
+          yield* eventually(() => actorBlocked);
+
+          for (let index = 0; index < 64; index++) {
+            assert.isTrue(
+              runtime.dispatch({
+                _tag: 'ProposeLocalSource',
+                source: { _tag: 'PreparedSource', value: `queued-${index}` },
+              }),
+            );
+          }
+          assert.isFalse(
+            runtime.dispatch({
+              _tag: 'ProposeLocalSource',
+              source: { _tag: 'PreparedSource', value: 'rejected' },
+            }),
+          );
+
+          yield* eventually(() => terminations.length === 1);
+          assert.strictEqual(cancelled.length, 64);
+          assert.isFalse(cancelled.includes('rejected'));
+          assert.strictEqual(new Set(cancelled).size, 64);
+          assert.deepStrictEqual(terminations, ['overloaded']);
+        }),
+      ),
+    ),
+  );
+
+  it.effect('releases an active presenter once when its mailbox overloads', () =>
+    Effect.scoped(
+      withCrypto(
+        Effect.gen(function* () {
+          const operations: string[] = [];
+          const events: WatchEvent[] = [];
+          const sent: WatchMessage[] = [];
+          const terminations: string[] = [];
+          const runtime = yield* startWatchRuntime({
+            role: 'host',
+            capabilities,
+            sendRaw: (payload) => Effect.sync(() => sent.push(JSON.parse(payload))),
+            closeWatchChannel: Effect.sync(() => operations.push('close-channel')),
+            attach: () => Effect.sync(() => operations.push('attach')),
+            clear: Effect.sync(() => operations.push('clear')),
+            platform: platform(operations),
+            sink: WatchEventSink.of({
+              emit: (event) => Effect.sync(() => void events.push(event)),
+            }),
+            onTerminated: (reason) => Effect.sync(() => void terminations.push(reason)),
+          });
+          runtime.dispatch({
+            _tag: 'RemoteMessage',
+            message: { version: WATCH_PROTOCOL_VERSION, type: 'hello', ...capabilities },
+          });
+          yield* eventually(() =>
+            events.some((event) => event._tag === 'WatchAvailabilityChanged' && event.available),
+          );
+          runtime.dispatch({
+            _tag: 'ProposeLocalSource',
+            source: { _tag: 'PreparedSource', value: 'active' },
+          });
+          yield* eventually(() => sent.some((message) => message.type === 'watch-proposed'));
+          const proposal = sent.find((message) => message.type === 'watch-proposed');
+          assert.isDefined(proposal);
+          runtime.dispatch({
+            _tag: 'RemoteMessage',
+            message: {
+              version: WATCH_PROTOCOL_VERSION,
+              type: 'watch-ready',
+              watchSessionId: proposal.watchSessionId,
+            },
+          });
+          yield* eventually(() => operations.includes('attach'));
+
+          for (let index = 0; index < 64; index++) {
+            assert.isTrue(runtime.dispatch({ _tag: 'RequestControl', control: { kind: 'pause' } }));
+          }
+          assert.isFalse(runtime.dispatch({ _tag: 'RequestControl', control: { kind: 'play' } }));
+
+          yield* eventually(() => terminations.length === 1);
+          assert.deepStrictEqual(terminations, ['overloaded']);
+          assert.strictEqual(operations.filter((operation) => operation === 'release').length, 1);
+          assert.strictEqual(operations.filter((operation) => operation === 'clear').length, 1);
+          assert.strictEqual(
+            operations.filter((operation) => operation === 'close-channel').length,
+            1,
+          );
+        }),
+      ),
+    ),
+  );
+
   it.effect('releases presenter and watcher state when transport is interrupted', () =>
     Effect.scoped(
       withCrypto(

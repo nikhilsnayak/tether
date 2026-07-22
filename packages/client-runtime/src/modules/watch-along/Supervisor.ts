@@ -1,4 +1,4 @@
-import { Cause, Crypto, Effect, Exit, Fiber, Queue, Result, Scope } from 'effect';
+import { Cause, Crypto, Deferred, Effect, Exit, Fiber, Queue, Result, Scope } from 'effect';
 
 import type { WatchActorInput } from './ActorModel';
 import type { WatchCapabilities } from './Model';
@@ -14,7 +14,7 @@ import {
 import { initialWatchSessionView } from './View';
 import { makeWatchActor } from './WatchActor';
 
-export type WatchRuntimeShutdownReason = 'transport-interrupted';
+export type WatchRuntimeShutdownReason = 'transport-interrupted' | 'overloaded';
 export type WatchRuntimeTerminationReason =
   | 'generation-closed'
   | 'actor-failed'
@@ -45,6 +45,8 @@ interface QueuedInput {
   readonly onDropped: Effect.Effect<void, unknown>;
 }
 
+const WATCH_INPUT_QUEUE_CAPACITY = 64;
+
 const bestEffort = (effect: Effect.Effect<void, unknown>) =>
   Effect.catchCause(effect, () => Effect.void);
 
@@ -53,7 +55,8 @@ export const startWatchRuntime = Effect.fnUntraced(function* (deps: StartWatchRu
   const generationScope = yield* Scope.Scope;
   const crypto = yield* Crypto.Crypto;
   const actorScope = yield* Scope.fork(generationScope);
-  const queue = yield* Queue.unbounded<QueuedInput>();
+  const queue = yield* Queue.dropping<QueuedInput>(WATCH_INPUT_QUEUE_CAPACITY);
+  const overload = Deferred.makeUnsafe<void>();
   let alive = true;
   let finalized = false;
   let requestedTermination: WatchRuntimeShutdownReason | null = null;
@@ -77,13 +80,18 @@ export const startWatchRuntime = Effect.fnUntraced(function* (deps: StartWatchRu
   });
   const dispatch = (input: WatchActorInput) => {
     if (!alive) return false;
-    return Queue.offerUnsafe(queue, {
+    const accepted = Queue.offerUnsafe(queue, {
       input,
       onDropped:
         input._tag === 'ProposeLocalSource'
           ? deps.platform.cancelPreparedSource(input.source)
           : Effect.void,
     });
+    if (accepted) return true;
+    alive = false;
+    requestedTermination = 'overloaded';
+    Deferred.doneUnsafe(overload, Effect.void);
+    return false;
   };
 
   const actor = yield* makeWatchActor(dispatch).pipe(
@@ -121,9 +129,10 @@ export const startWatchRuntime = Effect.fnUntraced(function* (deps: StartWatchRu
     yield* bestEffort(deps.onTerminated(reason));
   });
 
-  const actorLoop = Effect.forever(
+  const consumeInputs = Effect.forever(
     Queue.take(queue).pipe(Effect.flatMap((item) => actor.handleInput(item.input))),
-  ).pipe(
+  );
+  const actorLoop = Effect.raceFirst(consumeInputs, Deferred.await(overload)).pipe(
     Effect.onExit((exit) =>
       finalize(
         requestedTermination ??
