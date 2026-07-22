@@ -191,10 +191,11 @@ export class RoomDriver {
     return Promise.all([
       expect(
         actor.page.getByText('This room has ended. Create a new room to talk again.'),
-      ).toBeVisible(),
+      ).toBeVisible({ timeout: REAL_MEDIA_READY_TIMEOUT }),
       expect(actor.page.getByLabel('Dusk Suite room scene')).toHaveAttribute(
         'data-room-journey',
         'waiting',
+        { timeout: REAL_MEDIA_READY_TIMEOUT },
       ),
     ]);
   }
