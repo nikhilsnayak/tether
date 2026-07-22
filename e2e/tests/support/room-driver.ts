@@ -98,6 +98,12 @@ export class RoomDriver {
     }
   }
 
+  async closeActor(actor: RoomActor) {
+    await actor.context.close();
+    const index = this.#contexts.indexOf(actor.context);
+    if (index !== -1) this.#contexts.splice(index, 1);
+  }
+
   async completeMediaSetup(actor: RoomActor, actionLabel: string, atThreshold?: ThresholdHook) {
     await this.prepareMediaSetup(actor);
     await atThreshold?.(actor);

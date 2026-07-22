@@ -232,17 +232,28 @@ test.describe('real room', { tag: '@gpu' }, () => {
   });
 
   test('a detached room code cannot admit a replacement after departure', async ({ room }) => {
+    // The assertion covers a complete two-peer detach plus a fresh page load.
+    // Give software-rendered CI enough time to reach the replacement attempt.
+    test.slow();
+
     const { host, guest, roomId } = await room.connect();
     await Promise.all([room.expectDetached(host), room.expectDetached(guest)]);
+    await Promise.all([room.expectZeroServerSockets(host), room.expectZeroServerSockets(guest)]);
     await guest.page.getByRole('button', { name: 'Leave call' }).click();
     await room.expectPeerDeparted(host);
+    await Promise.all([room.closeActor(host), room.closeActor(guest)]);
 
     const replacement = await room.createActor();
     await replacement.page.goto(`/room/${roomId}`);
-    await replacement.page.getByRole('button', { name: 'Join in this browser' }).click();
+    const joinInBrowser = replacement.page.getByRole('button', { name: 'Join in this browser' });
+    await expect(joinInBrowser).toBeVisible({ timeout: REAL_RENDER_MEDIA_TIMEOUT });
+    // The replacement contract is the server response, not the scene's visual
+    // stability. SwiftShader can keep shifting this otherwise actionable button
+    // while the room renderer initializes.
+    await joinInBrowser.click({ force: CI });
     await expect(
       replacement.page.getByText('This room is no longer here', { exact: true }),
-    ).toBeVisible();
+    ).toBeVisible({ timeout: REAL_RENDER_MEDIA_TIMEOUT });
   });
 
   test('each peer controls only its own physical avatar', async ({ room }) => {
@@ -291,6 +302,8 @@ test.describe('real room', { tag: '@gpu' }, () => {
   });
 
   test('camera keeps its boom when the avatar reaches a room boundary', async ({ page, room }) => {
+    test.slow();
+    await page.clock.install();
     await page.emulateMedia({ reducedMotion: 'reduce' });
     const host = room.actorFor(page);
     await room.createRoom(host);
@@ -299,15 +312,15 @@ test.describe('real room', { tag: '@gpu' }, () => {
 
     await page.keyboard.down('w');
     try {
-      await expect
-        .poll(async () => {
-          const pose = await scene.getAttribute('data-room-local-pose');
-          return Number(pose?.split(',')[0]);
-        })
-        .toBeGreaterThan(4.3);
+      // Advance requestAnimationFrame deterministically: SwiftShader may only
+      // render a handful of frames per wall-clock second, while avatar movement
+      // intentionally caps the distance integrated by any one frame.
+      await page.clock.runFor(3_000);
     } finally {
       await page.keyboard.up('w');
     }
+    const pose = await scene.getAttribute('data-room-local-pose');
+    expect(Number(pose?.split(',')[0])).toBeGreaterThan(4.3);
 
     const sceneBounds = await scene.boundingBox();
     expect(sceneBounds).not.toBeNull();
@@ -316,8 +329,9 @@ test.describe('real room', { tag: '@gpu' }, () => {
     const dragStartX = sceneBounds.x + 160;
     await page.mouse.move(dragStartX, dragY);
     await page.mouse.down();
-    await page.mouse.move(dragStartX + 785, dragY, { steps: 12 });
+    await page.mouse.move(dragStartX + 785, dragY);
     await page.mouse.up();
+    await page.clock.runFor(20);
 
     await expect
       .poll(async () => Number(await scene.getAttribute('data-room-camera-distance')))
