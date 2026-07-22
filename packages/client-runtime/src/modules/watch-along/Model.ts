@@ -1,10 +1,12 @@
 import type { FailureReason } from './Protocol';
 
 export interface PreparedSourceHandle {
+  readonly _tag: 'PreparedSource';
   readonly value: unknown;
 }
 
 export interface ClaimedSourceHandle {
+  readonly _tag: 'ClaimedSource';
   readonly value: unknown;
 }
 

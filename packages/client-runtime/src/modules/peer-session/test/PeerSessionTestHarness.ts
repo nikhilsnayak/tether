@@ -221,8 +221,12 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
   const baseWatchPlatform: WatchAlongPlatform['Service'] = {
     cancelPreparedSource: () => Effect.sync(() => operations.push('watch:cancelPreparedSource')),
     claimSource: () =>
-      Effect.acquireRelease(Effect.succeed({ value: { id: 'watch-claimed-source' } }), () =>
-        Effect.sync(() => operations.push('watch:releaseSource')),
+      Effect.acquireRelease(
+        Effect.succeed({
+          _tag: 'ClaimedSource' as const,
+          value: { id: 'watch-claimed-source' },
+        }),
+        () => Effect.sync(() => operations.push('watch:releaseSource')),
       ),
     programStream: () => Effect.succeed({ value: { id: 'watch-program-stream' } }),
     play: () => Effect.sync(() => operations.push('watch:play')),

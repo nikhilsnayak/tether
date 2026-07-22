@@ -23,8 +23,9 @@ const eventually = Effect.fnUntraced(function* (predicate: () => boolean) {
 const platform = (operations: string[]): WatchAlongPlatform['Service'] => ({
   cancelPreparedSource: () => Effect.sync(() => operations.push('cancel')),
   claimSource: () =>
-    Effect.acquireRelease(Effect.succeed({ value: 'claimed' }), () =>
-      Effect.sync(() => operations.push('release')),
+    Effect.acquireRelease(
+      Effect.succeed({ _tag: 'ClaimedSource' as const, value: 'claimed' }),
+      () => Effect.sync(() => operations.push('release')),
     ),
   programStream: () => Effect.succeed({ value: 'program' }),
   play: () => Effect.sync(() => operations.push('play')),
@@ -72,7 +73,10 @@ describe('watch runtime', () => {
           yield* eventually(() =>
             events.some((event) => event._tag === 'WatchAvailabilityChanged' && event.available),
           );
-          runtime.dispatch({ _tag: 'ProposeLocalSource', source: { value: 'prepared' } });
+          runtime.dispatch({
+            _tag: 'ProposeLocalSource',
+            source: { _tag: 'PreparedSource', value: 'prepared' },
+          });
           yield* eventually(() => sent.some((message) => message.type === 'watch-proposed'));
           const proposal = sent.find((message) => message.type === 'watch-proposed');
           assert.isDefined(proposal);
@@ -259,7 +263,10 @@ describe('watch runtime', () => {
 
           runtime.dispatch({ _tag: 'ChannelOpened' });
           yield* Effect.yieldNow;
-          runtime.dispatch({ _tag: 'ProposeLocalSource', source: { value: 'queued' } });
+          runtime.dispatch({
+            _tag: 'ProposeLocalSource',
+            source: { _tag: 'PreparedSource', value: 'queued' },
+          });
           yield* Scope.close(generation, Exit.void);
 
           assert.include(operations, 'cancel');

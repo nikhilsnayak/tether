@@ -193,12 +193,15 @@ describe('web watch source', () => {
       observe: () => Effect.fail(sourceFailure),
       primeFirstFrame: Effect.fail(sourceFailure),
     };
-    const source = { value: resource } satisfies ClaimedSourceHandle;
+    const source = { _tag: 'ClaimedSource', value: resource } satisfies ClaimedSourceHandle;
 
     return Effect.gen(function* () {
       const platform = yield* WatchAlongPlatform;
-      const invalidPrepared = { value: null } satisfies PreparedSourceHandle;
-      const invalidClaimed = { value: null } satisfies ClaimedSourceHandle;
+      const invalidPrepared = {
+        _tag: 'PreparedSource',
+        value: null,
+      } satisfies PreparedSourceHandle;
+      const invalidClaimed = { _tag: 'ClaimedSource', value: null } satisfies ClaimedSourceHandle;
       const errors = yield* Effect.all([
         platform.cancelPreparedSource(invalidPrepared).pipe(Effect.flip),
         platform.programStream(invalidClaimed).pipe(Effect.flip),

@@ -186,7 +186,10 @@ export const prepareWatchSourceWith = Effect.fn('prepareWatchSourceWith')(functi
         return Effect.fail(sourceError('claim', 'Source was already claimed'));
       }
       ownership = 'claimed';
-      return Effect.succeed({ value: resource } satisfies ClaimedSourceHandle);
+      return Effect.succeed({
+        _tag: 'ClaimedSource',
+        value: resource,
+      } satisfies ClaimedSourceHandle);
     }),
     () => close,
   );
@@ -212,7 +215,7 @@ export const prepareWatchSourceWith = Effect.fn('prepareWatchSourceWith')(functi
   };
 
   return {
-    source: { value: resource },
+    source: { _tag: 'PreparedSource', value: resource },
     cancel: () => Effect.runPromise(resource.cancel),
   } satisfies PreparedWebWatchSource;
 });

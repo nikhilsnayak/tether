@@ -95,7 +95,10 @@ describe('peer-session watch supervision', () => {
         yield* fixture.openRoom(bob);
         yield* openCompatibleWatch(fixture);
 
-        yield* fixture.actor({ _tag: 'WatchProposeSource', source: { value: { id: 'source' } } });
+        yield* fixture.actor({
+          _tag: 'WatchProposeSource',
+          source: { _tag: 'PreparedSource', value: { id: 'source' } },
+        });
         yield* eventually(() =>
           fixture.operations.some((operation) => operation.includes('"type":"watch-proposed"')),
         );
@@ -286,7 +289,7 @@ describe('peer-session watch supervision', () => {
         yield* fixture.openWatchChannel();
         yield* fixture.actor({
           _tag: 'WatchProposeSource',
-          source: { value: { id: 'unclaimed' } },
+          source: { _tag: 'PreparedSource', value: { id: 'unclaimed' } },
         });
         yield* fixture.actor({
           _tag: 'RemoteDataChannel',
@@ -310,7 +313,7 @@ describe('peer-session watch supervision', () => {
         yield* openCompatibleWatch(fixture);
         yield* fixture.actor({
           _tag: 'WatchProposeSource',
-          source: { value: { id: 'replacement-failure' } },
+          source: { _tag: 'PreparedSource', value: { id: 'replacement-failure' } },
         });
         yield* eventually(() =>
           fixture.operations.some((operation) => operation.includes('"type":"watch-proposed"')),

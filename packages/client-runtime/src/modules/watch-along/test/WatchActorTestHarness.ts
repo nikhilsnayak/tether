@@ -33,8 +33,14 @@ const allCapabilities: WatchCapabilities = {
   canControlWatch: true,
 };
 
-export const preparedSource: PreparedSourceHandle = { value: { id: 'prepared' } };
-export const claimedSource: ClaimedSourceHandle = { value: { id: 'claimed' } };
+export const preparedSource: PreparedSourceHandle = {
+  _tag: 'PreparedSource',
+  value: { id: 'prepared' },
+};
+export const claimedSource: ClaimedSourceHandle = {
+  _tag: 'ClaimedSource',
+  value: { id: 'claimed' },
+};
 export const programStreamHandle: ProgramStreamHandle = { value: { id: 'program' } };
 export const remoteStreamHandle: ProgramStreamHandle = { value: { id: 'remote-program' } };
 

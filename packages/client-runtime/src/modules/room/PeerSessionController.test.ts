@@ -12,7 +12,7 @@ import type { PeerSession } from './PeerSessionHost';
 const peerId = PeerId.make('bbbbbbbbbbbb');
 const pose = { x: 1, z: 2, yaw: 0, action: 'walk' } as const;
 const mediaState = { cameraOn: true, microphoneOn: false } as const;
-const watchSource = { value: { id: 'prepared' } };
+const watchSource = { _tag: 'PreparedSource', value: { id: 'prepared' } } as const;
 const watchControl = { kind: 'play' } as const;
 
 const flushNotifications = Effect.promise(() => Promise.resolve());
