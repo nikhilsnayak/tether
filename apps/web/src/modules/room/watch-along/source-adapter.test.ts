@@ -14,13 +14,17 @@ import {
   type WatchAlongPlatformTestHarness,
 } from '@tether/test-support/watch-along-platform-contract';
 import { Effect, Fiber, Layer } from 'effect';
+import { TestClock } from 'effect/testing';
 import { afterEach, vi } from 'vitest';
 
 import { programMediaStreamValue, webWatchAlongPlatformLayer } from './platform';
 import {
   prepareWatchSource,
+  prepareWatchSourceWith,
+  WATCH_SOURCE_READY_TIMEOUT,
   waitForWatchSourceReady,
   WebWatchSourceError,
+  type CapturableVideoElement,
   type WebWatchSourceResource,
 } from './source-adapter';
 import {
@@ -125,8 +129,12 @@ describe('web watch source', () => {
         Effect.forkChild({ startImmediately: true }),
       );
       yield* Effect.yieldNow;
+      assert.strictEqual(video.listenerCount('canplay'), 1);
+      assert.strictEqual(video.listenerCount('error'), 1);
       video.emit('canplay');
       yield* Fiber.join(ready);
+      assert.strictEqual(video.listenerCount('canplay'), 0);
+      assert.strictEqual(video.listenerCount('error'), 0);
 
       const failed = new FakeWatchVideo();
       failed.readyState = 0;
@@ -137,6 +145,70 @@ describe('web watch source', () => {
       yield* Effect.yieldNow;
       failed.emit('error');
       assert.instanceOf(yield* Fiber.join(failure), WebWatchSourceError);
+      assert.strictEqual(failed.listenerCount('canplay'), 0);
+      assert.strictEqual(failed.listenerCount('error'), 0);
+    });
+  });
+
+  it.effect('times out media readiness and removes its listeners', () => {
+    installMediaReadyConstant();
+    return Effect.gen(function* () {
+      const video = new FakeWatchVideo();
+      video.readyState = 0;
+      const readiness = yield* waitForWatchSourceReady(video as unknown as HTMLMediaElement).pipe(
+        Effect.flip,
+        Effect.forkChild({ startImmediately: true }),
+      );
+      yield* Effect.yieldNow;
+
+      yield* TestClock.adjust(WATCH_SOURCE_READY_TIMEOUT);
+
+      const error = yield* Fiber.join(readiness);
+      assert.instanceOf(error, WebWatchSourceError);
+      assert.strictEqual(error.operation, 'prepare');
+      assert.strictEqual(video.listenerCount('canplay'), 0);
+      assert.strictEqual(video.listenerCount('error'), 0);
+    });
+  });
+
+  it.effect('releases browser resources when media readiness times out', () => {
+    installMediaReadyConstant();
+    return Effect.gen(function* () {
+      const video = new FakeWatchVideo();
+      video.readyState = 0;
+      const revoked: string[] = [];
+      const preparation = yield* prepareWatchSourceWith({ type: 'video/mp4' } as File, {
+        createObjectURL: () => 'blob:timeout',
+        revokeObjectURL: (url) => void revoked.push(url),
+        createVideoElement: () => video as unknown as CapturableVideoElement,
+      }).pipe(Effect.flip, Effect.forkChild({ startImmediately: true }));
+      yield* Effect.yieldNow;
+
+      yield* TestClock.adjust(WATCH_SOURCE_READY_TIMEOUT);
+
+      assert.instanceOf(yield* Fiber.join(preparation), WebWatchSourceError);
+      assert.deepStrictEqual(revoked, ['blob:timeout']);
+      assert.strictEqual(video.removeSourceCount, 1);
+      assert.strictEqual(video.captureCount, 0);
+      assert.strictEqual(video.listenerCount('canplay'), 0);
+      assert.strictEqual(video.listenerCount('error'), 0);
+    });
+  });
+
+  it.effect('removes media readiness listeners when interrupted', () => {
+    installMediaReadyConstant();
+    return Effect.gen(function* () {
+      const video = new FakeWatchVideo();
+      video.readyState = 0;
+      const readiness = yield* waitForWatchSourceReady(video as unknown as HTMLMediaElement).pipe(
+        Effect.forkChild({ startImmediately: true }),
+      );
+      yield* Effect.yieldNow;
+
+      yield* Fiber.interrupt(readiness);
+
+      assert.strictEqual(video.listenerCount('canplay'), 0);
+      assert.strictEqual(video.listenerCount('error'), 0);
     });
   });
 

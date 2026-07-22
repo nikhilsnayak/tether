@@ -30,6 +30,8 @@ const browserWatchSourceEnvironment = (): WatchSourceEnvironment => ({
 const sourceError = (operation: WebWatchSourceError['operation'], cause: unknown) =>
   new WebWatchSourceError({ operation, cause });
 
+export const WATCH_SOURCE_READY_TIMEOUT = '15 seconds';
+
 const trySource = <A>(
   operation: WebWatchSourceError['operation'],
   evaluate: () => A,
@@ -62,7 +64,12 @@ export const waitForWatchSourceReady = (
     element.addEventListener('canplay', handleReady);
     element.addEventListener('error', handleError);
     return Effect.sync(cleanup);
-  });
+  }).pipe(
+    Effect.timeoutOrElse({
+      duration: WATCH_SOURCE_READY_TIMEOUT,
+      orElse: () => Effect.fail(sourceError('prepare', 'Media readiness timed out')),
+    }),
+  );
 };
 
 export interface WebWatchSourceResource {

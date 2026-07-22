@@ -10,12 +10,12 @@ import {
   PopoverTrigger,
 } from '@tether/ui/components/popover';
 import { toast } from '@tether/ui/components/toast';
-import { Effect } from 'effect';
 import { Clapperboard, LoaderCircle, Pause, Play, RotateCcw, Square, Upload } from 'lucide-react';
-import { useRef } from 'react';
+import { useRef, useState, useSyncExternalStore } from 'react';
 
 import { useRoomExperience } from '../components/room-experience-context';
 import { prepareWatchSource } from './source-adapter';
+import { createSourcePreparationOwner } from './source-preparation';
 
 const statusLabel = (status: WatchSessionView['status']) => {
   switch (status) {
@@ -39,19 +39,19 @@ export function WatchPanel() {
   const { binding } = useRoomExperience();
   const view = useAtomValue(watchViewAtom);
   const input = useRef<HTMLInputElement>(null);
+  const [preparation] = useState(createSourcePreparationOwner);
+  const preparationStatus = useSyncExternalStore(preparation.subscribe, preparation.getSnapshot);
+  const locallyPreparing = preparationStatus === 'preparing';
+  const status = locallyPreparing ? 'preparing-local' : view.status;
 
   const chooseFile = (file: File) => {
-    Effect.runFork(
-      prepareWatchSource(file).pipe(
-        Effect.flatMap((prepared) => {
-          if (binding.controller.watch.propose(prepared.source) === 'queued') return Effect.void;
-          return Effect.promise(prepared.cancel).pipe(
-            Effect.andThen(Effect.sync(() => toast.error('Watch is not ready'))),
-          );
-        }),
-        Effect.catch(() => Effect.sync(() => toast.error('Unable to load this video'))),
-      ),
-    );
+    preparation.start({
+      prepare: prepareWatchSource(file),
+      propose: (source) =>
+        binding.controller.watch.propose(source) === 'queued' ? 'queued' : 'rejected',
+      onRejected: () => toast.error('Watch is not ready'),
+      onFailure: () => toast.error('Unable to load this video'),
+    });
   };
 
   const control = (kind: 'play' | 'pause' | 'replay' | 'eject') => {
@@ -59,6 +59,10 @@ export function WatchPanel() {
   };
 
   const stop = () => {
+    if (locallyPreparing) {
+      preparation.cancel();
+      return;
+    }
     if (view.status === 'preparing-local' || view.status === 'awaiting-remote-start') {
       binding.controller.watch.cancel();
       return;
@@ -67,11 +71,11 @@ export function WatchPanel() {
   };
 
   const TriggerIcon =
-    view.status === 'playing'
+    status === 'playing'
       ? Pause
-      : view.status === 'loaded-paused'
+      : status === 'loaded-paused'
         ? Play
-        : view.status === 'preparing-local' || view.status === 'awaiting-remote-start'
+        : status === 'preparing-local' || status === 'awaiting-remote-start'
           ? LoaderCircle
           : Clapperboard;
 
@@ -89,7 +93,7 @@ export function WatchPanel() {
         >
           <TriggerIcon
             className={
-              view.status === 'preparing-local' || view.status === 'awaiting-remote-start'
+              status === 'preparing-local' || status === 'awaiting-remote-start'
                 ? 'animate-spin'
                 : undefined
             }
@@ -97,7 +101,7 @@ export function WatchPanel() {
           <span className='font-mono text-[8px] tracking-[0.14em] uppercase sm:text-[9px] sm:tracking-[0.2em]'>
             watch
           </span>
-          {view.status === 'playing' && (
+          {status === 'playing' && (
             <span className='bg-success ring-background absolute top-1.5 right-1.5 size-2.5 rounded-full ring-2' />
           )}
         </PopoverTrigger>
@@ -105,13 +109,13 @@ export function WatchPanel() {
           <PopoverHeader>
             <div className='flex items-center justify-between gap-3'>
               <PopoverTitle>Watch together</PopoverTitle>
-              <span className='text-muted-foreground text-xs'>{statusLabel(view.status)}</span>
+              <span className='text-muted-foreground text-xs'>{statusLabel(status)}</span>
             </div>
             <PopoverDescription>Share a local video on the room display.</PopoverDescription>
           </PopoverHeader>
 
           <div className='flex gap-2'>
-            {view.status === 'idle' && view.canPresent && (
+            {status === 'idle' && view.canPresent && (
               <Button className='flex-1' onClick={() => input.current?.click()}>
                 <Upload />
                 Choose video
@@ -135,7 +139,7 @@ export function WatchPanel() {
                 Replay
               </Button>
             )}
-            {view.role !== null && (
+            {(locallyPreparing || view.role !== null) && (
               <Button variant='outline' onClick={stop}>
                 <Square />
                 Stop

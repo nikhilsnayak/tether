@@ -120,6 +120,10 @@ export class FakeWatchVideo {
     this.listeners.get(type)?.delete(listener);
   }
 
+  listenerCount(type: string) {
+    return this.listeners.get(type)?.size ?? 0;
+  }
+
   emit(type: string) {
     for (const listener of this.listeners.get(type) ?? []) listener();
   }
