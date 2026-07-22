@@ -48,7 +48,7 @@ export interface RoomGameplayConfig {
 
 export interface AvatarInputIntent {
   readonly forward: number;
-  readonly turn: number;
+  readonly lateral: number;
 }
 
 export interface RemotePoseSample {
@@ -58,14 +58,14 @@ export interface RemotePoseSample {
 
 export const AVATAR_COLLISION_RADIUS = 0.32;
 export const AVATAR_MOVE_SPEED = 2;
-export const AVATAR_TURN_SPEED = Math.PI * 1.25;
+export const AVATAR_TURN_SPEED = Math.PI * 4;
 export const AVATAR_SEND_INTERVAL_MS = 100;
 export const REMOTE_INTERPOLATION_DELAY_MS = 100;
 export const REMOTE_EXTRAPOLATION_LIMIT_MS = 250;
 export const REMOTE_TELEPORT_DISTANCE = 2;
 export const MAX_MOVEMENT_DELTA_SECONDS = 0.05;
 
-export const EMPTY_AVATAR_INPUT: AvatarInputIntent = { forward: 0, turn: 0 };
+export const EMPTY_AVATAR_INPUT: AvatarInputIntent = { forward: 0, lateral: 0 };
 
 export const canonicalYaw = (yaw: number): number => {
   const wrapped = ((((yaw + Math.PI) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2)) - Math.PI;
@@ -146,18 +146,30 @@ export const resolveAvatarCollision = (
 export const integrateAvatarPose = (
   pose: AvatarPose,
   input: AvatarInputIntent,
+  cameraYaw: number,
   deltaSeconds: number,
   config: RoomGameplayConfig,
   blocker: GroundPoint | null = null,
 ): AvatarPose => {
   const delta = clamp(deltaSeconds, 0, MAX_MOVEMENT_DELTA_SECONDS);
-  const turn = clamp(input.turn, -1, 1);
   const forward = clamp(input.forward, -1, 1);
-  const yaw = canonicalYaw(pose.yaw + turn * AVATAR_TURN_SPEED * delta);
-  const distance = forward * AVATAR_MOVE_SPEED * delta;
+  const lateral = clamp(input.lateral, -1, 1);
+  const inputLength = Math.hypot(forward, lateral);
+  const inputScale = inputLength > 1 ? 1 / inputLength : 1;
+  const movementX = (Math.sin(cameraYaw) * forward + Math.cos(cameraYaw) * lateral) * inputScale;
+  const movementZ = (Math.cos(cameraYaw) * forward - Math.sin(cameraYaw) * lateral) * inputScale;
+  const moving = inputLength > 0;
+  const desiredYaw = moving ? Math.atan2(movementX, movementZ) : pose.yaw;
+  const yawDelta = clamp(
+    shortestAngleDelta(pose.yaw, desiredYaw),
+    -AVATAR_TURN_SPEED * delta,
+    AVATAR_TURN_SPEED * delta,
+  );
+  const yaw = canonicalYaw(pose.yaw + yawDelta);
+  const distance = Math.min(1, inputLength) * AVATAR_MOVE_SPEED * delta;
   const proposed = {
-    x: pose.x + Math.sin(yaw) * distance,
-    z: pose.z + Math.cos(yaw) * distance,
+    x: pose.x + movementX * AVATAR_MOVE_SPEED * delta,
+    z: pose.z + movementZ * AVATAR_MOVE_SPEED * delta,
   };
   const bounded = resolveAvatarPosition(proposed, pose, config);
   // Treat the peer as a soft obstacle only while this avatar moves. Remote pose
@@ -167,7 +179,7 @@ export const integrateAvatarPose = (
   return {
     ...position,
     yaw,
-    action: Math.abs(distance) > 0 ? 'walk' : 'idle',
+    action: distance > 0 ? 'walk' : 'idle',
   };
 };
 

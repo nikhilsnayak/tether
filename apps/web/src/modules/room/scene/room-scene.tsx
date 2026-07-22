@@ -54,6 +54,7 @@ export function RoomScene({
   const [contextLost, setContextLost] = useState(false);
   const surfaceRef = useRef<HTMLDivElement>(null);
   const localPoseRef = useRef<AvatarPose>(avatarSpawn(template.gameplay, sessionIntent));
+  const cameraYawRef = useRef(localPoseRef.current.yaw);
   const remoteIntent: RoomSession['intent'] = sessionIntent === 'host' ? 'join' : 'host';
   const remotePoseRef = useRef<AvatarPose>(avatarSpawn(template.gameplay, remoteIntent));
   const reducedMotion = useReducedMotionPreference();
@@ -147,6 +148,7 @@ export function RoomScene({
           surfaceRef={surfaceRef}
           outside={cameraOutside}
           recenterSignal={recenterSignal}
+          cameraYawRef={cameraYawRef}
         />
         <LocalAvatarController
           poseRef={localPoseRef}
@@ -159,6 +161,7 @@ export function RoomScene({
           surfaceRef={surfaceRef}
           blockerRef={remotePoseRef}
           blockerActive={presentation.remote !== 'absent'}
+          cameraYawRef={cameraYawRef}
         />
         <RemoteAvatarController
           poseRef={remotePoseRef}

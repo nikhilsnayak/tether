@@ -278,6 +278,43 @@ test.describe('real room', { tag: '@gpu' }, () => {
     expect(await hostScene.getAttribute('data-room-local-pose')).toBe(hostAfter);
   });
 
+  test('camera keeps its boom when the avatar reaches a room boundary', async ({ page, room }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    const host = room.actorFor(page);
+    await room.createRoom(host);
+    const scene = page.getByLabel('Dusk Suite room scene');
+    await expect(scene).toHaveAttribute('data-room-camera-distance', /.+/);
+
+    await page.keyboard.down('w');
+    try {
+      await expect
+        .poll(async () => {
+          const pose = await scene.getAttribute('data-room-local-pose');
+          return Number(pose?.split(',')[0]);
+        })
+        .toBeGreaterThan(4.3);
+    } finally {
+      await page.keyboard.up('w');
+    }
+
+    const sceneBounds = await scene.boundingBox();
+    expect(sceneBounds).not.toBeNull();
+    if (sceneBounds === null) return;
+    const dragY = sceneBounds.y + sceneBounds.height / 2;
+    const dragStartX = sceneBounds.x + 160;
+    await page.mouse.move(dragStartX, dragY);
+    await page.mouse.down();
+    await page.mouse.move(dragStartX + 785, dragY, { steps: 12 });
+    await page.mouse.up();
+
+    await expect
+      .poll(async () => Number(await scene.getAttribute('data-room-camera-distance')))
+      .toBeGreaterThanOrEqual(1);
+    await expect
+      .poll(async () => Number(await scene.getAttribute('data-room-camera-distance')))
+      .toBeLessThan(1.01);
+  });
+
   test('responsive media tiles avoid controls and low quality sustains 30 FPS', async ({
     room,
   }) => {

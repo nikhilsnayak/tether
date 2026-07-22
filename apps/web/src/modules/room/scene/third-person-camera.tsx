@@ -4,11 +4,12 @@ import { useEffect, useRef, type RefObject } from 'react';
 import { MathUtils, Vector3 } from 'three';
 
 import type { RoomTemplate } from '../templates/registry';
-import { cameraContainmentScale } from './camera-containment';
+import { cameraClearanceScale, cameraContainmentScale } from './camera-containment';
 import { clampLook, selectCameraFraming } from './config';
 
 const WORLD_UP = new Vector3(0, 1, 0);
 const CAMERA_VERTICAL_BOUNDS = { minY: 0.8, maxY: 4.2 } as const;
+const CAMERA_AVATAR_CLEARANCE = 1;
 
 export function ThirdPersonCamera({
   template,
@@ -17,6 +18,7 @@ export function ThirdPersonCamera({
   surfaceRef,
   outside,
   recenterSignal,
+  cameraYawRef,
 }: {
   readonly template: RoomTemplate;
   readonly poseRef: RefObject<AvatarPose>;
@@ -24,9 +26,11 @@ export function ThirdPersonCamera({
   readonly surfaceRef: RefObject<HTMLDivElement | null>;
   readonly outside: boolean;
   readonly recenterSignal: RefObject<number>;
+  readonly cameraYawRef: RefObject<number>;
 }) {
   const { camera, size } = useThree();
-  const orbit = useRef({ yaw: 0, pitch: 0 });
+  const orbit = useRef({ yaw: poseRef.current.yaw, pitch: 0 });
+  const outsideLook = useRef({ yaw: 0, pitch: 0 });
   const distance = useRef(template.gameplay.camera.distance);
   const drag = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   const touchPointers = useRef(new Map<number, { x: number; y: number }>());
@@ -35,10 +39,14 @@ export function ThirdPersonCamera({
   const desiredPosition = useRef(new Vector3());
   const desiredFollow = useRef(new Vector3());
   const cameraOrigin = useRef(new Vector3());
+  const avatarOrigin = useRef(new Vector3());
+  const cameraOffset = useRef(new Vector3());
   const target = useRef(new Vector3());
   const lookDirection = useRef(new Vector3());
   const lookRight = useRef(new Vector3());
   const previousRecenterSignal = useRef(recenterSignal.current);
+  const wasOutside = useRef(outside);
+  const lastDiagnosticAtMs = useRef(0);
 
   useEffect(() => {
     const element = surfaceRef.current;
@@ -81,10 +89,11 @@ export function ThirdPersonCamera({
       }
       const current = drag.current;
       if (current === null || current.pointerId !== event.pointerId) return;
-      orbit.current = {
-        yaw: orbit.current.yaw - (event.clientX - current.x) * 0.004,
+      const look = outside ? outsideLook : orbit;
+      look.current = {
+        yaw: look.current.yaw - (event.clientX - current.x) * 0.004,
         pitch: MathUtils.clamp(
-          orbit.current.pitch - (event.clientY - current.y) * 0.003,
+          look.current.pitch - (event.clientY - current.y) * 0.003,
           -0.35,
           0.45,
         ),
@@ -124,11 +133,11 @@ export function ThirdPersonCamera({
       element.removeEventListener('pointercancel', pointerUp);
       element.removeEventListener('wheel', wheel);
     };
-  }, [surfaceRef, template]);
+  }, [outside, surfaceRef, template]);
 
   useFrame((_, delta) => {
     if (previousRecenterSignal.current !== recenterSignal.current) {
-      orbit.current = { yaw: 0, pitch: 0 };
+      orbit.current = { yaw: poseRef.current.yaw, pitch: 0 };
       distance.current = template.gameplay.camera.distance;
       previousRecenterSignal.current = recenterSignal.current;
     }
@@ -137,25 +146,31 @@ export function ThirdPersonCamera({
     if (outside) {
       // Outside the room the guest may only glance around within tight bounds so
       // they cannot rotate the view to peek inside before being admitted.
-      orbit.current = clampLook(orbit.current.yaw, orbit.current.pitch, template.camera.look);
+      outsideLook.current = clampLook(
+        outsideLook.current.yaw,
+        outsideLook.current.pitch,
+        template.camera.look,
+      );
       desiredPosition.current.set(...framing.position);
       camera.position.lerp(desiredPosition.current, reducedMotion ? 1 : 1 - Math.exp(-delta * 6));
       lookDirection.current
         .set(...framing.target)
         .sub(desiredPosition.current)
         .normalize()
-        .applyAxisAngle(WORLD_UP, orbit.current.yaw);
+        .applyAxisAngle(WORLD_UP, outsideLook.current.yaw);
       lookRight.current.crossVectors(lookDirection.current, WORLD_UP).normalize();
-      lookDirection.current.applyAxisAngle(lookRight.current, orbit.current.pitch);
+      lookDirection.current.applyAxisAngle(lookRight.current, outsideLook.current.pitch);
       target.current.copy(desiredPosition.current).add(lookDirection.current);
       camera.lookAt(target.current);
     } else {
+      if (wasOutside.current) orbit.current = { yaw: poseRef.current.yaw, pitch: 0 };
+      cameraYawRef.current = orbit.current.yaw;
       const followAlpha = reducedMotion
         ? 1
         : 1 - Math.exp(-delta / template.gameplay.camera.followSeconds);
       desiredFollow.current.set(poseRef.current.x, 0, poseRef.current.z);
       followed.current.lerp(desiredFollow.current, followAlpha);
-      const yaw = poseRef.current.yaw + orbit.current.yaw;
+      const yaw = orbit.current.yaw;
       const horizontalDistance = distance.current * Math.cos(orbit.current.pitch);
       desiredPosition.current.set(
         followed.current.x - Math.sin(yaw) * horizontalDistance,
@@ -173,14 +188,41 @@ export function ThirdPersonCamera({
         template.gameplay.walkableBounds,
         CAMERA_VERTICAL_BOUNDS,
       );
+      const clearanceScale = cameraClearanceScale(
+        cameraOrigin.current,
+        desiredPosition.current,
+        containmentScale,
+        CAMERA_AVATAR_CLEARANCE,
+      );
       desiredPosition.current
         .sub(cameraOrigin.current)
-        .multiplyScalar(containmentScale)
+        .multiplyScalar(clearanceScale)
         .add(cameraOrigin.current);
       camera.position.lerp(desiredPosition.current, followAlpha);
+      avatarOrigin.current.set(
+        poseRef.current.x,
+        template.gameplay.camera.targetHeight,
+        poseRef.current.z,
+      );
+      cameraOffset.current.copy(camera.position).sub(avatarOrigin.current);
+      if (cameraOffset.current.lengthSq() < CAMERA_AVATAR_CLEARANCE ** 2) {
+        if (cameraOffset.current.lengthSq() < 0.000_001) {
+          cameraOffset.current.copy(desiredPosition.current).sub(avatarOrigin.current);
+        }
+        cameraOffset.current.setLength(CAMERA_AVATAR_CLEARANCE);
+        camera.position.copy(avatarOrigin.current).add(cameraOffset.current);
+      }
       target.current.copy(cameraOrigin.current);
       camera.lookAt(target.current);
+      const nowMs = performance.now();
+      if (nowMs - lastDiagnosticAtMs.current >= 100 && surfaceRef.current !== null) {
+        surfaceRef.current.dataset.roomCameraDistance = camera.position
+          .distanceTo(avatarOrigin.current)
+          .toFixed(3);
+        lastDiagnosticAtMs.current = nowMs;
+      }
     }
+    wasOutside.current = outside;
     if ('fov' in camera) {
       const fieldOfView = framing.fieldOfView;
       if (camera.fov !== fieldOfView) {

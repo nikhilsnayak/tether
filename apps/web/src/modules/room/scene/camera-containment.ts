@@ -43,3 +43,18 @@ export const cameraContainmentScale = (
       axisContainmentScale(origin.z, desired.z, ground.minZ, ground.maxZ),
     ),
   );
+
+/**
+ * Preserves a minimum camera boom around the avatar when room containment
+ * would otherwise collapse the camera into its target at a wall.
+ */
+export const cameraClearanceScale = (
+  origin: CameraPoint,
+  desired: CameraPoint,
+  containmentScale: number,
+  minimumDistance: number,
+): number => {
+  const distance = Math.hypot(desired.x - origin.x, desired.y - origin.y, desired.z - origin.z);
+  if (distance <= minimumDistance) return 1;
+  return Math.max(containmentScale, minimumDistance / distance);
+};

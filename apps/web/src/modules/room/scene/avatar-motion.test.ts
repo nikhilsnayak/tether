@@ -40,17 +40,65 @@ describe('avatar motion', () => {
 
   it('caps large deltas, moves on the ground, and marks walking', () => {
     expect(
-      integrateAvatarPose(avatarSpawn(config, 'host'), { forward: 1, turn: 0 }, 1, config),
+      integrateAvatarPose(
+        avatarSpawn(config, 'host'),
+        { forward: 1, lateral: 0 },
+        Math.PI / 2,
+        1,
+        config,
+      ),
     ).toMatchObject({ x: -1.15, z: 0.8, action: 'walk' });
     expect(
-      integrateAvatarPose(avatarSpawn(config, 'host'), { forward: 0, turn: 0 }, 0.05, config),
+      integrateAvatarPose(
+        avatarSpawn(config, 'host'),
+        { forward: 0, lateral: 0 },
+        Math.PI / 2,
+        0.05,
+        config,
+      ),
     ).toMatchObject({ action: 'idle' });
+  });
+
+  it('moves relative to camera heading and turns the avatar toward travel', () => {
+    const forward = integrateAvatarPose(
+      { x: 0, z: 0, yaw: 0, action: 'idle' },
+      { forward: 1, lateral: 0 },
+      Math.PI / 2,
+      0.05,
+      config,
+    );
+    expect(forward.x).toBeCloseTo(0.1);
+    expect(forward.z).toBeCloseTo(0);
+    expect(forward.action).toBe('walk');
+    expect(forward.yaw).toBeGreaterThan(0);
+    expect(forward.yaw).toBeLessThan(Math.PI / 2);
+
+    const strafe = integrateAvatarPose(
+      { x: 0, z: 0, yaw: 0, action: 'idle' },
+      { forward: 0, lateral: 1 },
+      0,
+      0.05,
+      config,
+    );
+    expect(strafe).toMatchObject({ x: 0.1, z: 0, action: 'walk' });
+  });
+
+  it('normalizes diagonal input to the configured movement speed', () => {
+    const moved = integrateAvatarPose(
+      { x: 0, z: 0, yaw: 0, action: 'idle' },
+      { forward: 1, lateral: 1 },
+      0,
+      0.05,
+      config,
+    );
+    expect(Math.hypot(moved.x, moved.z)).toBeCloseTo(0.1);
   });
 
   it('clamps room edges and resolves obstacle corners', () => {
     const edge = integrateAvatarPose(
       { x: 4.34, z: 0, yaw: Math.PI / 2, action: 'walk' },
-      { forward: 1, turn: 0 },
+      { forward: 1, lateral: 0 },
+      Math.PI / 2,
       0.05,
       config,
     );
@@ -58,7 +106,8 @@ describe('avatar motion', () => {
 
     const blocked = integrateAvatarPose(
       { x: -0.83, z: 1.2, yaw: Math.PI / 2, action: 'idle' },
-      { forward: 1, turn: 0 },
+      { forward: 1, lateral: 0 },
+      Math.PI / 2,
       0.05,
       config,
     );
@@ -82,7 +131,8 @@ describe('avatar motion', () => {
     const blocker = { x: 1, z: 0.8 };
     const next = integrateAvatarPose(
       { x: 0.4, z: 0.8, yaw: Math.PI / 2, action: 'walk' },
-      { forward: 1, turn: 0 },
+      { forward: 1, lateral: 0 },
+      Math.PI / 2,
       0.05,
       config,
       blocker,
@@ -95,7 +145,10 @@ describe('avatar motion', () => {
   it('does not let remote interpolation push an idle local avatar', () => {
     const pose = { x: 2.4, z: 0.8, yaw: Math.PI / 2, action: 'idle' } as const;
     expect(
-      integrateAvatarPose(pose, { forward: 0, turn: 0 }, 0.05, config, { x: 2.5, z: 0.8 }),
+      integrateAvatarPose(pose, { forward: 0, lateral: 0 }, Math.PI / 2, 0.05, config, {
+        x: 2.5,
+        z: 0.8,
+      }),
     ).toMatchObject({ x: pose.x, z: pose.z, action: 'idle' });
   });
 
@@ -197,7 +250,8 @@ describe('avatar motion', () => {
   it('selects the nearest obstacle edge relative to the previous position', () => {
     const resolved = integrateAvatarPose(
       { x: 0, z: 2.4, yaw: Math.PI, action: 'walk' },
-      { forward: 1, turn: 0 },
+      { forward: 1, lateral: 0 },
+      Math.PI,
       0.05,
       config,
     );

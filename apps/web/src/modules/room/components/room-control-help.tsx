@@ -5,7 +5,7 @@ import { CircleQuestionMark } from 'lucide-react';
 const controls = [
   ['W / ↑', 'Move forward'],
   ['S / ↓', 'Move backward'],
-  ['A D / ← →', 'Turn'],
+  ['A D / ← →', 'Move sideways'],
   ['Drag', 'Orbit camera'],
   ['Scroll', 'Zoom'],
   ['R', 'Recenter camera'],

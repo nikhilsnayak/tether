@@ -34,9 +34,9 @@ export function useAvatarControls(enabled: boolean) {
           Number(
             heldControls.has('backward') || activeKeys.has('S') || activeKeys.has('ArrowDown'),
           ),
-        turn:
-          Number(heldControls.has('left') || activeKeys.has('A') || activeKeys.has('ArrowLeft')) -
-          Number(heldControls.has('right') || activeKeys.has('D') || activeKeys.has('ArrowRight')),
+        lateral:
+          Number(heldControls.has('right') || activeKeys.has('D') || activeKeys.has('ArrowRight')) -
+          Number(heldControls.has('left') || activeKeys.has('A') || activeKeys.has('ArrowLeft')),
       }
     : EMPTY_AVATAR_INPUT;
   const setControlHeld = (control: AvatarControl, held: boolean) => {
@@ -58,7 +58,7 @@ export function useAvatarControls(enabled: boolean) {
         if (!shouldIgnoreKeyboardTarget(event.target)) event.preventDefault();
       },
       options: {
-        meta: { name: 'Move avatar', description: 'Move or turn your room avatar' },
+        meta: { name: 'Move avatar', description: 'Move your room avatar relative to the camera' },
       },
     })),
     {
