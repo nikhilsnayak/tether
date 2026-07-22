@@ -408,7 +408,7 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
         acceptingInputs && Queue.offerUnsafe(mailbox, { _tag: 'WatchProposeSource', source }),
       control: (control) =>
         acceptingInputs && Queue.offerUnsafe(mailbox, { _tag: 'WatchRequestControl', control }),
-      cancel: () => acceptingInputs && Queue.offerUnsafe(mailbox, { _tag: 'WatchCancelPreparing' }),
+      cancel: () => acceptingInputs && Queue.offerUnsafe(mailbox, { _tag: 'WatchCancel' }),
     },
     respondToJoin: (peerId, decision) =>
       Effect.runPromise(

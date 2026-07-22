@@ -58,6 +58,14 @@ export function WatchPanel() {
     binding.controller.watch.control({ kind });
   };
 
+  const stop = () => {
+    if (view.status === 'preparing-local' || view.status === 'awaiting-remote-start') {
+      binding.controller.watch.cancel();
+      return;
+    }
+    control('eject');
+  };
+
   const TriggerIcon =
     view.status === 'playing'
       ? Play
@@ -128,7 +136,7 @@ export function WatchPanel() {
               </Button>
             )}
             {view.role !== null && (
-              <Button variant='outline' onClick={() => control('eject')}>
+              <Button variant='outline' onClick={stop}>
                 <Square />
                 Stop
               </Button>

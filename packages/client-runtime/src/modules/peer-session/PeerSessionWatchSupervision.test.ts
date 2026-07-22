@@ -244,7 +244,7 @@ describe('peer-session watch supervision', () => {
             reason: 'generation-closed',
           });
           yield* fixture.actor({ _tag: 'WatchRequestControl', control: { kind: 'play' } });
-          yield* fixture.actor({ _tag: 'WatchCancelPreparing' });
+          yield* fixture.actor({ _tag: 'WatchCancel' });
         }),
       ),
   );

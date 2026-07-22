@@ -12,7 +12,7 @@ export type WatchActorInput =
   | { readonly _tag: 'RemoteMessage'; readonly message: WatchMessage }
   | { readonly _tag: 'ProposeLocalSource'; readonly source: PreparedSourceHandle }
   | { readonly _tag: 'RequestControl'; readonly control: WatchControlCommand }
-  | { readonly _tag: 'CancelPreparing' }
+  | { readonly _tag: 'Cancel' }
   | WatchSourceEvent
   | {
       readonly _tag: 'RemoteProgramStreamChanged';

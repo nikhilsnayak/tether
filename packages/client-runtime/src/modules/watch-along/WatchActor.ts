@@ -47,6 +47,7 @@ type State =
       readonly _tag: 'Preparing';
       readonly watchSessionId: WatchSessionId;
       readonly source: PreparedSourceHandle;
+      readonly scope: Scope.Closeable;
     }
   | { readonly _tag: 'Awaiting'; readonly watchSessionId: WatchSessionId }
   | { readonly _tag: 'Active'; readonly session: Session };
@@ -102,7 +103,7 @@ export const makeWatchActor = Effect.fnUntraced(function* (dispatch: WatchActorI
   const releaseSession = Effect.fnUntraced(function* () {
     if (state._tag === 'Unavailable' || state._tag === 'Idle') return;
     if (state._tag === 'Preparing') {
-      yield* platform.cancelPreparedSource(state.source).pipe(Effect.ignore);
+      yield* Scope.close(state.scope, Exit.void);
     }
     if (state._tag === 'Active' && state.session.role === 'presenter') {
       yield* Scope.close(state.session.scope, Exit.void);
@@ -177,6 +178,7 @@ export const makeWatchActor = Effect.fnUntraced(function* (dispatch: WatchActorI
 
     yield* Effect.gen(function* () {
       const claimed = yield* platform.claimSource(source).pipe(Scope.provide(sourceScope));
+      yield* Scope.close(preparing.scope, Exit.void);
       const stream = yield* platform.programStream(claimed);
       yield* platform.attachProgramTracks(stream);
       yield* platform.observeSource(claimed, dispatch).pipe(Scope.provide(sourceScope));
@@ -196,7 +198,7 @@ export const makeWatchActor = Effect.fnUntraced(function* (dispatch: WatchActorI
       Effect.catch(() =>
         Effect.gen(function* () {
           yield* Scope.close(sourceScope, Exit.void);
-          yield* platform.cancelPreparedSource(source).pipe(Effect.ignore);
+          yield* Scope.close(preparing.scope, Exit.void);
           yield* platform.clearProgramTracks.pipe(Effect.ignore);
           yield* send({
             version: WATCH_PROTOCOL_VERSION,
@@ -336,10 +338,16 @@ export const makeWatchActor = Effect.fnUntraced(function* (dispatch: WatchActorI
         if (state._tag !== 'Idle' || !capabilities.canPresentLocalFile) {
           return yield* platform.cancelPreparedSource(input.source).pipe(Effect.ignore);
         }
+        const preparingScope = yield* Scope.fork(actorScope);
+        yield* Scope.addFinalizer(
+          preparingScope,
+          platform.cancelPreparedSource(input.source).pipe(Effect.ignore),
+        );
         state = {
           _tag: 'Preparing',
           watchSessionId: WatchSessionId.make(yield* crypto.randomUUIDv4),
           source: input.source,
+          scope: preparingScope,
         };
         yield* send({
           version: WATCH_PROTOCOL_VERSION,
@@ -349,8 +357,15 @@ export const makeWatchActor = Effect.fnUntraced(function* (dispatch: WatchActorI
         return yield* emitView();
       case 'RequestControl':
         return yield* requestControl(input.control);
-      case 'CancelPreparing':
-        if (state._tag === 'Preparing') return yield* reset('idle');
+      case 'Cancel':
+        if (state._tag === 'Preparing' || state._tag === 'Awaiting') {
+          yield* send({
+            version: WATCH_PROTOCOL_VERSION,
+            type: 'watch-ended',
+            watchSessionId: state.watchSessionId,
+          }).pipe(Effect.ignore);
+          return yield* reset('idle');
+        }
         return;
       case 'RemoteProgramStreamChanged':
         if (input.version <= remoteStreamVersion) return;

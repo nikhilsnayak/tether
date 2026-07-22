@@ -99,7 +99,7 @@ describe('minimal watch actor', () => {
         yield* watch.requestControl({ kind: 'play' });
         yield* watch.receiveReady(sessionId);
         yield* watch.receiveRejected(sessionId);
-        yield* watch.cancelPreparing();
+        yield* watch.cancel();
         yield* watch.receiveCanonical(sessionId, { status: 'playing' });
         yield* watch.input({ _tag: 'SourceEnded' });
         assert.strictEqual(watch.lastView()?.status, 'idle');
@@ -112,7 +112,7 @@ describe('minimal watch actor', () => {
           watchSessionId: sessionId,
           reason: 'busy',
         });
-        yield* watch.cancelPreparing();
+        yield* watch.cancel();
         assert.strictEqual(watch.lastView()?.status, 'idle');
         assert.include(watch.operations, 'cancelPreparedSource');
 
@@ -126,6 +126,52 @@ describe('minimal watch actor', () => {
         assert.strictEqual(watch.lastView()?.status, 'idle');
       }),
     ),
+  );
+
+  it.effect('ends a pending proposal for both peers when either side cancels', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const presenter = yield* makeWatchActorTestHarness();
+        yield* presenter.receiveHello();
+        yield* presenter.propose();
+        const proposal = presenter.lastSent();
+        if (proposal?.type !== 'watch-proposed') return;
+
+        yield* presenter.cancel();
+        assert.deepStrictEqual(presenter.lastSent(), {
+          version: WATCH_PROTOCOL_VERSION,
+          type: 'watch-ended',
+          watchSessionId: proposal.watchSessionId,
+        });
+        assert.strictEqual(presenter.lastView()?.status, 'idle');
+
+        const watcher = yield* makeWatchActorTestHarness();
+        yield* watcher.receiveHello();
+        yield* watcher.peerProposes(sessionId);
+        yield* watcher.cancel();
+        assert.deepStrictEqual(watcher.lastSent(), {
+          version: WATCH_PROTOCOL_VERSION,
+          type: 'watch-ended',
+          watchSessionId: sessionId,
+        });
+        assert.strictEqual(watcher.lastView()?.status, 'idle');
+      }),
+    ),
+  );
+
+  it.effect('releases a prepared source when its actor scope closes', () =>
+    Effect.gen(function* () {
+      const operations = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const watch = yield* makeWatchActorTestHarness();
+          yield* watch.receiveHello();
+          yield* watch.propose();
+          return watch.operations;
+        }),
+      );
+
+      assert.include(operations, 'cancelPreparedSource');
+    }),
   );
 
   it.effect('cancels a proposal when local presentation is unavailable', () =>

@@ -171,7 +171,7 @@ export const makeWatchActorTestHarness = Effect.fn('makeWatchActorTestHarness')(
     canonical,
     propose: (source: PreparedSourceHandle = preparedSource) =>
       submit({ _tag: 'ProposeLocalSource', source }),
-    cancelPreparing: () => submit({ _tag: 'CancelPreparing' }),
+    cancel: () => submit({ _tag: 'Cancel' }),
     requestControl: (control: WatchControlCommand) => submit({ _tag: 'RequestControl', control }),
     peerProposes: (watchSessionId: WatchSessionId) =>
       receive({ version: WATCH_PROTOCOL_VERSION, type: 'watch-proposed', watchSessionId }),

@@ -1310,8 +1310,8 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       case 'WatchRequestControl':
         dispatchWatchInput({ _tag: 'RequestControl', control: input.control });
         return;
-      case 'WatchCancelPreparing':
-        dispatchWatchInput({ _tag: 'CancelPreparing' });
+      case 'WatchCancel':
+        dispatchWatchInput({ _tag: 'Cancel' });
         return;
       case 'SendLeave':
         return yield* handleUiSendLeave();
