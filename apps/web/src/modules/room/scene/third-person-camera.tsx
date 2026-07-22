@@ -1,16 +1,37 @@
 import { useFrame, useThree } from '@react-three/fiber/webgpu';
 import type { AvatarPose } from '@tether/client-runtime/modules/peer-session';
 import { useEffect, useRef, type RefObject } from 'react';
-import { MathUtils, Matrix4, Quaternion, Vector3 } from 'three';
+import { MathUtils, Matrix4, Quaternion, Vector3, type Camera } from 'three';
 
 import type { RoomTemplate } from '../templates/registry';
 import { cameraContainmentScale, resolveCameraClearance } from './camera-containment';
-import { clampLook, selectCameraFraming, selectResponsiveCameraFraming } from './config';
+import {
+  cameraOrbitFromPosition,
+  clampLook,
+  selectCameraFraming,
+  selectResponsiveCameraFraming,
+} from './config';
 
 const WORLD_UP = new Vector3(0, 1, 0);
 const CAMERA_VERTICAL_BOUNDS = { minY: 0.8, maxY: 4.2 } as const;
 const CAMERA_AVATAR_CLEARANCE = 1;
 const WATCH_CAMERA_DAMPING = 4;
+const WATCH_CAMERA_HANDOFF_SECONDS = 0.85;
+
+interface CameraHandoff {
+  readonly fromPosition: Vector3;
+  readonly fromRotation: Quaternion;
+  readonly fromFieldOfView: number;
+  elapsedSeconds: number;
+}
+
+const captureCameraHandoff = (camera: Camera, fallbackFieldOfView: number): CameraHandoff => ({
+  fromPosition: camera.position.clone(),
+  fromRotation: camera.quaternion.clone(),
+  fromFieldOfView:
+    'fov' in camera && typeof camera.fov === 'number' ? camera.fov : fallbackFieldOfView,
+  elapsedSeconds: 0,
+});
 
 export function ThirdPersonCamera({
   template,
@@ -53,11 +74,29 @@ export function ThirdPersonCamera({
   const wasOutside = useRef(outside);
   const previousWatchFraming = useRef(watchFraming);
   const watchFramingSuppressed = useRef(false);
+  const cameraHandoff = useRef<CameraHandoff | null>(null);
   const lastDiagnosticAtMs = useRef(0);
 
   useEffect(() => {
     const element = surfaceRef.current;
     if (element === null) return;
+    const releaseWatchFraming = () => {
+      if (!watchFraming || watchFramingSuppressed.current) return;
+      followed.current.set(poseRef.current.x, 0, poseRef.current.z);
+      const nextOrbit = cameraOrbitFromPosition(
+        camera.position,
+        poseRef.current,
+        template.gameplay.camera.height,
+        {
+          minimum: template.gameplay.camera.minimumDistance,
+          maximum: template.gameplay.camera.maximumDistance,
+        },
+      );
+      orbit.current = { yaw: nextOrbit.yaw, pitch: nextOrbit.pitch };
+      distance.current = nextOrbit.distance;
+      watchFramingSuppressed.current = true;
+      cameraHandoff.current = captureCameraHandoff(camera, template.camera.landscape.fieldOfView);
+    };
     const pointerDown = (event: PointerEvent) => {
       if ((event.target as Element).closest('[data-room-scene-ignore-gesture]') !== null) return;
       if (event.pointerType === 'touch') {
@@ -84,7 +123,7 @@ export function ThirdPersonCamera({
             const nextDistance = Math.hypot(first.x - second.x, first.y - second.y);
             if (pinchDistance.current !== null) {
               if (Math.abs(nextDistance - pinchDistance.current) >= 1) {
-                watchFramingSuppressed.current = watchFraming;
+                releaseWatchFraming();
               }
               distance.current = MathUtils.clamp(
                 distance.current - (nextDistance - pinchDistance.current) * 0.012,
@@ -100,7 +139,7 @@ export function ThirdPersonCamera({
       const current = drag.current;
       if (current === null || current.pointerId !== event.pointerId) return;
       if (Math.hypot(event.clientX - current.x, event.clientY - current.y) >= 1) {
-        watchFramingSuppressed.current = watchFraming;
+        releaseWatchFraming();
       }
       const look = outside ? outsideLook : orbit;
       look.current = {
@@ -128,7 +167,7 @@ export function ThirdPersonCamera({
     const wheel = (event: WheelEvent) => {
       if ((event.target as Element).closest('[data-room-scene-ignore-gesture]') !== null) return;
       event.preventDefault();
-      watchFramingSuppressed.current = watchFraming;
+      releaseWatchFraming();
       distance.current = MathUtils.clamp(
         distance.current + event.deltaY * 0.006,
         template.gameplay.camera.minimumDistance,
@@ -147,7 +186,7 @@ export function ThirdPersonCamera({
       element.removeEventListener('pointercancel', pointerUp);
       element.removeEventListener('wheel', wheel);
     };
-  }, [outside, surfaceRef, template, watchFraming]);
+  }, [camera, outside, poseRef, surfaceRef, template, watchFraming]);
 
   const lookAt = (point: Vector3, alpha: number) => {
     lookMatrix.current.lookAt(camera.position, point, camera.up);
@@ -176,7 +215,7 @@ export function ThirdPersonCamera({
     camera.lookAt(target.current);
   };
 
-  const updateInsideCamera = (delta: number) => {
+  const updateInsideCamera = (delta: number, fieldOfView: number): number => {
     if (wasOutside.current) orbit.current = { yaw: poseRef.current.yaw, pitch: 0 };
     cameraYawRef.current = orbit.current.yaw;
     const followAlpha = reducedMotion
@@ -227,9 +266,27 @@ export function ThirdPersonCamera({
       );
       desiredPosition.current.set(clearancePosition.x, clearancePosition.y, clearancePosition.z);
     }
-    camera.position.lerp(desiredPosition.current, followAlpha);
     target.current.copy(cameraOrigin.current);
-    lookAt(target.current, followAlpha);
+    const handoff = cameraHandoff.current;
+    let nextFieldOfView = fieldOfView;
+    if (handoff === null) {
+      camera.position.lerp(desiredPosition.current, followAlpha);
+      camera.lookAt(target.current);
+    } else {
+      handoff.elapsedSeconds = Math.min(
+        WATCH_CAMERA_HANDOFF_SECONDS,
+        handoff.elapsedSeconds + delta,
+      );
+      const progress = reducedMotion
+        ? 1
+        : MathUtils.smootherstep(handoff.elapsedSeconds / WATCH_CAMERA_HANDOFF_SECONDS, 0, 1);
+      camera.position.copy(handoff.fromPosition).lerp(desiredPosition.current, progress);
+      lookMatrix.current.lookAt(desiredPosition.current, target.current, camera.up);
+      desiredRotation.current.setFromRotationMatrix(lookMatrix.current);
+      camera.quaternion.copy(handoff.fromRotation).slerp(desiredRotation.current, progress);
+      nextFieldOfView = MathUtils.lerp(handoff.fromFieldOfView, fieldOfView, progress);
+      if (progress === 1) cameraHandoff.current = null;
+    }
     const nowMs = performance.now();
     if (nowMs - lastDiagnosticAtMs.current >= 100 && surfaceRef.current !== null) {
       surfaceRef.current.dataset.roomCameraDistance = camera.position
@@ -237,6 +294,7 @@ export function ThirdPersonCamera({
         .toFixed(3);
       lastDiagnosticAtMs.current = nowMs;
     }
+    return nextFieldOfView;
   };
 
   const updateWatchCamera = (
@@ -262,6 +320,12 @@ export function ThirdPersonCamera({
 
   useFrame((_, delta) => {
     if (previousWatchFraming.current !== watchFraming) {
+      const manuallySuppressed = watchFramingSuppressed.current;
+      if (watchFraming) {
+        cameraHandoff.current = null;
+      } else if (!manuallySuppressed) {
+        cameraHandoff.current = captureCameraHandoff(camera, template.camera.landscape.fieldOfView);
+      }
       watchFramingSuppressed.current = false;
       previousWatchFraming.current = watchFraming;
     }
@@ -269,6 +333,7 @@ export function ThirdPersonCamera({
       orbit.current = { yaw: poseRef.current.yaw, pitch: 0 };
       distance.current = template.gameplay.camera.distance;
       watchFramingSuppressed.current = false;
+      cameraHandoff.current = null;
       previousRecenterSignal.current = recenterSignal.current;
     }
 
@@ -278,6 +343,7 @@ export function ThirdPersonCamera({
       !outside && watchFraming && !watchFramingSuppressed.current && watchCamera !== undefined;
     let fieldOfView = framing.fieldOfView;
     if (outside) {
+      cameraHandoff.current = null;
       updateOutsideCamera(delta, framing);
     } else if (watchCameraEngaged && watchCamera !== undefined) {
       const watchCameraFraming = selectResponsiveCameraFraming(
@@ -288,7 +354,7 @@ export function ThirdPersonCamera({
       updateWatchCamera(delta, watchCameraFraming);
       fieldOfView = watchCameraFraming.fieldOfView;
     } else {
-      updateInsideCamera(delta);
+      fieldOfView = updateInsideCamera(delta, framing.fieldOfView);
     }
     if (surfaceRef.current !== null) {
       surfaceRef.current.dataset.roomCameraMode = watchCameraEngaged ? 'watch' : 'avatar';

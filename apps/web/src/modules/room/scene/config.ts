@@ -6,6 +6,12 @@ export interface CameraFraming {
   readonly fieldOfView: number;
 }
 
+export interface CameraOrbit {
+  readonly yaw: number;
+  readonly pitch: number;
+  readonly distance: number;
+}
+
 export interface CameraFramings {
   readonly landscape: CameraFraming;
   readonly portrait: CameraFraming;
@@ -143,6 +149,26 @@ export function clampLook(
   return {
     yaw: Math.min(config.yaw[1], Math.max(config.yaw[0], yaw)),
     pitch: Math.min(config.pitch[1], Math.max(config.pitch[0], pitch)),
+  };
+}
+
+export function cameraOrbitFromPosition(
+  position: { readonly x: number; readonly y: number; readonly z: number },
+  focus: { readonly x: number; readonly z: number },
+  cameraHeight: number,
+  distanceBounds: { readonly minimum: number; readonly maximum: number },
+): CameraOrbit {
+  const offsetX = position.x - focus.x;
+  const offsetZ = position.z - focus.z;
+  const verticalOffset = position.y - cameraHeight;
+  const horizontalDistance = Math.hypot(offsetX, offsetZ);
+  return {
+    yaw: Math.atan2(-offsetX, -offsetZ),
+    pitch: Math.min(0.45, Math.max(-0.35, Math.atan2(verticalOffset, horizontalDistance))),
+    distance: Math.min(
+      distanceBounds.maximum,
+      Math.max(distanceBounds.minimum, Math.hypot(horizontalDistance, verticalOffset)),
+    ),
   };
 }
 

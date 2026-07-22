@@ -1,6 +1,7 @@
 import { assert, describe, it } from 'vitest';
 
 import {
+  cameraOrbitFromPosition,
   clampLook,
   type AdaptiveQualityState,
   isQualityPreference,
@@ -26,6 +27,18 @@ describe('scene configuration', () => {
   it('bounds camera look and preserves values within the range', () => {
     assert.deepStrictEqual(clampLook(1, -1, look), { yaw: 0.32, pitch: -0.16 });
     assert.deepStrictEqual(clampLook(0.1, 0.05, look), { yaw: 0.1, pitch: 0.05 });
+  });
+
+  it('continues an avatar orbit from the current camera position', () => {
+    const orbit = cameraOrbitFromPosition({ x: 0, y: 3.2, z: 4 }, { x: -1.25, z: 0.8 }, 2.55, {
+      minimum: 3,
+      maximum: 7,
+    });
+    const horizontalDistance = orbit.distance * Math.cos(orbit.pitch);
+
+    assert.closeTo(-1.25 - Math.sin(orbit.yaw) * horizontalDistance, 0, 1e-10);
+    assert.closeTo(2.55 + Math.sin(orbit.pitch) * orbit.distance, 3.2, 1e-10);
+    assert.closeTo(0.8 - Math.cos(orbit.yaw) * horizontalDistance, 4, 1e-10);
   });
 
   it('selects framing from viewport orientation', () => {
