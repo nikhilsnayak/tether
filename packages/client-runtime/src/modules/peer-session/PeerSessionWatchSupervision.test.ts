@@ -58,32 +58,109 @@ const proposalFrom = (operations: ReadonlyArray<string>) => {
 };
 
 describe('peer-session watch supervision', () => {
-  it.effect('provisions watch resources only for a capable room', () =>
+  it.effect('requires template support and local baseline capabilities', () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const enabled = yield* makePeerSessionTestHarness();
-        yield* enabled.openRoom(bob);
-        assert.include(enabled.operations, 'reserveProgramTransceivers');
+        const web = yield* makePeerSessionTestHarness();
+        yield* web.openRoom(bob);
+        assert.include(web.operations, 'reserveProgramTransceivers');
         assert.isTrue(
-          enabled.dataChannels.some(
-            (channel) => (channel.value as { readonly label: string }).label === 'watch-control-v1',
+          web.dataChannels.some(
+            (channel) => (channel.value as TestDataChannel).label === WATCH_CONTROL_CHANNEL_LABEL,
           ),
         );
 
-        const disabled = yield* makePeerSessionTestHarness();
-        yield* disabled.openRoom(bob, RoomTemplateId.make('watch-disabled-test'));
-        assert.notInclude(disabled.operations, 'reserveProgramTransceivers');
+        const watcherOnly = yield* makePeerSessionTestHarness(
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          { capabilities: { canPresentLocalFile: false } },
+        );
+        yield* watcherOnly.openRoom(bob);
+        assert.include(watcherOnly.operations, 'reserveProgramTransceivers');
+
+        for (const capability of [
+          'canReceiveProgramMedia',
+          'canRenderWatch',
+          'canControlWatch',
+        ] as const) {
+          const disabled = yield* makePeerSessionTestHarness(
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            { capabilities: { [capability]: false } },
+          );
+          yield* disabled.openRoom(bob);
+          assert.notInclude(disabled.operations, 'reserveProgramTransceivers');
+          assert.isFalse(
+            disabled.dataChannels.some(
+              (channel) => (channel.value as TestDataChannel).label === WATCH_CONTROL_CHANNEL_LABEL,
+            ),
+          );
+          assert.include(disabled.operations, 'createOffer');
+        }
+
+        const unsupportedTemplate = yield* makePeerSessionTestHarness();
+        yield* unsupportedTemplate.openRoom(bob, RoomTemplateId.make('watch-disabled-test'));
+        assert.notInclude(unsupportedTemplate.operations, 'reserveProgramTransceivers');
         assert.isFalse(
-          disabled.dataChannels.some(
-            (channel) => (channel.value as { readonly label: string }).label === 'watch-control-v1',
+          unsupportedTemplate.dataChannels.some(
+            (channel) => (channel.value as TestDataChannel).label === WATCH_CONTROL_CHANNEL_LABEL,
           ),
         );
+      }),
+    ),
+  );
 
-        const disabledAnswerer = yield* makePeerSessionTestHarness();
-        yield* disabledAnswerer.openRoom(null, RoomTemplateId.make('watch-disabled-test'));
+  it.effect('keeps an incapable answerer alive when a peer offers watch', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const disabledAnswerer = yield* makePeerSessionTestHarness(
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          {
+            role: 'host',
+            capabilities: {
+              canPresentLocalFile: false,
+              canReceiveProgramMedia: false,
+              canRenderWatch: false,
+              canControlWatch: false,
+            },
+          },
+        );
+        const remoteWatchChannel: DataChannelHandle = {
+          value: { label: WATCH_CONTROL_CHANNEL_LABEL } satisfies TestDataChannel,
+        };
+
+        yield* disabledAnswerer.openRoom(null);
         yield* disabledAnswerer.peerJoined(bob);
         yield* disabledAnswerer.receiveOffer(bob, 'disabled-offer', 0);
+        yield* disabledAnswerer.actor({
+          _tag: 'RemoteDataChannel',
+          peerConnection: disabledAnswerer.peerConnection,
+          dataChannel: remoteWatchChannel,
+        });
+        yield* disabledAnswerer.actor({
+          _tag: 'DataChannelOpened',
+          dataChannel: remoteWatchChannel,
+        });
+
+        assert.notInclude(disabledAnswerer.operations, 'reserveProgramTransceivers');
         assert.include(disabledAnswerer.operations, 'createAnswer');
+        assert.include(
+          disabledAnswerer.operations,
+          `closeDataChannel:${WATCH_CONTROL_CHANNEL_LABEL}`,
+        );
+        assert.isFalse(
+          disabledAnswerer.operations.some((operation) => operation.includes('"type":"hello"')),
+        );
       }),
     ),
   );

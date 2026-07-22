@@ -257,8 +257,8 @@ const makeRoomEventMemory = (initialMediaState: MediaState | null) => {
   };
 };
 
-// Resolved once from the room template when the session opens; it gates all
-// watch-along transport provisioning and never changes within a session.
+// Resolved once from template support and local baseline capabilities when the
+// session opens; it gates all watch transport provisioning for that session.
 const makeWatchMemory = () => {
   let enabled = false;
 

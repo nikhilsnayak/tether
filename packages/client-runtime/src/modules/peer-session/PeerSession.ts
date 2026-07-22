@@ -61,6 +61,12 @@ export interface PeerSessionWatchDependencies {
   readonly sink: WatchEventSink['Service'];
 }
 
+const canProvisionWatchTransport = (templateEnabled: boolean, capabilities: WatchCapabilities) =>
+  templateEnabled &&
+  capabilities.canReceiveProgramMedia &&
+  capabilities.canRenderWatch &&
+  capabilities.canControlWatch;
+
 const requireDescription = (description: SessionDescription, type: 'offer' | 'answer') =>
   description.sdp === undefined
     ? Effect.fail(new Error(`Failed to create ${type}: SDP is undefined`))
@@ -485,7 +491,12 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       return yield* Effect.logWarning('Ignored duplicate room session open');
     }
 
-    memory.watch.setEnabled(resolveRoomFeatureManifest(roomTemplateId).watchAlong);
+    memory.watch.setEnabled(
+      canProvisionWatchTransport(
+        resolveRoomFeatureManifest(roomTemplateId).watchAlong,
+        watch.capabilities,
+      ),
+    );
     const generation = yield* acquirePeerConnectionGeneration();
 
     if (peerId === null) {
