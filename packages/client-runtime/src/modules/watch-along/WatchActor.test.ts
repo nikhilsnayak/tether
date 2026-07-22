@@ -1,5 +1,5 @@
 import { assert, describe, it } from '@effect/vitest';
-import { Effect } from 'effect';
+import { Deferred, Effect } from 'effect';
 
 import { WATCH_PROTOCOL_VERSION, WatchSessionId } from './Protocol';
 import { WatchPlatformError } from './Services';
@@ -155,6 +155,34 @@ describe('minimal watch actor', () => {
           watchSessionId: sessionId,
         });
         assert.strictEqual(watcher.lastView()?.status, 'idle');
+      }),
+    ),
+  );
+
+  it.effect('honors cancellation queued while a proposal becomes active', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const continueStartup = yield* Deferred.make<void>();
+        const watch = yield* makeWatchActorTestHarness({
+          overrides: { primeFirstFrame: () => Deferred.await(continueStartup) },
+        });
+        yield* watch.receiveHello();
+        yield* watch.propose();
+        const proposal = watch.lastSent();
+        if (proposal?.type !== 'watch-proposed') return;
+
+        yield* watch.receiveReady(proposal.watchSessionId);
+        yield* watch.enqueue({ _tag: 'Cancel' });
+        yield* Deferred.succeed(continueStartup, undefined);
+        yield* watch.settle;
+
+        assert.strictEqual(watch.lastView()?.status, 'idle');
+        assert.deepStrictEqual(watch.lastSent(), {
+          version: WATCH_PROTOCOL_VERSION,
+          type: 'watch-ended',
+          watchSessionId: proposal.watchSessionId,
+        });
+        assert.include(watch.operations, 'closeSourceScope');
       }),
     ),
   );

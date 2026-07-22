@@ -163,6 +163,8 @@ export const makeWatchActorTestHarness = Effect.fn('makeWatchActorTestHarness')(
     sent,
     dependencies,
     input: submit,
+    enqueue: (input: WatchActorInput) => Queue.offer(mailbox, input),
+    settle,
     openChannel: () => submit({ _tag: 'ChannelOpened' }),
     closeChannel: () => submit({ _tag: 'ChannelClosed' }),
     receiveHello: (peer: Partial<WatchCapabilities> = {}) =>

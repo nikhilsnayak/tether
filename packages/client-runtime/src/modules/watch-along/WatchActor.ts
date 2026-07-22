@@ -358,6 +358,7 @@ export const makeWatchActor = Effect.fnUntraced(function* (dispatch: WatchActorI
       case 'RequestControl':
         return yield* requestControl(input.control);
       case 'Cancel':
+        if (state._tag === 'Active') return yield* requestControl({ kind: 'eject' });
         if (state._tag === 'Preparing' || state._tag === 'Awaiting') {
           yield* send({
             version: WATCH_PROTOCOL_VERSION,
