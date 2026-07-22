@@ -3,6 +3,7 @@ import type { RoomSession } from '@tether/client-runtime/modules/room';
 import { Suspense, useEffect, useReducer, useRef } from 'react';
 
 import { initialRoomEntryState, roomEntryReducer } from '../entry/room-entry-state';
+import { useProgramAudioPreferences } from '../hooks/use-program-audio-preferences';
 import type { PreparedMediaSelection } from '../preflight/media';
 import { MediaSetupPanel } from '../preflight/media-setup-panel';
 import type { RoomTemplate } from '../templates/registry';
@@ -27,6 +28,8 @@ export function RoomEntryFlow({
   readonly onLeave: () => void;
 }) {
   const [state, dispatch] = useReducer(roomEntryReducer, initialRoomEntryState);
+  const { preferences: audioPreferences, setPreferences: setAudioPreferences } =
+    useProgramAudioPreferences();
   // One record per entry attempt: `index` is the error boundary's reset key
   // (session.selfId is stable and never resets it), and `claimed` latches the
   // first accepted media synchronously so a racing completion can't slip past.
@@ -41,6 +44,8 @@ export function RoomEntryFlow({
       return;
     }
     attempt.current.claimed = true;
+    // Keep the chosen output and program volume, but never begin a new call muted.
+    setAudioPreferences({ ...audioPreferences, speakerEnabled: true });
     dispatch({ _tag: 'MediaPrepared', preparedMedia });
   };
 

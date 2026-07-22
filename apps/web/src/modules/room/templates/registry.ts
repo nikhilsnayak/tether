@@ -30,6 +30,12 @@ export interface RoomTemplate {
     readonly outside: CameraFraming;
     readonly look: CameraLookConfig;
   };
+  readonly watchAlong?: {
+    readonly display: {
+      readonly position: [number, number, number];
+      readonly size: readonly [number, number];
+    };
+  };
 }
 
 export type RoomTemplateResolution =
@@ -45,7 +51,7 @@ export const DUSK_SUITE_TEMPLATE: RoomTemplate = {
   scene: lazy(loadDuskSuiteScene),
   gameplay: {
     walkableBounds: { minX: -4.35, maxX: 4.35, minZ: -3.35, maxZ: 4.35 },
-    // Dusk Suite's display console and doorway sit beyond the walkable center bounds.
+    // Dusk Suite's wall display and doorway sit beyond the walkable center bounds.
     obstacles: [],
     spawns: {
       host: { x: -1.25, z: 0.8, yaw: Math.PI / 2 },
@@ -71,6 +77,9 @@ export const DUSK_SUITE_TEMPLATE: RoomTemplate = {
       recenterAfterMs: 2_800,
       recenterSeconds: 1.15,
     },
+  },
+  watchAlong: {
+    display: { position: [0, 2.35, -4.61], size: [6.5, 3.66] },
   },
 };
 

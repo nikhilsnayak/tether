@@ -5,11 +5,16 @@ import {
   type PeerSessionControllerBinding,
   type PreparedMedia,
 } from '@tether/client-runtime/modules/room';
+import { watchEventSinkLayer } from '@tether/client-runtime/modules/watch-along';
 import { Effect, Layer } from 'effect';
 import { Atom } from 'effect/unstable/reactivity';
 
 import { peerSessionSignalingLayer } from '@/lib/app-client';
 
+import {
+  webWatchAlongPlatformLayer,
+  webWatchLocalCapabilitiesLayer,
+} from '../watch-along/platform';
 import { webCryptoLayer, webPeerSessionPlatformLayer } from './platform';
 
 const peerSessionRuntime = Atom.runtime(
@@ -17,6 +22,9 @@ const peerSessionRuntime = Atom.runtime(
     peerSessionSignalingLayer,
     webPeerSessionPlatformLayer,
     peerSessionEventSinkLayer,
+    webWatchAlongPlatformLayer,
+    webWatchLocalCapabilitiesLayer,
+    watchEventSinkLayer,
     webCryptoLayer,
   ),
 );

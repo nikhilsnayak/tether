@@ -5,6 +5,7 @@ import {
   doorTransition,
   doorTransitionOpenness,
   resolveDoorTransition,
+  resolveRoomJourney,
   resolveRoomTransition,
   roomJourneyCue,
   roomJourneyLabel,
@@ -60,6 +61,54 @@ describe('roomJourneyCue', () => {
       expect(roomJourneyLabel(roomJourneyCue('join', status))).not.toBe('');
     }
     expect(roomJourneyLabel('connecting')).toBe('Connecting');
+  });
+});
+
+describe('resolveRoomJourney', () => {
+  it('uses the entry stage and binding activity before the peer view', () => {
+    expect(
+      resolveRoomJourney({
+        entryStage: 'MediaSetup',
+        intent: 'host',
+        active: false,
+        status: 'connected',
+      }),
+    ).toBe('waiting');
+    expect(
+      resolveRoomJourney({
+        entryStage: 'MediaSetup',
+        intent: 'join',
+        active: true,
+        status: 'connected',
+      }),
+    ).toBe('outside');
+    expect(
+      resolveRoomJourney({
+        entryStage: 'SessionRequested',
+        intent: 'host',
+        active: false,
+        status: 'connected',
+      }),
+    ).toBe('connecting');
+    expect(
+      resolveRoomJourney({
+        entryStage: 'SessionRequested',
+        intent: 'join',
+        active: false,
+        status: 'connected',
+      }),
+    ).toBe('outside');
+  });
+
+  it('delegates active peer states to the shared journey mapping', () => {
+    expect(
+      resolveRoomJourney({
+        entryStage: 'SessionRequested',
+        intent: 'host',
+        active: true,
+        status: 'connected',
+      }),
+    ).toBe('together');
   });
 });
 

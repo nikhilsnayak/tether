@@ -1,11 +1,16 @@
-import type { PeerSessionControllerBinding } from '@tether/client-runtime/modules/room';
-import { createContext, use, type ReactNode } from 'react';
+import {
+  makePeerSessionControllerBinding,
+  type PeerSessionControllerBinding,
+} from '@tether/client-runtime/modules/room';
+import { createContext, use, useState, useSyncExternalStore, type ReactNode } from 'react';
 
-import type { RoomJourneyCue } from '../scene/journey';
+import type { RoomEntryState } from '../entry/room-entry-state';
 
 interface RoomExperienceContextValue {
+  readonly active: boolean;
   readonly binding: PeerSessionControllerBinding;
-  readonly journey: RoomJourneyCue;
+  readonly entryStage: RoomEntryState['_tag'];
+  readonly watchAlongEnabled: boolean;
 }
 
 const RoomExperienceContext = createContext<RoomExperienceContextValue | null>(null);
@@ -19,9 +24,20 @@ export function useRoomExperience(): RoomExperienceContextValue {
 }
 
 export function RoomExperienceProvider({
-  binding,
-  journey,
+  entryStage,
+  watchAlongEnabled,
   children,
-}: RoomExperienceContextValue & { readonly children: ReactNode }) {
-  return <RoomExperienceContext value={{ binding, journey }}>{children}</RoomExperienceContext>;
+}: {
+  readonly entryStage: RoomEntryState['_tag'];
+  readonly watchAlongEnabled: boolean;
+  readonly children: ReactNode;
+}) {
+  const [binding] = useState(makePeerSessionControllerBinding);
+  const active = useSyncExternalStore(binding.subscribe, binding.getSnapshot);
+
+  return (
+    <RoomExperienceContext value={{ active, binding, entryStage, watchAlongEnabled }}>
+      {children}
+    </RoomExperienceContext>
+  );
 }

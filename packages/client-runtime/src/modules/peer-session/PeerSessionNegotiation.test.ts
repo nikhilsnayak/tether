@@ -5,6 +5,7 @@ import {
   JoinRequestedEvent,
   PeerJoinedEvent,
   PeerLeftEvent,
+  RoomTemplateId,
   SessionDescriptionSignal,
   SignalReceivedEvent,
   type RoomEvent,
@@ -27,6 +28,7 @@ import {
   session,
   type TestDataChannel,
 } from './test/PeerSessionTestHarness';
+import { WATCH_CONTROL_CHANNEL_LABEL } from './WatchTransport';
 
 describe('peer-session actor', () => {
   const fingerprintSdp = (fingerprint: string) =>
@@ -574,8 +576,11 @@ describe('peer-session actor', () => {
           'acquirePeerConnection',
           'observePeerConnection',
           'addLocalTracks',
+          'reserveProgramTransceivers',
           `createDataChannel:${ROOM_EVENTS_CHANNEL_LABEL}`,
           `observeDataChannel:${ROOM_EVENTS_CHANNEL_LABEL}`,
+          `createDataChannel:${WATCH_CONTROL_CHANNEL_LABEL}`,
+          `observeDataChannel:${WATCH_CONTROL_CHANNEL_LABEL}`,
           'createOffer',
           'setLocalDescription:offer:offer-sdp',
           'sendSignal:offer:offer-sdp',
@@ -585,6 +590,32 @@ describe('peer-session actor', () => {
           roomOpened,
           { _tag: 'Connected', peerId: bob },
           { _tag: 'RoomEventsReady' },
+        ]);
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('provisions no watch transport for a template without watch-along', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makePeerSessionTestHarness();
+
+        yield* fixture.openRoom(bob, RoomTemplateId.make('plain-suite'));
+        yield* fixture.openRoomEvents();
+
+        assert.notInclude(fixture.operations, 'reserveProgramTransceivers');
+        assert.isFalse(
+          fixture.operations.some((operation) => operation.includes(WATCH_CONTROL_CHANNEL_LABEL)),
+        );
+        assert.deepStrictEqual(fixture.operations, [
+          'acquirePeerConnection',
+          'observePeerConnection',
+          'addLocalTracks',
+          `createDataChannel:${ROOM_EVENTS_CHANNEL_LABEL}`,
+          `observeDataChannel:${ROOM_EVENTS_CHANNEL_LABEL}`,
+          'createOffer',
+          'setLocalDescription:offer:offer-sdp',
+          'sendSignal:offer:offer-sdp',
         ]);
       }),
     ).pipe(Effect.orDie),
@@ -626,6 +657,7 @@ describe('peer-session actor', () => {
           'acquirePeerConnection',
           'observePeerConnection',
           'addLocalTracks',
+          'reserveProgramTransceivers',
           'setRemoteDescription:offer:remote-offer',
           'createAnswer',
           'setLocalDescription:answer:answer-sdp',

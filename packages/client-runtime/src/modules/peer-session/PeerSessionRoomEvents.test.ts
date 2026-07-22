@@ -8,7 +8,7 @@ import {
 import { Effect } from 'effect';
 import { TestClock } from 'effect/testing';
 
-import { type DataChannelHandle } from './Model';
+import { type DataChannelHandle, type MediaStreamHandle } from './Model';
 import { PlatformError } from './Platform';
 import { bob, makePeerSessionTestHarness } from './test/PeerSessionTestHarness';
 
@@ -134,7 +134,10 @@ describe('peer-session actor — room events and commands', () => {
           _tag: 'PeerConnectionFailed',
           peerConnection: fixture.peerConnection,
         });
-        const replacementChannel = fixture.dataChannels[1]!;
+        // Index 0 is the first generation's room-events channel, index 1 its
+        // watch-control channel, so the replacement generation's room-events
+        // channel is index 2.
+        const replacementChannel = fixture.dataChannels[2]!;
         yield* fixture.actor({ _tag: 'DataChannelOpened', dataChannel: replacementChannel });
 
         const allSends = fixture.operations.filter((operation) =>
@@ -378,6 +381,32 @@ describe('peer-session actor — room events and commands', () => {
           fixture.events.filter((event) => event._tag === 'ChatMessageAdded'),
           0,
         );
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('records a remote track on the reserved transceivers without emitting', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makePeerSessionTestHarness();
+        const stream: MediaStreamHandle = { value: { id: 'remote-shared-media' } };
+
+        // Before a peer is known the track is ignored; a matching generation stores it.
+        yield* fixture.actor({
+          _tag: 'RemoteSharedTrackReceived',
+          peerConnection: fixture.peerConnection,
+          stream,
+        });
+        yield* fixture.openRoom(bob);
+        yield* fixture.openRoomEvents();
+        const eventsBefore = fixture.events.length;
+        yield* fixture.actor({
+          _tag: 'RemoteSharedTrackReceived',
+          peerConnection: fixture.peerConnection,
+          stream,
+        });
+
+        assert.strictEqual(fixture.events.length, eventsBefore);
       }),
     ).pipe(Effect.orDie),
   );

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { cameraContainmentScale } from './camera-containment';
+import { cameraContainmentScale, resolveCameraClearance } from './camera-containment';
 
 const ground = { minX: -4.35, maxX: 4.35, minZ: -3.35, maxZ: 4.35 };
 const vertical = { minY: 0.8, maxY: 4.2 };
@@ -47,4 +47,87 @@ describe('camera containment', () => {
       ),
     ).toBe(0);
   });
+
+  it('moves an outward clearance correction toward the room interior', () => {
+    const origin = { x: ground.maxX, y: 1.05, z: 0 };
+    const resolved = resolveCameraClearance(
+      origin,
+      { x: ground.maxX + 1, y: 1.05, z: 0 },
+      1,
+      ground,
+      vertical,
+    );
+
+    expect(resolved).toEqual({ x: ground.maxX - 1, y: origin.y, z: origin.z });
+  });
+
+  it('moves a zero-length clearance correction toward the room interior', () => {
+    const origin = { x: ground.maxX, y: 1.05, z: 0 };
+
+    expect(resolveCameraClearance(origin, origin, 1, ground, vertical)).toEqual({
+      x: ground.maxX - 1,
+      y: origin.y,
+      z: origin.z,
+    });
+  });
+
+  it.each([
+    ['minimum x', { x: ground.minX, y: 1.05, z: 0 }, { x: ground.minX - 1, y: 1.05, z: 0 }],
+    ['maximum x', { x: ground.maxX, y: 1.05, z: 0 }, { x: ground.maxX + 1, y: 1.05, z: 0 }],
+    ['minimum y', { x: 0, y: vertical.minY, z: 0 }, { x: 0, y: vertical.minY - 1, z: 0 }],
+    ['maximum y', { x: 0, y: vertical.maxY, z: 0 }, { x: 0, y: vertical.maxY + 1, z: 0 }],
+    ['minimum z', { x: 0, y: 1.05, z: ground.minZ }, { x: 0, y: 1.05, z: ground.minZ - 1 }],
+    ['maximum z', { x: 0, y: 1.05, z: ground.maxZ }, { x: 0, y: 1.05, z: ground.maxZ + 1 }],
+  ] as const)('preserves clearance at the %s boundary', (_, origin, desired) => {
+    const resolved = resolveCameraClearance(origin, desired, 1, ground, vertical);
+
+    expect(resolved.x).toBeGreaterThanOrEqual(ground.minX);
+    expect(resolved.x).toBeLessThanOrEqual(ground.maxX);
+    expect(resolved.y).toBeGreaterThanOrEqual(vertical.minY);
+    expect(resolved.y).toBeLessThanOrEqual(vertical.maxY);
+    expect(resolved.z).toBeGreaterThanOrEqual(ground.minZ);
+    expect(resolved.z).toBeLessThanOrEqual(ground.maxZ);
+    expect(
+      Math.hypot(resolved.x - origin.x, resolved.y - origin.y, resolved.z - origin.z),
+    ).toBeCloseTo(1);
+  });
+
+  it('slides a clearance correction along a blocking wall', () => {
+    const origin = { x: ground.maxX, y: 1.05, z: 0 };
+    const resolved = resolveCameraClearance(
+      origin,
+      { x: ground.maxX + 1, y: 1.05, z: 1 },
+      1,
+      ground,
+      vertical,
+    );
+
+    expect(resolved).toEqual({ x: ground.maxX, y: origin.y, z: 1 });
+  });
+
+  it.each([
+    [
+      { minX: 0, maxX: 0.5, minZ: 0, maxZ: 0.4 },
+      { x: 0.5, y: 1.05, z: 0.4 },
+      { x: 0, y: 1.05, z: 0.4 },
+    ],
+    [
+      { minX: 0, maxX: 0.4, minZ: 0, maxZ: 0.5 },
+      { x: 0.4, y: 1.05, z: 0.5 },
+      { x: 0.4, y: 1.05, z: 0 },
+    ],
+  ] as const)(
+    'clamps fallback clearance to narrow ground bounds',
+    (narrowGround, origin, expected) => {
+      const resolved = resolveCameraClearance(
+        origin,
+        { x: origin.x + 1, y: origin.y, z: origin.z + 1 },
+        1,
+        narrowGround,
+        vertical,
+      );
+
+      expect(resolved).toEqual(expected);
+    },
+  );
 });

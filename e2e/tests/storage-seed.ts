@@ -1,6 +1,7 @@
 import type { BrowserContextOptions } from '@playwright/test';
 
 type QualityPreference = 'high' | 'low';
+const webPort = process.env.TETHER_E2E_WEB_PORT ?? '5173';
 
 const buildStorageState = (
   qualityPreference?: QualityPreference,
@@ -8,7 +9,7 @@ const buildStorageState = (
   cookies: [],
   origins: [
     {
-      origin: 'http://localhost:5173',
+      origin: `http://localhost:${webPort}`,
       localStorage: [
         { name: 'tether:disclaimer-accepted:v1', value: 'true' },
         ...(qualityPreference === undefined

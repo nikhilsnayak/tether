@@ -3,6 +3,7 @@ import {
   IceCandidateSignal,
   PeerJoinedEvent,
   PeerLeftEvent,
+  RoomTemplateId,
   SessionDescriptionSignal,
   SignalReceivedEvent,
 } from '@tether/contracts/modules/room';
@@ -19,6 +20,7 @@ import {
   roomOpened,
   type TestDataChannel,
 } from './test/PeerSessionTestHarness';
+import { WATCH_CONTROL_CHANNEL_LABEL } from './WatchTransport';
 
 describe('peer-session actor — recovery and ownership', () => {
   const fingerprintSdp = (fingerprint: string) =>
@@ -138,17 +140,22 @@ describe('peer-session actor — recovery and ownership', () => {
           'acquirePeerConnection',
           'observePeerConnection',
           'addLocalTracks',
+          'reserveProgramTransceivers',
           `createDataChannel:${ROOM_EVENTS_CHANNEL_LABEL}`,
           `observeDataChannel:${ROOM_EVENTS_CHANNEL_LABEL}`,
+          `createDataChannel:${WATCH_CONTROL_CHANNEL_LABEL}`,
+          `observeDataChannel:${WATCH_CONTROL_CHANNEL_LABEL}`,
           'createOffer',
           'setLocalDescription:offer:offer-sdp',
           'sendSignal:offer:offer-sdp',
+          `unobserveDataChannel:${WATCH_CONTROL_CHANNEL_LABEL}`,
           `unobserveDataChannel:${ROOM_EVENTS_CHANNEL_LABEL}`,
           'unobservePeerConnection',
           'closePeerConnection',
           'acquirePeerConnection',
           'observePeerConnection',
           'addLocalTracks',
+          'reserveProgramTransceivers',
         ]);
         assert.deepStrictEqual(fixture.events, [roomOpened, { _tag: 'PeerDeparted', peerId: bob }]);
 
@@ -332,27 +339,130 @@ describe('peer-session actor — recovery and ownership', () => {
         const duplicate: DataChannelHandle = {
           value: { label: ROOM_EVENTS_CHANNEL_LABEL },
         };
+        const watchAccepted: DataChannelHandle = {
+          value: { label: WATCH_CONTROL_CHANNEL_LABEL },
+        };
+        const watchDuplicate: DataChannelHandle = {
+          value: { label: WATCH_CONTROL_CHANNEL_LABEL },
+        };
 
+        yield* fixture.openRoom(null);
+        yield* fixture.actor({ _tag: 'RoomEvent', event: new PeerJoinedEvent({ peerId: bob }) });
+        for (const dataChannel of [
+          wrongLabel,
+          accepted,
+          duplicate,
+          watchAccepted,
+          watchDuplicate,
+        ]) {
+          yield* fixture.actor({
+            _tag: 'RemoteDataChannel',
+            peerConnection: fixture.peerConnection,
+            dataChannel,
+          });
+        }
+
+        assert.deepStrictEqual(closed, [wrongLabel, duplicate, watchDuplicate]);
+        assert.include(fixture.operations, `observeDataChannel:${ROOM_EVENTS_CHANNEL_LABEL}`);
+        assert.include(fixture.operations, `observeDataChannel:${WATCH_CONTROL_CHANNEL_LABEL}`);
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('accepts a watch channel that arrives before the room-events channel', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const closed: DataChannelHandle[] = [];
+        const fixture = yield* makePeerSessionTestHarness(undefined, undefined, {
+          closeDataChannel: (dataChannel) =>
+            Effect.sync(() => {
+              closed.push(dataChannel);
+            }),
+        });
+        const watchChannel: DataChannelHandle = { value: { label: WATCH_CONTROL_CHANNEL_LABEL } };
+        const roomChannel: DataChannelHandle = { value: { label: ROOM_EVENTS_CHANNEL_LABEL } };
+
+        yield* fixture.openRoom(null);
+        yield* fixture.actor({ _tag: 'RoomEvent', event: new PeerJoinedEvent({ peerId: bob }) });
+        // Watch first: it must not consume or advance the room-events channel state.
+        yield* fixture.actor({
+          _tag: 'RemoteDataChannel',
+          peerConnection: fixture.peerConnection,
+          dataChannel: watchChannel,
+        });
+        yield* fixture.actor({
+          _tag: 'RemoteDataChannel',
+          peerConnection: fixture.peerConnection,
+          dataChannel: roomChannel,
+        });
+        yield* fixture.openRoomEvents(roomChannel);
+
+        assert.deepStrictEqual(closed, []);
+        assert.include(fixture.operations, `observeDataChannel:${WATCH_CONTROL_CHANNEL_LABEL}`);
+        assert.include(fixture.operations, `observeDataChannel:${ROOM_EVENTS_CHANNEL_LABEL}`);
+        assert.lengthOf(
+          fixture.events.filter((event) => event._tag === 'RoomEventsReady'),
+          1,
+        );
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('closes a remote watch channel on a template without watch-along', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const closed: DataChannelHandle[] = [];
+        const fixture = yield* makePeerSessionTestHarness(undefined, undefined, {
+          closeDataChannel: (dataChannel) =>
+            Effect.sync(() => {
+              closed.push(dataChannel);
+            }),
+        });
+        const watchChannel: DataChannelHandle = { value: { label: WATCH_CONTROL_CHANNEL_LABEL } };
+        const roomChannel: DataChannelHandle = { value: { label: ROOM_EVENTS_CHANNEL_LABEL } };
+
+        yield* fixture.openRoom(null, RoomTemplateId.make('plain-suite'));
+        yield* fixture.actor({ _tag: 'RoomEvent', event: new PeerJoinedEvent({ peerId: bob }) });
+        yield* fixture.actor({
+          _tag: 'RemoteDataChannel',
+          peerConnection: fixture.peerConnection,
+          dataChannel: watchChannel,
+        });
+        yield* fixture.actor({
+          _tag: 'RemoteDataChannel',
+          peerConnection: fixture.peerConnection,
+          dataChannel: roomChannel,
+        });
+
+        assert.deepStrictEqual(closed, [watchChannel]);
+        assert.notInclude(fixture.operations, 'reserveProgramTransceivers');
+        assert.include(fixture.operations, `observeDataChannel:${ROOM_EVENTS_CHANNEL_LABEL}`);
+        assert.notInclude(fixture.operations, `observeDataChannel:${WATCH_CONTROL_CHANNEL_LABEL}`);
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('ignores messages delivered on the watch channel', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const watchChannel: DataChannelHandle = { value: { label: WATCH_CONTROL_CHANNEL_LABEL } };
+
+        const fixture = yield* makePeerSessionTestHarness();
         yield* fixture.openRoom(null);
         yield* fixture.actor({ _tag: 'RoomEvent', event: new PeerJoinedEvent({ peerId: bob }) });
         yield* fixture.actor({
           _tag: 'RemoteDataChannel',
           peerConnection: fixture.peerConnection,
-          dataChannel: wrongLabel,
+          dataChannel: watchChannel,
         });
+        const eventsBefore = fixture.events.length;
         yield* fixture.actor({
-          _tag: 'RemoteDataChannel',
-          peerConnection: fixture.peerConnection,
-          dataChannel: accepted,
-        });
-        yield* fixture.actor({
-          _tag: 'RemoteDataChannel',
-          peerConnection: fixture.peerConnection,
-          dataChannel: duplicate,
+          _tag: 'DataChannelMessageReceived',
+          dataChannel: watchChannel,
+          data: JSON.stringify({ version: 1, type: 'chat-message', text: 'ignored' }),
         });
 
-        assert.deepStrictEqual(closed, [wrongLabel, duplicate]);
-        assert.include(fixture.operations, `observeDataChannel:${ROOM_EVENTS_CHANNEL_LABEL}`);
+        assert.strictEqual(fixture.events.length, eventsBefore);
       }),
     ).pipe(Effect.orDie),
   );
@@ -436,6 +546,29 @@ describe('peer-session actor — recovery and ownership', () => {
           { _tag: 'PeerInterrupted', peerId: bob },
           { _tag: 'PeerRestored', peerId: bob },
         ]);
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('keeps interruption recovery alive when an unopened watch channel cannot close', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const failedClose = yield* makePeerSessionTestHarness(undefined, undefined, {
+          closeDataChannel: () =>
+            Effect.fail(new PlatformError({ operation: 'close-data-channel', cause: 'failed' })),
+        });
+        yield* failedClose.openRoom(bob);
+        yield* failedClose.connectionConnected();
+        yield* failedClose.connectionInterrupted();
+        assert.isTrue(failedClose.events.some((event) => event._tag === 'PeerInterrupted'));
+
+        const unsupportedClose = yield* makePeerSessionTestHarness(undefined, undefined, {
+          closeDataChannel: undefined,
+        });
+        yield* unsupportedClose.openRoom(bob);
+        yield* unsupportedClose.connectionConnected();
+        yield* unsupportedClose.connectionInterrupted();
+        assert.isTrue(unsupportedClose.events.some((event) => event._tag === 'PeerInterrupted'));
       }),
     ).pipe(Effect.orDie),
   );

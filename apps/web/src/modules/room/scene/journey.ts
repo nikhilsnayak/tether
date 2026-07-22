@@ -1,5 +1,7 @@
 import type { PeerSessionView, RoomSession } from '@tether/client-runtime/modules/peer-session';
 
+import type { RoomEntryState } from '../entry/room-entry-state';
+
 export type RoomJourneyCue =
   | 'waiting'
   | 'outside'
@@ -51,6 +53,22 @@ export function roomJourneyCue(
     case 'connected':
       return 'together';
   }
+}
+
+export function resolveRoomJourney({
+  entryStage,
+  intent,
+  active,
+  status,
+}: {
+  readonly entryStage: RoomEntryState['_tag'];
+  readonly intent: RoomSession['intent'];
+  readonly active: boolean;
+  readonly status: PeerSessionView['status'];
+}): RoomJourneyCue {
+  if (entryStage === 'MediaSetup') return intent === 'join' ? 'outside' : 'waiting';
+  if (!active) return intent === 'join' ? 'outside' : 'connecting';
+  return roomJourneyCue(intent, status);
 }
 
 const successfulAdmission = (previous: RoomJourneyCue, next: RoomJourneyCue) =>

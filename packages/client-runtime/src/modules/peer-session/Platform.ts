@@ -10,6 +10,8 @@ export type PlatformOperation =
   | 'acquire-peer-connection'
   | 'acquire-local-media'
   | 'add-local-tracks'
+  | 'reserve-program-transceivers'
+  | 'replace-program-tracks'
   | 'create-data-channel'
   | 'create-offer'
   | 'create-answer'

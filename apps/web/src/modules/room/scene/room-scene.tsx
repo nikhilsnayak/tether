@@ -1,18 +1,19 @@
+import { useAtomValue } from '@effect/atom-react';
 import { Canvas } from '@react-three/fiber/webgpu';
-import type {
-  AvatarPose,
-  RoomSession,
-  SequencedAvatarPose,
-} from '@tether/client-runtime/modules/peer-session';
+import type { AvatarPose, RoomSession } from '@tether/client-runtime/modules/peer-session';
+import { peerSessionViewAtom } from '@tether/client-runtime/modules/room';
+import { watchViewAtom } from '@tether/client-runtime/modules/watch-along';
 import { Suspense, useRef, useState } from 'react';
 
 import { useReducedMotionPreference } from '@/hooks/use-reduced-motion-preference';
 
 import { AvatarControls } from '../components/avatar-controls';
 import { RoomControlHelp } from '../components/room-control-help';
+import { useRoomExperience } from '../components/room-experience-context';
 import { useAvatarControls } from '../hooks/use-avatar-controls';
 import { useRoomQualityPreference } from '../hooks/use-room-quality-preference';
 import type { RoomTemplate } from '../templates/registry';
+import { WatchDisplay } from '../watch-along/watch-display';
 import { LocalAvatarController, RemoteAvatarController } from './avatar-controllers';
 import { avatarSpawn } from './avatar-motion';
 import { avatarPresentation } from './avatar-presentation';
@@ -25,33 +26,26 @@ import {
   selectCameraFraming,
   resolveQualityTier,
 } from './config';
-import type { RoomJourneyCue } from './journey';
+import { resolveRoomJourney } from './journey';
 import { ParticipantAvatar } from './participant-avatar';
 import {
   ContextLossGuard,
   FramePerformanceMonitor,
   RendererStatusObserver,
-} from './renderer-lifecycle';
+} from './renderer-observers';
 import { RoomTransitionController } from './room-transition-controller';
 import { ThirdPersonCamera } from './third-person-camera';
 
 export function RoomScene({
   template,
-  journey,
-  admissionPending,
   sessionIntent,
-  remoteAvatarPose,
-  roomEventsReady,
-  sendAvatarPose,
 }: {
   readonly template: RoomTemplate;
-  readonly journey: RoomJourneyCue;
-  readonly admissionPending: boolean;
   readonly sessionIntent: RoomSession['intent'];
-  readonly remoteAvatarPose: SequencedAvatarPose | null;
-  readonly roomEventsReady: boolean;
-  readonly sendAvatarPose: (pose: AvatarPose) => boolean;
 }) {
+  const { active, binding, entryStage } = useRoomExperience();
+  const peerView = useAtomValue(peerSessionViewAtom);
+  const watchView = useAtomValue(watchViewAtom);
   const { qualityPreference } = useRoomQualityPreference();
   const deviceDpr = typeof devicePixelRatio === 'number' ? devicePixelRatio : 1;
   const [adaptiveQuality, setAdaptiveQuality] = useState(() =>
@@ -60,17 +54,25 @@ export function RoomScene({
   const [contextLost, setContextLost] = useState(false);
   const surfaceRef = useRef<HTMLDivElement>(null);
   const localPoseRef = useRef<AvatarPose>(avatarSpawn(template.gameplay, sessionIntent));
+  const cameraYawRef = useRef(localPoseRef.current.yaw);
   const remoteIntent: RoomSession['intent'] = sessionIntent === 'host' ? 'join' : 'host';
   const remotePoseRef = useRef<AvatarPose>(avatarSpawn(template.gameplay, remoteIntent));
   const reducedMotion = useReducedMotionPreference();
-  const activeJourney = journey ?? 'waiting';
-  const [spatialJourney, setSpatialJourney] = useState(activeJourney);
+  const journey = resolveRoomJourney({
+    entryStage,
+    intent: sessionIntent,
+    active,
+    status: peerView.status,
+  });
+  const admissionPending = active && peerView.pendingJoinRequests.length > 0;
+  const remoteAvatarPose = active ? peerView.remoteAvatarPose : null;
+  const roomEventsReady = active && peerView.roomEventsReady;
+  const [spatialJourney, setSpatialJourney] = useState(journey);
   const presentation = avatarPresentation(sessionIntent, spatialJourney);
   const cameraOutside = presentation.localLocation === 'outside';
   const controlsEnabled =
-    presentation.localLocation === 'inside' &&
-    activeJourney !== 'ended' &&
-    activeJourney !== 'departed';
+    presentation.localLocation === 'inside' && journey !== 'ended' && journey !== 'departed';
+  const watchCapability = template.watchAlong;
   const { input, recenter, recenterSignal, setControlHeld } = useAvatarControls(controlsEnabled);
   const qualityTier =
     qualityPreference === 'auto'
@@ -106,7 +108,8 @@ export function RoomScene({
       data-room-local-avatar={presentation.local}
       data-room-remote-avatar={presentation.remote}
       data-room-avatar-sync={roomEventsReady ? 'ready' : 'unavailable'}
-      data-room-display='idle'
+      data-room-watch-display={watchCapability === undefined ? 'absent' : 'present'}
+      data-room-display={watchCapability === undefined ? 'unavailable' : watchView.status}
       // isolate traps the drei Html labels' large z-index inside the scene so
       // they cannot paint over the sibling entry/call overlays.
       className='bg-card absolute inset-0 isolate touch-none overflow-hidden'
@@ -134,7 +137,7 @@ export function RoomScene({
       >
         <color attach='background' args={['#090b13']} />
         <RoomTransitionController
-          journey={activeJourney}
+          journey={journey}
           reducedMotion={reducedMotion}
           updateSpatialJourney={setSpatialJourney}
         />
@@ -145,6 +148,7 @@ export function RoomScene({
           surfaceRef={surfaceRef}
           outside={cameraOutside}
           recenterSignal={recenterSignal}
+          cameraYawRef={cameraYawRef}
         />
         <LocalAvatarController
           poseRef={localPoseRef}
@@ -153,10 +157,11 @@ export function RoomScene({
           intent={sessionIntent}
           location={presentation.localLocation}
           enabled={controlsEnabled}
-          sendAvatarPose={sendAvatarPose}
+          sendAvatarPose={(pose) => binding.controller.sendAvatarPose(pose) === 'queued'}
           surfaceRef={surfaceRef}
           blockerRef={remotePoseRef}
           blockerActive={presentation.remote !== 'absent'}
+          cameraYawRef={cameraYawRef}
         />
         <RemoteAvatarController
           poseRef={remotePoseRef}
@@ -190,6 +195,7 @@ export function RoomScene({
           }}
         />
         <ContextLossGuard updateContextLost={setContextLost} />
+        {watchCapability !== undefined && <WatchDisplay capability={watchCapability} />}
         <Suspense fallback={null}>
           <SceneEnvironment
             admissionPending={admissionPending}

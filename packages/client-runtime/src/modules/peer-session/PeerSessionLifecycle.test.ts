@@ -1,5 +1,6 @@
 import { assert, describe, it } from '@effect/vitest';
 import {
+  DUSK_SUITE_TEMPLATE_ID,
   JoinDenied,
   NoPendingJoin,
   PeerAlreadyJoined,
@@ -44,7 +45,11 @@ describe('startPeerSession', () => {
         const fixture = yield* makePeerSessionTestHarness();
 
         assert.strictEqual(
-          yield* fixture.actor({ _tag: 'RoomSessionOpened', peerId: null }),
+          yield* fixture.actor({
+            _tag: 'RoomSessionOpened',
+            peerId: null,
+            roomTemplateId: DUSK_SUITE_TEMPLATE_ID,
+          }),
           'continue',
         );
       }),
@@ -337,6 +342,49 @@ describe('startPeerSession', () => {
         assert.isFalse(peerSession.sendMessage('too late'));
         assert.isFalse(peerSession.sendAvatarPose({ x: 0, z: 0, yaw: 0, action: 'idle' }));
         assert.isFalse(peerSession.sendMediaState({ cameraOn: false, microphoneOn: false }));
+      }),
+    ),
+  );
+
+  it.effect('rejects every public enqueue while actor teardown is still in progress', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const teardownStarted = yield* Deferred.make<void>();
+        const allowTeardown = yield* Deferred.make<void>();
+        const fixture = yield* makePeerSessionTestHarness(
+          (() =>
+            Stream.make({
+              event: openedEvent(bob),
+            })) as AppSignalingClient['Service']['OpenRoomSession'],
+          undefined,
+          {
+            observePeerConnection: () =>
+              Effect.acquireRelease(Effect.void, () =>
+                Deferred.succeed(teardownStarted, undefined).pipe(
+                  Effect.andThen(Deferred.await(allowTeardown)),
+                ),
+              ),
+          },
+        );
+        const peerSession = yield* startPeerSession(session).pipe(
+          Effect.provide(fixture.dependencies),
+        );
+
+        yield* Deferred.await(teardownStarted);
+
+        assert.isFalse(peerSession.sendMessage('too late'));
+        assert.isFalse(peerSession.sendAvatarPose({ x: 0, z: 0, yaw: 0, action: 'idle' }));
+        assert.isFalse(peerSession.sendMediaState({ cameraOn: false, microphoneOn: false }));
+        assert.isFalse(
+          peerSession.watch.propose({
+            _tag: 'PreparedSource',
+            value: { id: 'too-late-source' },
+          }),
+        );
+        assert.isFalse(peerSession.watch.control({ kind: 'play' }));
+        assert.isFalse(peerSession.watch.cancel());
+
+        yield* Deferred.succeed(allowTeardown, undefined);
       }),
     ),
   );

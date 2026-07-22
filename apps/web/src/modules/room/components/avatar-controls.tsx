@@ -46,14 +46,14 @@ export function AvatarControls({
     <div
       data-room-scene-ignore-gesture
       aria-label='Avatar controls'
-      className='absolute bottom-24 left-3 z-20 hidden grid-cols-3 gap-1 sm:bottom-28 sm:left-4 [@media(pointer:coarse)]:grid'
+      className='absolute bottom-32 left-3 z-20 hidden grid-cols-3 gap-1 sm:bottom-28 sm:left-4 [@media(pointer:coarse)]:grid'
       // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role
       role='group'
     >
       {controlButton('forward', 'Move avatar forward', <ArrowUp />, 'col-start-2')}
-      {controlButton('left', 'Turn avatar left', <ArrowLeft />, 'col-start-1 row-start-2')}
+      {controlButton('left', 'Move avatar left', <ArrowLeft />, 'col-start-1 row-start-2')}
       {controlButton('backward', 'Move avatar backward', <ArrowDown />, 'row-start-2')}
-      {controlButton('right', 'Turn avatar right', <ArrowRight />, 'row-start-2')}
+      {controlButton('right', 'Move avatar right', <ArrowRight />, 'row-start-2')}
       <Button
         aria-label='Recenter camera'
         className='col-start-2 row-start-3'

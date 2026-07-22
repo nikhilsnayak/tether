@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { attachRemoteAudio, createKnockPlaybackQueue, setRemoteAudioSink } from './remote-audio';
+import { attachAudioStream, setAudioSink } from './audio-element';
+import { createKnockPlaybackQueue } from './remote-audio';
 
 function fakeAudio() {
   const play = vi.fn(async () => undefined);
@@ -23,7 +24,7 @@ describe('remote audio lifecycle', () => {
   it('attaches, plays, and detaches a stream without stopping actor-owned tracks', () => {
     const { element, play, pause } = fakeAudio();
     const stream = {} as MediaStream;
-    const dispose = attachRemoteAudio(element, stream);
+    const dispose = attachAudioStream(element, stream);
 
     expect(element.srcObject).toBe(stream);
     expect(play).toHaveBeenCalledOnce();
@@ -34,7 +35,32 @@ describe('remote audio lifecycle', () => {
 
   it('changes supported output sinks', () => {
     const { element, setSinkId } = fakeAudio();
-    setRemoteAudioSink(element, 'speaker-2');
+    setAudioSink(element, 'speaker-2');
+    expect(setSinkId).toHaveBeenCalledWith('speaker-2');
+  });
+
+  it('ignores media playback failures and unavailable output sinks', async () => {
+    const play = vi.fn(() => Promise.reject(new Error('blocked')));
+    const pause = vi.fn();
+    const element = { srcObject: null, play, pause } as unknown as HTMLAudioElement;
+    const dispose = attachAudioStream(element, {} as MediaStream);
+
+    setAudioSink(element, '');
+    setAudioSink(element, 'speaker-2');
+    await Promise.resolve();
+    dispose();
+
+    expect(play).toHaveBeenCalledOnce();
+    expect(pause).toHaveBeenCalledOnce();
+  });
+
+  it('ignores output sink failures', async () => {
+    const { element, setSinkId } = fakeAudio();
+    setSinkId.mockRejectedValueOnce(new Error('unavailable'));
+
+    setAudioSink(element, 'speaker-2');
+    await Promise.resolve();
+
     expect(setSinkId).toHaveBeenCalledWith('speaker-2');
   });
 });

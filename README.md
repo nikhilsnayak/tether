@@ -39,6 +39,8 @@ admission, calling, and chat flow with a conventional call interface.
   closes its signaling WebSocket. The web app shows a quiet `Direct` indicator at that point.
 - **A shared spatial room on web and desktop.** Each person controls an avatar while camera feeds
   remain in movable utility tiles.
+- **Watch Together on the room display.** A compatible web or desktop peer can select a local video
+  and stream it directly to both peers, with shared playback controls in the call dock.
 - **Connection safety codes.** Both people can compare a code derived from the negotiated DTLS
   fingerprints to check that they see the same connection.
 
@@ -81,6 +83,10 @@ The `room-events-v1` data channel carries bounded, schema-validated events for c
 media state, detachment coordination, and departure. Pose updates are rate-limited so they cannot
 build an unbounded queue.
 
+Rooms that support Watch Together also negotiate reserved program-audio and program-video
+transceivers plus a dedicated `watch-control-v1` data channel before detachment. Starting a video
+later therefore does not reopen signaling or renegotiate the peer connection.
+
 ## The room experience
 
 On web and desktop, callers meet as two procedural avatars in the Dusk Suite. Each browser owns its
@@ -88,36 +94,43 @@ local avatar and receives the other person's pose over the data channel. Movemen
 room, and the avatars act as soft obstacles to each other.
 
 Video remains separate from the avatars in two draggable tiles. Turning a camera off changes the
-tile to a placeholder without removing the avatar. The wall display is currently idle and reserved
-for a future shared activity.
+tile to a placeholder without removing the avatar. In rooms with Watch Together, the wall display
+shows a local video selected by either compatible peer. Open **Watch** in the bottom call dock to
+choose a file or use the shared play, pause, replay, and Stop controls. The file is decoded on the
+presenter's device and sent as live WebRTC program media; it is not uploaded to Tether.
 
-| Input         | Action              |
-| ------------- | ------------------- |
-| W / Up        | Walk forward        |
-| S / Down      | Walk backward       |
-| A / Left      | Turn left           |
-| D / Right     | Turn right          |
-| R             | Recenter the camera |
-| Pointer drag  | Orbit the camera    |
-| Wheel / pinch | Zoom                |
+Movement follows familiar third-person controls: input is relative to the camera, the avatar turns
+toward the direction of travel, and orbiting does not rotate the avatar. The camera shortens its
+boom near room boundaries while retaining enough clearance to avoid entering the avatar.
+
+| Input         | Action                                |
+| ------------- | ------------------------------------- |
+| W / Up        | Move forward relative to the camera   |
+| S / Down      | Move backward relative to the camera  |
+| A / Left      | Move left relative to the camera      |
+| D / Right     | Move right relative to the camera     |
+| R             | Recenter behind the avatar            |
+| Pointer drag  | Orbit independently around the avatar |
+| Wheel / pinch | Zoom                                  |
 
 Touch browsers also receive on-screen movement controls. Rendering quality can be selected
 manually or left on automatic, which lowers quality after a sustained frame-rate drop.
 
 ## Platform status
 
-| Platform | Status                                                                                      |
-| -------- | ------------------------------------------------------------------------------------------- |
-| Web      | Full spatial room, admission, audio/video, chat, safety codes, and media controls           |
-| Desktop  | Electron shell around the web app, Linux `.deb` packaging, and `tether://` room links       |
-| Mobile   | Expo development build with native admission, audio/video, chat, and deep links; no 3D room |
+| Platform | Status                                                                                                          |
+| -------- | --------------------------------------------------------------------------------------------------------------- |
+| Web      | Spatial room, admission, calls, chat, safety codes, media controls, and Watch Together                          |
+| Desktop  | Electron shell around the web app, including Watch Together, Linux `.deb` packaging, and `tether://` room links |
+| Mobile   | Native admission, audio/video, chat, and deep links; no Watch Together player or presentation UI                |
 
 ## Privacy and current limits
 
 Tether keeps call content separate from coordination:
 
 - The server handles room membership, admission, SDP, ICE, and detachment readiness.
-- Audio, video, chat, avatar poses, and media state are encrypted by WebRTC and sent between peers.
+- Voice/video media, Watch Together program media, chat, avatar poses, and media state are
+  encrypted by WebRTC and sent between peers.
 - Rooms, pending knocks, and signaling state live only in server memory. There is no account,
   message, recording, or call-history database.
 - Private session tokens authorize admission decisions, signaling, and departure.
@@ -145,7 +158,9 @@ The service is provided as-is, without an uptime commitment. See
 ### Requirements
 
 - [Bun](https://bun.sh/) 1.3.14
-- A modern browser with WebGL2, WebRTC, and camera/microphone access
+- A modern browser with WebGL2, WebRTC, and camera/microphone access. Presenting a local Watch
+  Together file additionally requires `HTMLMediaElement.captureStream()`; peers without it can
+  still receive and control a shared video.
 
 ```sh
 git clone https://github.com/nikhilsnayak/tether.git
@@ -240,7 +255,9 @@ The main module boundaries are:
 - [`packages/client-runtime/src/modules/room`](packages/client-runtime/src/modules/room) — room
   orchestration and presentation state.
 - [`packages/client-runtime/src/modules/peer-session`](packages/client-runtime/src/modules/peer-session)
-  — WebRTC negotiation, recovery, safety codes, detachment, and room events.
+  — WebRTC negotiation, recovery, safety codes, detachment, room events, and watch supervision.
+- [`packages/client-runtime/src/modules/watch-along`](packages/client-runtime/src/modules/watch-along)
+  — shared playback protocol, actor, supervision boundary, and view projections.
 - [`apps/web/src/modules/room`](apps/web/src/modules/room) — browser media, call UI, and the Dusk
   Suite.
 - [`apps/mobile/src/modules/room`](apps/mobile/src/modules/room) — native media adapter and call UI.
@@ -282,7 +299,8 @@ bun run test:e2e:gpu
 The fast lane covers flows that do not enter the rendered room. Real-render lanes mount the
 production React Three Fiber canvas and frame loop. The browser suite covers admission, media,
 chat, safety-code agreement, connection recovery, physical signaling-socket closure, direct-call
-departure, and complete two-peer room journeys.
+departure, complete two-peer room journeys, Watch Together program media, and camera/avatar
+movement invariants.
 
 ## Deliberate scope
 

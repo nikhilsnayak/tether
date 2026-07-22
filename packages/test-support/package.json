@@ -5,7 +5,8 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
-    "./peer-session-platform-contract": "./src/peer-session-platform-contract.ts"
+    "./peer-session-platform-contract": "./src/peer-session-platform-contract.ts",
+    "./watch-along-platform-contract": "./src/watch-along-platform-contract.ts"
   },
   "dependencies": {
     "@effect/vitest": "catalog:",

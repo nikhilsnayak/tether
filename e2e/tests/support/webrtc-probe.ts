@@ -2,14 +2,19 @@ import type { BrowserContext, Page } from '@playwright/test';
 
 type WebRtcProbeState = {
   readonly configurations: RTCConfiguration[];
-  readonly dataChannels: RTCDataChannel[];
+  readonly dataChannels: Array<{
+    readonly channel: RTCDataChannel;
+    readonly side: 'local' | 'remote';
+  }>;
   readonly localStreams: MediaStream[];
+  readonly videos: HTMLVideoElement[];
   preflightPreviewStream: MediaStream | null;
   readonly peerConnections: RTCPeerConnection[];
   addIceCandidateCalls: number;
   failNextIceCandidate: boolean;
   rejectedIceCandidates: number;
   sasShownBeforeConnected: boolean;
+  negotiationNeededCount: number;
 };
 
 declare global {
@@ -25,14 +30,24 @@ export const installWebRtcProbe = (context: BrowserContext) =>
       configurations: [],
       dataChannels: [],
       localStreams: [],
+      videos: [],
       preflightPreviewStream: null,
       peerConnections: [],
       addIceCandidateCalls: 0,
       failNextIceCandidate: false,
       rejectedIceCandidates: 0,
       sasShownBeforeConnected: false,
+      negotiationNeededCount: 0,
     };
     window.__tetherE2E = probe;
+
+    document.createElement = new Proxy(document.createElement.bind(document), {
+      apply(target, thisArgument, argumentsList) {
+        const element = Reflect.apply(target, thisArgument, argumentsList) as HTMLElement;
+        if (element instanceof HTMLVideoElement) probe.videos.push(element);
+        return element;
+      },
+    }) as typeof document.createElement;
 
     const NativePeerConnection = window.RTCPeerConnection;
     const InstrumentedPeerConnection = new Proxy(NativePeerConnection, {
@@ -41,6 +56,12 @@ export const installWebRtcProbe = (context: BrowserContext) =>
         const configuration = args[0] as RTCConfiguration | undefined;
         probe.peerConnections.push(peerConnection);
         probe.configurations.push(configuration ?? {});
+        peerConnection.addEventListener('negotiationneeded', () => {
+          probe.negotiationNeededCount += 1;
+        });
+        peerConnection.addEventListener('datachannel', (event) => {
+          probe.dataChannels.push({ channel: event.channel, side: 'remote' });
+        });
 
         const nativeAddIceCandidate = peerConnection.addIceCandidate.bind(peerConnection);
         peerConnection.addIceCandidate = (candidate) => {
@@ -56,7 +77,7 @@ export const installWebRtcProbe = (context: BrowserContext) =>
         const nativeCreateDataChannel = peerConnection.createDataChannel.bind(peerConnection);
         peerConnection.createDataChannel = (label, options) => {
           const dataChannel = nativeCreateDataChannel(label, options);
-          probe.dataChannels.push(dataChannel);
+          probe.dataChannels.push({ channel: dataChannel, side: 'local' });
           return dataChannel;
         };
 
@@ -106,14 +127,16 @@ export class WebRtcProbe {
     );
   }
 
-  closeLatestDataChannel() {
-    return this.page.evaluate(() => {
-      const dataChannel = window.__tetherE2E.dataChannels.at(-1);
-      if (dataChannel === undefined) {
-        throw new Error('Expected an instrumented local data channel');
+  closeDataChannel(label: string) {
+    return this.page.evaluate((expectedLabel) => {
+      const matches = window.__tetherE2E.dataChannels.filter(
+        ({ channel }) => channel.label === expectedLabel,
+      );
+      if (matches.length !== 1) {
+        throw new Error(`Expected exactly one instrumented ${expectedLabel} data channel`);
       }
-      dataChannel.close();
-    });
+      matches[0]?.channel.close();
+    }, label);
   }
 
   emitIceCandidateBurst(count: number) {
@@ -151,8 +174,14 @@ export class WebRtcProbe {
     return this.page.evaluate(() => window.__tetherE2E.configurations[0]?.iceServers ?? []);
   }
 
-  latestDataChannelLabel() {
-    return this.page.evaluate(() => window.__tetherE2E.dataChannels.at(-1)?.label ?? null);
+  dataChannelLabels() {
+    return this.page.evaluate(() =>
+      window.__tetherE2E.dataChannels.map(({ channel }) => channel.label),
+    );
+  }
+
+  negotiationNeededCount() {
+    return this.page.evaluate(() => window.__tetherE2E.negotiationNeededCount);
   }
 
   localStreamCount() {
@@ -216,5 +245,34 @@ export class WebRtcProbe {
 
   sasShownBeforeConnected() {
     return this.page.evaluate(() => window.__tetherE2E.sasShownBeforeConnected);
+  }
+
+  hasDecodedDetachedVideoFrame() {
+    return this.page.evaluate(() => {
+      for (const video of window.__tetherE2E.videos) {
+        const stream = video.srcObject as MediaStream | null;
+        if (
+          video.isConnected ||
+          video.videoWidth === 0 ||
+          video.videoHeight === 0 ||
+          stream?.getVideoTracks().length !== 1
+        ) {
+          continue;
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = 2;
+        canvas.height = 2;
+        const context = canvas.getContext('2d');
+        if (context === null) continue;
+        context.drawImage(video, 0, 0, 2, 2);
+        const pixels = context.getImageData(0, 0, 2, 2).data;
+        const colors = new Set<string>();
+        for (let index = 0; index < pixels.length; index += 4) {
+          colors.add(`${pixels[index]}:${pixels[index + 1]}:${pixels[index + 2]}`);
+        }
+        if (colors.size > 1) return true;
+      }
+      return false;
+    });
   }
 }

@@ -31,7 +31,7 @@ test.describe('automatic room quality', () => {
     await expect(scene).toHaveAttribute('data-room-quality-tier', 'low');
     expect(await page.evaluate(() => localStorage.getItem('tether.room.quality'))).toBe('low');
     const controls = page.getByRole('toolbar', { name: 'Call controls' });
-    await expect(controls.getByRole('button')).toHaveCount(6);
+    await expect(controls.getByRole('button')).toHaveCount(7);
     await expect(controls.getByRole('button', { name: 'Leave call' })).toBeVisible();
     await expect(page.getByRole('group', { name: 'Avatar controls' })).toBeHidden();
     const controlHelp = page.getByRole('button', { name: 'Room controls help' });
@@ -78,7 +78,7 @@ test(
   async ({ room }) => {
     const { host } = await room.connect();
     const { page } = host;
-    await page.setViewportSize({ width: 390, height: 844 });
+    await page.setViewportSize({ width: 320, height: 568 });
     const scene = page.getByLabel('Dusk Suite room scene');
     await expect(scene).toHaveAttribute('data-room-remote-avatar', 'present');
     await expect(scene.locator('canvas')).toBeVisible();
@@ -87,7 +87,7 @@ test(
     await expect(page.getByRole('button', { name: 'Room quality' })).toBeVisible();
     expect(await fitsViewport(page)).toBe(true);
 
-    const controls = await page.getByRole('button', { name: 'Leave call' }).boundingBox();
+    const controls = await page.getByRole('toolbar', { name: 'Call controls' }).boundingBox();
     const preview = await page.getByLabel('Local video preview').boundingBox();
     expect(controls).not.toBeNull();
     expect(preview).not.toBeNull();
@@ -100,7 +100,9 @@ test(
     await expect(page.getByLabel('Local video preview')).toBeVisible();
     expect(await fitsViewport(page)).toBe(true);
 
-    const landscapeControls = await page.getByRole('button', { name: 'Leave call' }).boundingBox();
+    const landscapeControls = await page
+      .getByRole('toolbar', { name: 'Call controls' })
+      .boundingBox();
     const landscapePreview = await page.getByLabel('Local video preview').boundingBox();
     expect(landscapeControls).not.toBeNull();
     expect(landscapePreview).not.toBeNull();

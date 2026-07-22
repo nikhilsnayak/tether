@@ -28,6 +28,12 @@ describe('room template registry', () => {
     assert.isTrue(roomGameplayConfigIsWithinWireBounds(DUSK_SUITE_TEMPLATE.gameplay));
   });
 
+  it('places the watch display in the room', () => {
+    const display = DUSK_SUITE_TEMPLATE.watchAlong?.display;
+    assert.isDefined(display);
+    assert.isTrue([...display.position, ...display.size].every(Number.isFinite));
+  });
+
   it('loads the bundled Dusk Suite scene', async () => {
     const sceneModule = await loadDuskSuiteScene();
     assert.isFunction(sceneModule.default);

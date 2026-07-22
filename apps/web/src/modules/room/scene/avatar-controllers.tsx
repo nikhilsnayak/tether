@@ -32,6 +32,7 @@ export function LocalAvatarController({
   surfaceRef,
   blockerRef,
   blockerActive,
+  cameraYawRef,
 }: {
   readonly poseRef: RefObject<AvatarPose>;
   readonly input: AvatarInputIntent;
@@ -43,6 +44,7 @@ export function LocalAvatarController({
   readonly surfaceRef: RefObject<HTMLDivElement | null>;
   readonly blockerRef: RefObject<AvatarPose>;
   readonly blockerActive: boolean;
+  readonly cameraYawRef: RefObject<number>;
 }) {
   const previousLocation = useRef<'inside' | 'outside' | null>(null);
   const previousGameplay = useRef<RoomGameplayConfig | null>(null);
@@ -67,7 +69,14 @@ export function LocalAvatarController({
         : null;
     const next =
       enabled && location === 'inside'
-        ? integrateAvatarPose(poseRef.current, input, delta, gameplay, blocker)
+        ? integrateAvatarPose(
+            poseRef.current,
+            input,
+            cameraYawRef.current,
+            delta,
+            gameplay,
+            blocker,
+          )
         : { ...poseRef.current, action: 'idle' as const };
     poseRef.current = next;
     if (location !== 'inside') return;

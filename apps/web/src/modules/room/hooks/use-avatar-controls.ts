@@ -24,19 +24,19 @@ export function useAvatarControls(enabled: boolean) {
   const heldKeys = useHeldKeys();
   const [heldControls, setHeldControls] = useState<ReadonlySet<AvatarControl>>(new Set());
   const recenterSignal = useRef(0);
-  const keyboardIgnored =
-    typeof document !== 'undefined' && shouldIgnoreKeyboardTarget(document.activeElement);
-  const activeKeys = enabled && !keyboardIgnored ? new Set(heldKeys) : new Set<string>();
-  const input: AvatarInputIntent = enabled
+  const movementEnabled = enabled;
+  const keyboardIgnored = shouldIgnoreKeyboardTarget(document.activeElement);
+  const activeKeys = movementEnabled && !keyboardIgnored ? new Set(heldKeys) : new Set<string>();
+  const input: AvatarInputIntent = movementEnabled
     ? {
         forward:
           Number(heldControls.has('forward') || activeKeys.has('W') || activeKeys.has('ArrowUp')) -
           Number(
             heldControls.has('backward') || activeKeys.has('S') || activeKeys.has('ArrowDown'),
           ),
-        turn:
-          Number(heldControls.has('left') || activeKeys.has('A') || activeKeys.has('ArrowLeft')) -
-          Number(heldControls.has('right') || activeKeys.has('D') || activeKeys.has('ArrowRight')),
+        lateral:
+          Number(heldControls.has('right') || activeKeys.has('D') || activeKeys.has('ArrowRight')) -
+          Number(heldControls.has('left') || activeKeys.has('A') || activeKeys.has('ArrowLeft')),
       }
     : EMPTY_AVATAR_INPUT;
   const setControlHeld = (control: AvatarControl, held: boolean) => {
@@ -58,11 +58,11 @@ export function useAvatarControls(enabled: boolean) {
         if (!shouldIgnoreKeyboardTarget(event.target)) event.preventDefault();
       },
       options: {
-        meta: { name: 'Move avatar', description: 'Move or turn your room avatar' },
+        meta: { name: 'Move avatar', description: 'Move your room avatar relative to the camera' },
       },
     })),
     {
-      enabled,
+      enabled: movementEnabled,
       ignoreInputs: false,
       preventDefault: false,
       stopPropagation: false,
@@ -76,7 +76,7 @@ export function useAvatarControls(enabled: boolean) {
       recenter();
     },
     {
-      enabled,
+      enabled: movementEnabled,
       ignoreInputs: false,
       preventDefault: false,
       requireReset: true,
@@ -84,6 +84,5 @@ export function useAvatarControls(enabled: boolean) {
       meta: { name: 'Recenter camera', description: 'Recenter the camera behind your avatar' },
     },
   );
-
   return { input, recenter, recenterSignal, setControlHeld };
 }

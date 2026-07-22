@@ -38,6 +38,15 @@ import {
   PeerSessionPlatform,
   PeerSessionSignaling,
 } from '../peer-session/Services';
+import type { PreparedSourceHandle, WatchCapabilities } from '../watch-along/Model';
+import type { WatchControlCommand } from '../watch-along/Protocol';
+import {
+  WatchAlongPlatform,
+  WatchEventSink,
+  WatchLocalCapabilities,
+  WatchPlatformError,
+  type WatchPlatformOperation,
+} from '../watch-along/Services';
 import { translateRoomEventData } from './Translation';
 
 export interface PeerSession {
@@ -47,6 +56,12 @@ export interface PeerSession {
   readonly sendAvatarPose: (pose: AvatarPose) => boolean;
   /** Enqueues the latest local camera/microphone state; `true` means queued. */
   readonly sendMediaState: (mediaState: MediaState) => boolean;
+  readonly watch: {
+    /** Transfers provisional source ownership only when the command is queued. */
+    readonly propose: (source: PreparedSourceHandle) => boolean;
+    readonly control: (control: WatchControlCommand) => boolean;
+    readonly cancel: () => boolean;
+  };
   /** Host admits or rejects a knocking joiner. */
   readonly respondToJoin: (peerId: PeerId, decision: 'allow' | 'deny') => Promise<void>;
   /** Notifies the peer directly after detachment; otherwise releases server membership. */
@@ -77,6 +92,31 @@ export const makePeerSessionSignalingLayer = (url: string) =>
     ),
   });
 
+const disabledWatchCapabilities: WatchCapabilities = {
+  canPresentLocalFile: false,
+  canReceiveProgramMedia: false,
+  canRenderWatch: false,
+  canControlWatch: false,
+};
+
+const disabledWatchOperation = (operation: WatchPlatformOperation) =>
+  Effect.fail(new WatchPlatformError({ operation, cause: 'watch platform unavailable' }));
+
+const disabledWatchPlatform = WatchAlongPlatform.of({
+  cancelPreparedSource: () => disabledWatchOperation('cancel-prepared-source'),
+  claimSource: () => disabledWatchOperation('claim-source'),
+  programStream: () => disabledWatchOperation('program-stream'),
+  play: () => disabledWatchOperation('play'),
+  pause: () => disabledWatchOperation('pause'),
+  replay: () => disabledWatchOperation('replay'),
+  observeSource: () => disabledWatchOperation('observe-source'),
+  primeFirstFrame: () => disabledWatchOperation('prime-first-frame'),
+  attachProgramTracks: () => disabledWatchOperation('attach-program-tracks'),
+  clearProgramTracks: disabledWatchOperation('clear-program-tracks'),
+});
+
+const noopWatchEventSink = WatchEventSink.of({ emit: () => Effect.void });
+
 /**
  * Hosts the serialized peer-session actor and owns its session-level resources.
  * Signaling has a child scope that closes on detachment while actor, media, and
@@ -90,6 +130,18 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
   const transport = yield* PeerSessionSignalingTransport;
   const platform = yield* PeerSessionPlatform;
   const peerSessionEventSink = yield* PeerSessionEventSink;
+  const watchPlatform = Option.getOrElse(
+    yield* Effect.serviceOption(WatchAlongPlatform),
+    () => disabledWatchPlatform,
+  );
+  const watchEventSink = Option.getOrElse(
+    yield* Effect.serviceOption(WatchEventSink),
+    () => noopWatchEventSink,
+  );
+  const watchCapabilities = Option.getOrElse(
+    yield* Effect.serviceOption(WatchLocalCapabilities),
+    () => disabledWatchCapabilities,
+  );
   const sessionScope = yield* Scope.Scope;
   const signalingScope = yield* Scope.fork(sessionScope);
   const client = yield* transport.acquire.pipe(Scope.provide(signalingScope));
@@ -110,6 +162,7 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
     readonly sessionToken: SessionToken;
   }>();
   const mailbox = yield* Queue.unbounded<PeerSessionInput>();
+  let acceptingInputs = true;
   const detachedSignal = yield* Deferred.make<void>();
   const dispatchLocalInput: PeerSessionLocalInputDispatch = (input) => {
     Queue.offerUnsafe(mailbox, input);
@@ -181,6 +234,12 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
     localStream,
     GOOGLE_STUN_SERVERS,
     dispatchLocalInput,
+    {
+      role: session.intent === 'host' ? 'host' : 'guest',
+      capabilities: watchCapabilities,
+      platform: watchPlatform,
+      sink: watchEventSink,
+    },
     preparedMedia?.initialState ?? null,
   ).pipe(
     Effect.provideService(PeerSessionSignaling, signaling),
@@ -213,9 +272,27 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
     Stream.runDrain,
   );
 
+  const closeActorHost = Effect.gen(function* () {
+    acceptingInputs = false;
+    yield* Scope.close(actorScope, Exit.void);
+    const queued = yield* Queue.clear(mailbox);
+    for (const input of queued) {
+      if (input._tag !== 'WatchProposeSource') continue;
+      yield* watchPlatform
+        .cancelPreparedSource(input.source)
+        .pipe(
+          Effect.catchTag('WatchPlatformError', (error) =>
+            Effect.logWarning(
+              'Failed to release a queued watch source during session teardown',
+            ).pipe(Effect.annotateLogs('operation', error.operation)),
+          ),
+        );
+    }
+    yield* Queue.shutdown(mailbox);
+  });
+
   yield* actorLoop.pipe(
-    Effect.ensuring(Scope.close(actorScope, Exit.void)),
-    Effect.ensuring(Queue.shutdown(mailbox)),
+    Effect.ensuring(closeActorHost),
     Effect.onExit(
       Effect.fnUntraced(function* (exit) {
         yield* Scope.close(mediaScope, Exit.void);
@@ -309,20 +386,30 @@ export const startPeerSession = Effect.fn('@tether/client-runtime/startPeerSessi
 
   return {
     sendMessage: (message) =>
+      acceptingInputs &&
       Queue.offerUnsafe(mailbox, {
         _tag: 'SendMessage',
         message,
       }),
     sendAvatarPose: (pose) =>
+      acceptingInputs &&
       Queue.offerUnsafe(mailbox, {
         _tag: 'SendAvatarPose',
         pose,
       }),
     sendMediaState: (mediaState) =>
+      acceptingInputs &&
       Queue.offerUnsafe(mailbox, {
         _tag: 'SendMediaState',
         mediaState,
       }),
+    watch: {
+      propose: (source) =>
+        acceptingInputs && Queue.offerUnsafe(mailbox, { _tag: 'WatchProposeSource', source }),
+      control: (control) =>
+        acceptingInputs && Queue.offerUnsafe(mailbox, { _tag: 'WatchRequestControl', control }),
+      cancel: () => acceptingInputs && Queue.offerUnsafe(mailbox, { _tag: 'WatchCancel' }),
+    },
     respondToJoin: (peerId, decision) =>
       Effect.runPromise(
         Deferred.await(openedSession).pipe(

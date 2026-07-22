@@ -1,11 +1,16 @@
-import type { PeerId } from '@tether/contracts/modules/room';
+import type { PeerId, RoomTemplateId } from '@tether/contracts/modules/room';
 import type { Scope } from 'effect';
 
+import type { PreparedSourceHandle } from '../watch-along/Model';
+import type { WatchControlCommand } from '../watch-along/Protocol';
+import type { WatchRuntime, WatchRuntimeTerminationReason } from '../watch-along/Supervisor';
 import type {
   DataChannelHandle,
+  MediaStreamHandle,
   PeerConnectionHandle,
   PeerSessionSignal,
   PlatformEvent,
+  ProgramTransceiverHandle,
 } from './Model';
 import type { AvatarPose, MediaState } from './RoomEvents';
 
@@ -18,6 +23,8 @@ export type DataChannelState =
 export type PeerConnectionGeneration = {
   readonly scope: Scope.Closeable;
   readonly peerConnection: PeerConnectionHandle;
+  /** Present only when the room template enables watch-along. */
+  readonly programTransceivers: ProgramTransceiverHandle | null;
 };
 
 export type PeerNegotiationState =
@@ -54,6 +61,19 @@ export type PeerSessionActorState =
       readonly peerConnectionState: 'connecting' | 'connected' | 'interrupted';
       readonly iceGatheringComplete: boolean;
       readonly dataChannelState: DataChannelState;
+      /**
+       * Generation-scoped watch-control transport. The peer session owns its
+       * lifecycle while the supervised watch runtime owns payload semantics.
+       */
+      readonly watchChannel: DataChannelHandle | null;
+      /** Stream assembled from the generation's reserved remote transceivers. */
+      readonly remoteSharedStream: MediaStreamHandle | null;
+      /** Monotonic within one peer-connection generation. */
+      readonly remoteProgramStreamVersion: number;
+      /** Child actor supervised by this generation, once its channel opens. */
+      readonly watchRuntime: WatchRuntime | null;
+      /** Prevents watch from being provisioned again after fail-closed termination. */
+      readonly watchTerminated: boolean;
       readonly reconnectAttempts: number;
     }
   | { readonly _tag: 'TransportLost'; readonly peerId: PeerId };
@@ -65,6 +85,9 @@ export type PeerSessionUiCommand =
     }
   | { readonly _tag: 'SendAvatarPose'; readonly pose: AvatarPose }
   | { readonly _tag: 'SendMediaState'; readonly mediaState: MediaState }
+  | { readonly _tag: 'WatchProposeSource'; readonly source: PreparedSourceHandle }
+  | { readonly _tag: 'WatchRequestControl'; readonly control: WatchControlCommand }
+  | { readonly _tag: 'WatchCancel' }
   | { readonly _tag: 'SendLeave' };
 
 /** Identifies the connection generation guarded by a negotiation deadline. */
@@ -77,6 +100,11 @@ export type PeerSessionTimerInput =
       readonly _tag: 'RetryPendingAvatarPose';
       readonly peerConnection: PeerConnectionHandle;
       readonly dataChannel: DataChannelHandle;
+    }
+  | {
+      readonly _tag: 'WatchRuntimeTerminated';
+      readonly peerConnection: PeerConnectionHandle;
+      readonly reason: WatchRuntimeTerminationReason;
     };
 
 export type PeerSessionLocalInput = PlatformEvent | PeerSessionUiCommand | PeerSessionTimerInput;
@@ -84,7 +112,11 @@ export type PeerSessionLocalInput = PlatformEvent | PeerSessionUiCommand | PeerS
 export type PeerSessionLocalInputDispatch = (input: PeerSessionLocalInput) => void;
 
 export type PeerSessionRemoteInput =
-  | { readonly _tag: 'RoomSessionOpened'; readonly peerId: PeerId | null }
+  | {
+      readonly _tag: 'RoomSessionOpened';
+      readonly peerId: PeerId | null;
+      readonly roomTemplateId: RoomTemplateId;
+    }
   | { readonly _tag: 'PeerJoined'; readonly peerId: PeerId }
   | { readonly _tag: 'PeerLeft'; readonly peerId: PeerId }
   | { readonly _tag: 'Detached' }

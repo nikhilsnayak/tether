@@ -7,10 +7,16 @@ import {
   type PeerConnectionHandle,
   type PlatformEventDispatch,
   type IceServer,
+  type ProgramTransceiverHandle,
 } from '@tether/client-runtime/modules/peer-session';
 import { Crypto, Effect, Layer } from 'effect';
 import * as ExpoCrypto from 'expo-crypto';
-import { MediaStream, RTCPeerConnection, mediaDevices } from 'react-native-webrtc';
+import {
+  MediaStream,
+  type MediaStreamTrack,
+  RTCPeerConnection,
+  mediaDevices,
+} from 'react-native-webrtc';
 
 export const nativeCryptoLayer = Layer.succeed(
   Crypto.Crypto,
@@ -32,10 +38,38 @@ export const nativeCryptoLayer = Layer.succeed(
 
 // Not exported from the package index.
 type RTCDataChannel = ReturnType<RTCPeerConnection['createDataChannel']>;
+type RTCRtpTransceiver = ReturnType<RTCPeerConnection['addTransceiver']>;
+type NativeProgramTransceivers = {
+  readonly video: RTCRtpTransceiver;
+  readonly audio: RTCRtpTransceiver;
+};
+type NativeProgramTransceiverReservation =
+  | ({ readonly _tag: 'reserved' } & NativeProgramTransceivers)
+  | {
+      readonly _tag: 'offered-remotely';
+      readonly peerConnection: RTCPeerConnection;
+      readonly offset: number;
+    };
 
 const peerConnectionValue = (handle: PeerConnectionHandle) => handle.value as RTCPeerConnection;
 const dataChannelValue = (handle: DataChannelHandle) => handle.value as RTCDataChannel;
 export const mediaStreamValue = (handle: MediaStreamHandle) => handle.value as MediaStream;
+const resolveProgramTransceivers = (handle: ProgramTransceiverHandle) =>
+  Effect.try({
+    try: (): NativeProgramTransceivers => {
+      const reservation = handle.value as NativeProgramTransceiverReservation;
+      if (reservation._tag === 'reserved') return reservation;
+
+      const offered = reservation.peerConnection.getTransceivers().slice(reservation.offset);
+      const video = offered.find(({ receiver }) => receiver.track?.kind === 'video');
+      const audio = offered.find(({ receiver }) => receiver.track?.kind === 'audio');
+      if (video === undefined || audio === undefined) {
+        throw new Error('Remote offer did not contain reserved program transceivers');
+      }
+      return { video, audio };
+    },
+    catch: (cause) => new PlatformError({ operation: 'replace-program-tracks', cause }),
+  });
 
 export const acquireLocalMedia = Effect.acquireRelease(
   Effect.tryPromise({
@@ -109,14 +143,28 @@ const observePeerConnection = Effect.fnUntraced(function* (
     });
   };
 
-  const handleTrack = (event: { readonly streams: ReadonlyArray<MediaStream> }) => {
+  let sharedStream: MediaStream | null = null;
+  const handleTrack = (event: {
+    readonly streams: ReadonlyArray<MediaStream>;
+    readonly track: MediaStreamTrack | null;
+  }) => {
     const stream = event.streams[0];
-    if (stream === undefined) return;
+    if (stream !== undefined) {
+      dispatch({
+        _tag: 'RemoteTrackReceived',
+        peerConnection: peerConnectionHandle,
+        stream: { value: stream },
+      });
+      return;
+    }
+    if (event.track == null) return;
 
+    if (sharedStream === null) sharedStream = new MediaStream([event.track]);
+    else sharedStream.addTrack(event.track);
     dispatch({
-      _tag: 'RemoteTrackReceived',
+      _tag: 'RemoteSharedTrackReceived',
       peerConnection: peerConnectionHandle,
-      stream: { value: stream },
+      stream: { value: sharedStream },
     });
   };
 
@@ -260,6 +308,47 @@ const nativePeerSessionPlatform = PeerSessionPlatform.of({
         }
       },
       catch: (cause) => new PlatformError({ operation: 'add-local-tracks', cause }),
+    }),
+  reserveProgramTransceivers: (peerConnection, negotiationRole) =>
+    Effect.try({
+      try: () => {
+        const peer = peerConnectionValue(peerConnection);
+        if (negotiationRole === 'answerer') {
+          return {
+            value: {
+              _tag: 'offered-remotely',
+              peerConnection: peer,
+              offset: peer.getTransceivers().length,
+            } satisfies NativeProgramTransceiverReservation,
+          };
+        }
+        // First-release mobile is a receive-only watcher: it never presents, so
+        // its program transceivers do not advertise sending capability.
+        return {
+          value: {
+            _tag: 'reserved',
+            video: peer.addTransceiver('video', { direction: 'recvonly' }),
+            audio: peer.addTransceiver('audio', { direction: 'recvonly' }),
+          } satisfies NativeProgramTransceiverReservation,
+        };
+      },
+      catch: (cause) => new PlatformError({ operation: 'reserve-program-transceivers', cause }),
+    }),
+  activateProgramTransceivers: (transceiver) =>
+    resolveProgramTransceivers(transceiver).pipe(Effect.asVoid),
+  replaceProgramTracks: (transceiver, stream) =>
+    Effect.gen(function* () {
+      const { video, audio } = yield* resolveProgramTransceivers(transceiver);
+      yield* Effect.tryPromise({
+        try: async () => {
+          const media = stream === null ? null : mediaStreamValue(stream);
+          await Promise.all([
+            video.sender.replaceTrack(media?.getVideoTracks()[0] ?? null),
+            audio.sender.replaceTrack(media?.getAudioTracks()[0] ?? null),
+          ]);
+        },
+        catch: (cause) => new PlatformError({ operation: 'replace-program-tracks', cause }),
+      });
     }),
   observePeerConnection,
   createDataChannel: (peerConnection, label) =>

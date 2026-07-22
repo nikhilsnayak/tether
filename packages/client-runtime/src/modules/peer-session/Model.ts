@@ -56,6 +56,10 @@ export interface MediaStreamHandle {
   readonly value: unknown;
 }
 
+export interface ProgramTransceiverHandle {
+  readonly value: unknown;
+}
+
 export type PlatformEvent =
   | {
       readonly _tag: 'RemoteDataChannel';
@@ -84,6 +88,11 @@ export type PlatformEvent =
   | { readonly _tag: 'PeerConnectionRestored'; readonly peerConnection: PeerConnectionHandle }
   | {
       readonly _tag: 'RemoteTrackReceived';
+      readonly peerConnection: PeerConnectionHandle;
+      readonly stream: MediaStreamHandle;
+    }
+  | {
+      readonly _tag: 'RemoteSharedTrackReceived';
       readonly peerConnection: PeerConnectionHandle;
       readonly stream: MediaStreamHandle;
     };

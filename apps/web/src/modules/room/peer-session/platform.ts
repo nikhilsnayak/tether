@@ -7,6 +7,7 @@ import {
   type MediaStreamHandle,
   type PeerConnectionHandle,
   type PlatformEventDispatch,
+  type ProgramTransceiverHandle,
 } from '@tether/client-runtime/modules/peer-session';
 import type { PreparedMedia } from '@tether/client-runtime/modules/room';
 import { Crypto, Effect, Exit, Layer, Scope } from 'effect';
@@ -26,6 +27,87 @@ export const webCryptoLayer = Layer.succeed(
 const peerConnectionValue = (handle: PeerConnectionHandle) => handle.value as RTCPeerConnection;
 const dataChannelValue = (handle: DataChannelHandle) => handle.value as RTCDataChannel;
 export const mediaStreamValue = (handle: MediaStreamHandle) => handle.value as MediaStream;
+type BrowserProgramTransceivers = {
+  readonly video: RTCRtpTransceiver;
+  readonly audio: RTCRtpTransceiver;
+};
+
+type BrowserProgramTransceiverReservation =
+  | ({ readonly _tag: 'reserved' } & BrowserProgramTransceivers)
+  | {
+      readonly _tag: 'offered-remotely';
+      readonly peerConnection: RTCPeerConnection;
+      readonly offset: number;
+    };
+
+const resolveProgramTransceivers = (handle: ProgramTransceiverHandle) =>
+  Effect.try({
+    try: (): BrowserProgramTransceivers => {
+      const reservation = handle.value as BrowserProgramTransceiverReservation;
+      if (reservation._tag === 'reserved') return reservation;
+
+      const offered = reservation.peerConnection.getTransceivers().slice(reservation.offset);
+      const video = offered.find(({ receiver }) => receiver.track.kind === 'video');
+      const audio = offered.find(({ receiver }) => receiver.track.kind === 'audio');
+      if (video === undefined || audio === undefined) {
+        throw new Error('Remote offer did not contain reserved program transceivers');
+      }
+      return { video, audio };
+    },
+    catch: (cause) => new PlatformError({ operation: 'replace-program-tracks', cause }),
+  });
+
+export type SenderTrafficClass = 'voice-audio' | 'program-audio' | 'program-video';
+
+const senderTuning = {
+  'voice-audio': { priority: 'high' },
+  'program-audio': { priority: 'medium' },
+  'program-video': { priority: 'low', degradationPreference: 'maintain-resolution' },
+} as const satisfies Record<
+  SenderTrafficClass,
+  { readonly priority: RTCPriorityType; readonly degradationPreference?: RTCDegradationPreference }
+>;
+
+/** Feature-detects encoding priorities and applies standard degradation preference best-effort. */
+export const tuneSenderParameters = (
+  parameters: RTCRtpSendParameters,
+  trafficClass: SenderTrafficClass,
+): boolean => {
+  const tuning = senderTuning[trafficClass];
+  let changed = false;
+  for (const encoding of parameters.encodings) {
+    if ('priority' in encoding && encoding.priority !== tuning.priority) {
+      encoding.priority = tuning.priority;
+      changed = true;
+    }
+    if ('networkPriority' in encoding && encoding.networkPriority !== tuning.priority) {
+      encoding.networkPriority = tuning.priority;
+      changed = true;
+    }
+  }
+  if (
+    'degradationPreference' in tuning &&
+    parameters.degradationPreference !== tuning.degradationPreference
+  ) {
+    parameters.degradationPreference = tuning.degradationPreference;
+    changed = true;
+  }
+  return changed;
+};
+
+const tuneSender = (sender: RTCRtpSender, trafficClass: SenderTrafficClass) =>
+  Effect.try(() => {
+    const parameters = sender.getParameters();
+    return tuneSenderParameters(parameters, trafficClass)
+      ? Effect.tryPromise(() => sender.setParameters(parameters))
+      : Effect.void;
+  }).pipe(Effect.flatten, Effect.ignore);
+
+const replaceSenderTrack = (sender: RTCRtpSender, track: MediaStreamTrack | null) =>
+  Effect.tryPromise({
+    try: () => sender.replaceTrack(track),
+    catch: (cause) => new PlatformError({ operation: 'replace-program-tracks', cause }),
+  });
 
 const acquireLocalMedia = Effect.acquireRelease(
   Effect.tryPromise({
@@ -145,14 +227,26 @@ const observePeerConnection = Effect.fnUntraced(function* (
     });
   };
 
+  // Camera/mic tracks carry their stream. Reserved watch-along tracks do not,
+  // so group those into a separate stream for the shared-media projection.
+  let sharedStream: MediaStream | null = null;
   const handleTrack = (event: RTCTrackEvent) => {
     const stream = event.streams[0];
-    if (stream === undefined) return;
+    if (stream !== undefined) {
+      dispatch({
+        _tag: 'RemoteTrackReceived',
+        peerConnection: peerConnectionHandle,
+        stream: { value: stream },
+      });
+      return;
+    }
 
+    if (sharedStream === null) sharedStream = new MediaStream([event.track]);
+    else sharedStream.addTrack(event.track);
     dispatch({
-      _tag: 'RemoteTrackReceived',
+      _tag: 'RemoteSharedTrackReceived',
       peerConnection: peerConnectionHandle,
-      stream: { value: stream },
+      stream: { value: sharedStream },
     });
   };
 
@@ -291,11 +385,66 @@ const webPeerSessionPlatform = PeerSessionPlatform.of({
     Effect.try({
       try: () => {
         const stream = mediaStreamValue(localStream);
-        for (const track of stream.getTracks()) {
-          peerConnectionValue(peerConnection).addTrack(track, stream);
-        }
+        return Effect.all(
+          stream.getTracks().map((track) => {
+            const sender = peerConnectionValue(peerConnection).addTrack(track, stream);
+            return track.kind === 'audio' ? tuneSender(sender, 'voice-audio') : Effect.void;
+          }),
+          { discard: true },
+        );
       },
       catch: (cause) => new PlatformError({ operation: 'add-local-tracks', cause }),
+    }).pipe(Effect.flatten),
+  reserveProgramTransceivers: (peerConnection, negotiationRole) =>
+    Effect.gen(function* () {
+      const peer = peerConnectionValue(peerConnection);
+      if (negotiationRole === 'answerer') {
+        return {
+          value: {
+            _tag: 'offered-remotely',
+            peerConnection: peer,
+            offset: peer.getTransceivers().length,
+          } satisfies BrowserProgramTransceiverReservation,
+        };
+      }
+      const { video, audio } = yield* Effect.try({
+        try: () => ({
+          video: peer.addTransceiver('video', { direction: 'sendrecv' }),
+          audio: peer.addTransceiver('audio', { direction: 'sendrecv' }),
+        }),
+        catch: (cause) => new PlatformError({ operation: 'reserve-program-transceivers', cause }),
+      });
+      yield* Effect.all(
+        [tuneSender(video.sender, 'program-video'), tuneSender(audio.sender, 'program-audio')],
+        { concurrency: 'unbounded', discard: true },
+      );
+      return {
+        value: { _tag: 'reserved', video, audio } satisfies BrowserProgramTransceiverReservation,
+      };
+    }),
+  activateProgramTransceivers: (transceiver) =>
+    Effect.gen(function* () {
+      const { video, audio } = yield* resolveProgramTransceivers(transceiver);
+      video.direction = 'sendrecv';
+      audio.direction = 'sendrecv';
+    }),
+  replaceProgramTracks: (transceiver, stream) =>
+    Effect.gen(function* () {
+      const { video, audio } = yield* resolveProgramTransceivers(transceiver);
+      const media = stream === null ? null : mediaStreamValue(stream);
+      const videoTrack = media?.getVideoTracks()[0] ?? null;
+      if (videoTrack !== null) videoTrack.contentHint = 'detail';
+      yield* Effect.all(
+        [tuneSender(video.sender, 'program-video'), tuneSender(audio.sender, 'program-audio')],
+        { concurrency: 'unbounded', discard: true },
+      );
+      yield* Effect.all(
+        [
+          replaceSenderTrack(video.sender, videoTrack),
+          replaceSenderTrack(audio.sender, media?.getAudioTracks()[0] ?? null),
+        ],
+        { concurrency: 'unbounded', discard: true },
+      );
     }),
   observePeerConnection,
   createDataChannel: (peerConnection, label) =>

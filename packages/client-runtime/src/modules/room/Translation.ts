@@ -36,7 +36,11 @@ export const translateRoomEventData = (event: RoomEvent): RoomEventTranslation =
   switch (event._tag) {
     case '@tether/RoomSessionOpenedEvent':
       return {
-        input: { _tag: 'RoomSessionOpened', peerId: event.peerId },
+        input: {
+          _tag: 'RoomSessionOpened',
+          peerId: event.peerId,
+          roomTemplateId: event.roomTemplateId,
+        },
         uiEvent: {
           _tag: 'RoomOpened',
           roomId: event.roomId,

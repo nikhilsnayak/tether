@@ -12,6 +12,8 @@ import type { PeerSession } from './PeerSessionHost';
 const peerId = PeerId.make('bbbbbbbbbbbb');
 const pose = { x: 1, z: 2, yaw: 0, action: 'walk' } as const;
 const mediaState = { cameraOn: true, microphoneOn: false } as const;
+const watchSource = { _tag: 'PreparedSource', value: { id: 'prepared' } } as const;
+const watchControl = { kind: 'play' } as const;
 
 const flushNotifications = Effect.promise(() => Promise.resolve());
 
@@ -29,6 +31,20 @@ const makeSession = (queued = true) => {
     sendMediaState: (value) => {
       calls.push(['sendMediaState', value]);
       return queued;
+    },
+    watch: {
+      propose: (source) => {
+        calls.push(['watch.propose', source]);
+        return queued;
+      },
+      control: (control) => {
+        calls.push(['watch.control', control]);
+        return queued;
+      },
+      cancel: () => {
+        calls.push(['watch.cancel']);
+        return queued;
+      },
     },
     respondToJoin: async (id, decision) => {
       calls.push(['respondToJoin', id, decision]);
@@ -49,6 +65,9 @@ describe('PeerSessionController', () => {
     assert.strictEqual(controller.sendMessage('hello'), 'unavailable');
     assert.strictEqual(controller.sendAvatarPose(pose), 'unavailable');
     assert.strictEqual(controller.sendMediaState(mediaState), 'unavailable');
+    assert.strictEqual(controller.watch.propose(watchSource), 'unavailable');
+    assert.strictEqual(controller.watch.control(watchControl), 'unavailable');
+    assert.strictEqual(controller.watch.cancel(), 'unavailable');
     const respondToJoinError = await controller.respondToJoin(peerId, 'allow').then(
       () => null,
       (error: unknown) => error,
@@ -72,12 +91,18 @@ describe('PeerSessionController', () => {
       assert.strictEqual(binding.controller.sendMessage('hello'), 'queued');
       assert.strictEqual(binding.controller.sendAvatarPose(pose), 'queued');
       assert.strictEqual(binding.controller.sendMediaState(mediaState), 'queued');
+      assert.strictEqual(binding.controller.watch.propose(watchSource), 'queued');
+      assert.strictEqual(binding.controller.watch.control(watchControl), 'queued');
+      assert.strictEqual(binding.controller.watch.cancel(), 'queued');
       yield* Effect.promise(() => binding.controller.respondToJoin(peerId, 'deny'));
       yield* Effect.promise(() => binding.controller.leave());
       assert.deepStrictEqual(fixture.calls, [
         ['sendMessage', 'hello'],
         ['sendAvatarPose', pose],
         ['sendMediaState', mediaState],
+        ['watch.propose', watchSource],
+        ['watch.control', watchControl],
+        ['watch.cancel'],
         ['respondToJoin', peerId, 'deny'],
         ['leave'],
       ]);
