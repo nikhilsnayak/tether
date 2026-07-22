@@ -90,10 +90,13 @@ export const startWatchRuntime = Effect.fnUntraced(function* (deps: StartWatchRu
   );
 
   const finalize = Effect.fnUntraced(function* (reason: WatchRuntimeTerminationReason) {
+    // Actor-loop exit is the sole caller; retain the guard so later finalizer
+    // call sites cannot duplicate cleanup.
+    /* v8 ignore next */
     if (finalized) return;
     finalized = true;
     alive = false;
-    const queued = yield* Queue.clear(queue).pipe(Effect.catch(() => Effect.succeed([])));
+    const queued = yield* Queue.clear(queue);
     yield* bestEffort(Queue.shutdown(queue));
     for (const item of queued) yield* bestEffort(item.onDropped);
     yield* bestEffort(deps.clear);

@@ -553,7 +553,24 @@ describe('web peer-session platform', () => {
         assert.strictEqual(error.operation, 'replace-program-tracks');
       }).pipe(Effect.provide(replaceHarness.layer)),
     );
-    return reserve.pipe(Effect.andThen(replace));
+    const resolveHarness = makeWebPlatformTestHarness();
+    const resolve = Effect.scoped(
+      Effect.gen(function* () {
+        const platform = yield* PeerSessionPlatform;
+        const peerConnection = yield* platform.acquirePeerConnection([]);
+        const reservation = yield* platform.reserveProgramTransceivers(peerConnection, 'answerer');
+        const peer = peerConnection.value as FakePeerConnection;
+        peer.transceivers.push({
+          sender: new FakeSender(),
+          receiver: { track: new FakeTrack('video') },
+          direction: 'recvonly',
+        });
+
+        const error = yield* platform.activateProgramTransceivers(reservation).pipe(Effect.flip);
+        assert.strictEqual(error.operation, 'replace-program-tracks');
+      }).pipe(Effect.provide(resolveHarness.layer)),
+    );
+    return reserve.pipe(Effect.andThen(replace), Effect.andThen(resolve));
   });
 
   it.effect('maps browser channel-close failures to PlatformError', () => {

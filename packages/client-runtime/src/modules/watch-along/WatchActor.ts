@@ -168,9 +168,10 @@ export const makeWatchActor = Effect.fnUntraced(function* (dispatch: WatchActorI
     });
   });
 
-  const startPresenting = Effect.fnUntraced(function* () {
-    if (state._tag !== 'Preparing') return;
-    const { watchSessionId, source } = state;
+  const startPresenting = Effect.fnUntraced(function* (
+    preparing: Extract<State, { readonly _tag: 'Preparing' }>,
+  ) {
+    const { watchSessionId, source } = preparing;
     const sourceScope = yield* Scope.make();
     yield* Scope.addFinalizer(actorScope, Scope.close(sourceScope, Exit.void));
 
@@ -269,7 +270,7 @@ export const makeWatchActor = Effect.fnUntraced(function* (dispatch: WatchActorI
         return yield* emitView();
       case 'watch-ready':
         if (state._tag === 'Preparing' && state.watchSessionId === message.watchSessionId) {
-          return yield* startPresenting();
+          return yield* startPresenting(state);
         }
         return;
       case 'watch-rejected':

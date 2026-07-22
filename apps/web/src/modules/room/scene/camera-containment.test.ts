@@ -60,4 +60,8 @@ describe('camera containment', () => {
 
     expect(distance).toBeCloseTo(1);
   });
+
+  it('does not expand a camera boom already within the minimum distance', () => {
+    expect(cameraClearanceScale({ x: 0, y: 1, z: 0 }, { x: 0.25, y: 1, z: 0 }, 0.5, 1)).toBe(1);
+  });
 });

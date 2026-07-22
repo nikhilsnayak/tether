@@ -162,6 +162,7 @@ export const makeWatchActorTestHarness = Effect.fn('makeWatchActorTestHarness')(
     events,
     sent,
     dependencies,
+    input: submit,
     openChannel: () => submit({ _tag: 'ChannelOpened' }),
     closeChannel: () => submit({ _tag: 'ChannelClosed' }),
     receiveHello: (peer: Partial<WatchCapabilities> = {}) =>

@@ -2,6 +2,10 @@ import { assert, describe, it } from '@effect/vitest';
 import {
   WatchAlongPlatform,
   WatchLocalCapabilities,
+  WatchPlatformError,
+  type ClaimedSourceHandle,
+  type PreparedSourceHandle,
+  type ProgramStreamHandle,
   type WatchCapabilities,
   type WatchSourceEvent,
 } from '@tether/client-runtime/modules/watch-along';
@@ -13,7 +17,12 @@ import { Effect, Fiber, Layer } from 'effect';
 import { afterEach, vi } from 'vitest';
 
 import { webWatchAlongPlatformLayer } from './platform';
-import { prepareWatchSource, waitForWatchSourceReady, WebWatchSourceError } from './source-adapter';
+import {
+  prepareWatchSource,
+  waitForWatchSourceReady,
+  WebWatchSourceError,
+  type WebWatchSourceResource,
+} from './source-adapter';
 import {
   FakeWatchStream,
   FakeWatchVideo,
@@ -163,5 +172,90 @@ describe('web watch source', () => {
       );
       yield* Effect.promise(noAudio.prepared.cancel);
     });
+  });
+
+  it.effect('maps source operation failures at the platform boundary', () => {
+    const sourceFailure = new WebWatchSourceError({ operation: 'play', cause: 'failure' });
+    const resource: WebWatchSourceResource = {
+      element: {} as WebWatchSourceResource['element'],
+      stream: {} as MediaStream,
+      claim: Effect.fail(sourceFailure),
+      cancel: Effect.void,
+      play: Effect.fail(sourceFailure),
+      pause: Effect.fail(sourceFailure),
+      seek: () => Effect.fail(sourceFailure),
+      observe: () => Effect.fail(sourceFailure),
+      primeFirstFrame: Effect.fail(sourceFailure),
+    };
+    const source = { value: resource } satisfies ClaimedSourceHandle;
+
+    return Effect.gen(function* () {
+      const platform = yield* WatchAlongPlatform;
+      const invalidPrepared = { value: null } satisfies PreparedSourceHandle;
+      const invalidClaimed = { value: null } satisfies ClaimedSourceHandle;
+      const errors = yield* Effect.all([
+        platform.cancelPreparedSource(invalidPrepared).pipe(Effect.flip),
+        platform.programStream(invalidClaimed).pipe(Effect.flip),
+        platform.play(source).pipe(Effect.flip),
+        platform.pause(source).pipe(Effect.flip),
+        platform.seek(source, 0).pipe(Effect.flip),
+        platform.observeSource(source, () => {}).pipe(Effect.flip),
+        platform.primeFirstFrame(source).pipe(Effect.flip),
+        platform.attachProgramTracks({ value: {} } satisfies ProgramStreamHandle).pipe(Effect.flip),
+        platform.clearProgramTracks.pipe(Effect.flip),
+      ]);
+
+      assert.deepStrictEqual(
+        errors.map((error) => error.operation),
+        [
+          'cancel-prepared-source',
+          'program-stream',
+          'play',
+          'pause',
+          'seek',
+          'observe-source',
+          'prime-first-frame',
+          'attach-program-tracks',
+          'clear-program-tracks',
+        ],
+      );
+      for (const error of errors) assert.instanceOf(error, WatchPlatformError);
+    }).pipe(Effect.provide(webWatchAlongPlatformLayer));
+  });
+
+  it.effect('maps a browser play rejection to a platform failure', () => {
+    installMediaReadyConstant();
+    const video = new FakeWatchVideo();
+    video.playFailure = new Error('autoplay blocked');
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeWatchSourceTestFixture(video);
+        const platform = yield* WatchAlongPlatform;
+        const source = yield* platform.claimSource(fixture.prepared.source);
+        const error = yield* platform.play(source).pipe(Effect.flip);
+
+        assert.instanceOf(error, WatchPlatformError);
+        assert.strictEqual(error.operation, 'play');
+      }).pipe(Effect.provide(webWatchAlongPlatformLayer)),
+    );
+  });
+
+  it.effect('maps unavailable source duration to a seek failure', () => {
+    installMediaReadyConstant();
+    const video = new FakeWatchVideo();
+    video.duration = 0;
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeWatchSourceTestFixture(video);
+        const platform = yield* WatchAlongPlatform;
+        const source = yield* platform.claimSource(fixture.prepared.source);
+        const error = yield* platform.seek(source, 0.5).pipe(Effect.flip);
+
+        assert.instanceOf(error, WatchPlatformError);
+        assert.strictEqual(error.operation, 'seek');
+      }).pipe(Effect.provide(webWatchAlongPlatformLayer)),
+    );
   });
 });

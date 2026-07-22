@@ -4,7 +4,15 @@ import { Effect } from 'effect';
 
 import type { WatchCapabilities, WatchEvent } from '../watch-along/Model';
 import { WATCH_PROTOCOL_VERSION, type WatchMessage } from '../watch-along/Protocol';
-import { bob, makePeerSessionTestHarness } from './test/PeerSessionTestHarness';
+import { WatchPlatformError } from '../watch-along/Services';
+import type { DataChannelHandle, PeerConnectionHandle } from './Model';
+import { PlatformError } from './Platform';
+import {
+  bob,
+  makePeerSessionTestHarness,
+  type TestDataChannel,
+} from './test/PeerSessionTestHarness';
+import { WATCH_CONTROL_CHANNEL_LABEL } from './WatchTransport';
 
 const capabilities: WatchCapabilities = {
   canPresentLocalFile: true,
@@ -70,6 +78,12 @@ describe('peer-session watch supervision', () => {
             (channel) => (channel.value as { readonly label: string }).label === 'watch-control-v1',
           ),
         );
+
+        const disabledAnswerer = yield* makePeerSessionTestHarness();
+        yield* disabledAnswerer.openRoom(null, RoomTemplateId.make('watch-disabled-test'));
+        yield* disabledAnswerer.peerJoined(bob);
+        yield* disabledAnswerer.receiveOffer(bob, 'disabled-offer', 0);
+        assert.include(disabledAnswerer.operations, 'createAnswer');
       }),
     ),
   );
@@ -144,6 +158,7 @@ describe('peer-session watch supervision', () => {
               operation.includes('chat-message') && operation.includes('call survived'),
           ),
         );
+        yield* fixture.peerLeft(bob);
       }),
     ),
   );
@@ -163,6 +178,152 @@ describe('peer-session watch supervision', () => {
         assert.isTrue(
           fixture.operations.some(
             (operation) => operation.includes('chat-message') && operation.includes('still alive'),
+          ),
+        );
+      }),
+    ),
+  );
+
+  it.effect(
+    'activates answerer transceivers and seeds a late watch runtime with remote media',
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const roles: string[] = [];
+          const activations: string[] = [];
+          const fixture = yield* makePeerSessionTestHarness(
+            undefined,
+            undefined,
+            {
+              reserveProgramTransceivers: (_peerConnection, role) =>
+                Effect.sync(() => {
+                  roles.push(role);
+                  return { value: {} };
+                }),
+              activateProgramTransceivers: () =>
+                Effect.sync(() => {
+                  activations.push('activated');
+                }),
+            },
+            undefined,
+            undefined,
+            { role: 'host' },
+          );
+          const watchChannel: DataChannelHandle = {
+            value: { label: WATCH_CONTROL_CHANNEL_LABEL } satisfies TestDataChannel,
+          };
+          const remoteStream = { value: { id: 'remote-before-watch-open' } };
+
+          yield* fixture.openRoom(null);
+          yield* fixture.peerJoined(bob);
+          yield* fixture.receiveOffer(bob, 'remote-offer', 0);
+          assert.deepStrictEqual(roles, ['answerer']);
+          assert.deepStrictEqual(activations, ['activated']);
+
+          yield* fixture.actor({
+            _tag: 'RemoteDataChannel',
+            peerConnection: fixture.peerConnection,
+            dataChannel: watchChannel,
+          });
+          yield* fixture.actor({
+            _tag: 'RemoteSharedTrackReceived',
+            peerConnection: fixture.peerConnection,
+            stream: remoteStream,
+          });
+          yield* fixture.actor({ _tag: 'DataChannelOpened', dataChannel: watchChannel });
+          yield* fixture.actor({ _tag: 'DataChannelOpened', dataChannel: watchChannel });
+
+          yield* fixture.actor({
+            _tag: 'WatchRuntimeTerminated',
+            peerConnection: { value: { id: 'stale' } } satisfies PeerConnectionHandle,
+            reason: 'generation-closed',
+          });
+          yield* fixture.actor({
+            _tag: 'WatchRuntimeTerminated',
+            peerConnection: fixture.peerConnection,
+            reason: 'generation-closed',
+          });
+          yield* fixture.actor({ _tag: 'WatchRequestControl', control: { kind: 'play' } });
+          yield* fixture.actor({ _tag: 'WatchCancelPreparing' });
+        }),
+      ),
+  );
+
+  it.effect('cancels proposals when watch runtime startup is unavailable', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makePeerSessionTestHarness(
+          undefined,
+          undefined,
+          {
+            closeDataChannel: undefined,
+            sendDataChannelMessage: () =>
+              Effect.fail(new PlatformError({ operation: 'send-message', cause: 'failed' })),
+          },
+          undefined,
+          undefined,
+          {
+            platform: {
+              cancelPreparedSource: () =>
+                Effect.fail(
+                  new WatchPlatformError({
+                    operation: 'cancel-prepared-source',
+                    cause: 'failed',
+                  }),
+                ),
+            },
+          },
+        );
+
+        yield* fixture.actor({
+          _tag: 'WatchRuntimeTerminated',
+          peerConnection: fixture.peerConnection,
+          reason: 'generation-closed',
+        });
+        yield* fixture.openRoom(bob);
+        yield* fixture.openRoomEvents();
+        yield* fixture.sendChat('close-less failure');
+        yield* fixture.openWatchChannel();
+        yield* fixture.actor({
+          _tag: 'WatchProposeSource',
+          source: { value: { id: 'unclaimed' } },
+        });
+        yield* fixture.actor({
+          _tag: 'RemoteDataChannel',
+          peerConnection: fixture.peerConnection,
+          dataChannel: { value: { label: 'unexpected' } satisfies TestDataChannel },
+        });
+      }),
+    ),
+  );
+
+  it.effect('maps program-track replacement failures into watch platform failures', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makePeerSessionTestHarness(undefined, undefined, {
+          replaceProgramTracks: () =>
+            Effect.fail(
+              new PlatformError({ operation: 'replace-program-tracks', cause: 'failed' }),
+            ),
+        });
+        yield* fixture.openRoom(bob);
+        yield* openCompatibleWatch(fixture);
+        yield* fixture.actor({
+          _tag: 'WatchProposeSource',
+          source: { value: { id: 'replacement-failure' } },
+        });
+        yield* eventually(() =>
+          fixture.operations.some((operation) => operation.includes('"type":"watch-proposed"')),
+        );
+        const proposal = proposalFrom(fixture.operations);
+        yield* fixture.receiveWatchMessage({
+          version: WATCH_PROTOCOL_VERSION,
+          type: 'watch-ready',
+          watchSessionId: proposal.watchSessionId,
+        });
+        yield* eventually(() =>
+          fixture.watchEvents.some(
+            (event) => event._tag === 'WatchFailed' && event.reason === 'source',
           ),
         );
       }),

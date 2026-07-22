@@ -56,6 +56,24 @@ describe('watch actor — capability exchange', () => {
     ),
   );
 
+  it.effect('requires every local and remote receive, render, and control capability', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const keys = ['canReceiveProgramMedia', 'canRenderWatch', 'canControlWatch'] as const;
+
+        for (const key of keys) {
+          const local = yield* makeWatchActorTestHarness({ capabilities: { [key]: false } });
+          yield* local.receiveHello();
+          assert.deepStrictEqual(local.events, []);
+
+          const remote = yield* makeWatchActorTestHarness();
+          yield* remote.receiveHello({ [key]: false });
+          assert.deepStrictEqual(remote.events, []);
+        }
+      }),
+    ),
+  );
+
   it.effect('stays unavailable when neither side can present', () =>
     Effect.scoped(
       Effect.gen(function* () {

@@ -11,7 +11,10 @@ import { Atom } from 'effect/unstable/reactivity';
 
 import { peerSessionSignalingLayer } from '@/lib/app-client';
 
-import { webWatchAlongPlatformLayer, webWatchLocalCapabilitiesLayer } from '../watch-along';
+import {
+  webWatchAlongPlatformLayer,
+  webWatchLocalCapabilitiesLayer,
+} from '../watch-along/platform';
 import { webCryptoLayer, webPeerSessionPlatformLayer } from './platform';
 
 const peerSessionRuntime = Atom.runtime(
