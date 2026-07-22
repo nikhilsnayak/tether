@@ -39,12 +39,37 @@ export const nativeCryptoLayer = Layer.succeed(
 // Not exported from the package index.
 type RTCDataChannel = ReturnType<RTCPeerConnection['createDataChannel']>;
 type RTCRtpTransceiver = ReturnType<RTCPeerConnection['addTransceiver']>;
+type NativeProgramTransceivers = {
+  readonly video: RTCRtpTransceiver;
+  readonly audio: RTCRtpTransceiver;
+};
+type NativeProgramTransceiverReservation =
+  | ({ readonly _tag: 'reserved' } & NativeProgramTransceivers)
+  | {
+      readonly _tag: 'offered-remotely';
+      readonly peerConnection: RTCPeerConnection;
+      readonly offset: number;
+    };
 
 const peerConnectionValue = (handle: PeerConnectionHandle) => handle.value as RTCPeerConnection;
 const dataChannelValue = (handle: DataChannelHandle) => handle.value as RTCDataChannel;
 export const mediaStreamValue = (handle: MediaStreamHandle) => handle.value as MediaStream;
-const programTransceiverValue = (handle: ProgramTransceiverHandle) =>
-  handle.value as { readonly video: RTCRtpTransceiver; readonly audio: RTCRtpTransceiver };
+const resolveProgramTransceivers = (handle: ProgramTransceiverHandle) =>
+  Effect.try({
+    try: (): NativeProgramTransceivers => {
+      const reservation = handle.value as NativeProgramTransceiverReservation;
+      if (reservation._tag === 'reserved') return reservation;
+
+      const offered = reservation.peerConnection.getTransceivers().slice(reservation.offset);
+      const video = offered.find(({ receiver }) => receiver.track?.kind === 'video');
+      const audio = offered.find(({ receiver }) => receiver.track?.kind === 'audio');
+      if (video === undefined || audio === undefined) {
+        throw new Error('Remote offer did not contain reserved program transceivers');
+      }
+      return { video, audio };
+    },
+    catch: (cause) => new PlatformError({ operation: 'replace-program-tracks', cause }),
+  });
 
 export const acquireLocalMedia = Effect.acquireRelease(
   Effect.tryPromise({
@@ -284,33 +309,46 @@ const nativePeerSessionPlatform = PeerSessionPlatform.of({
       },
       catch: (cause) => new PlatformError({ operation: 'add-local-tracks', cause }),
     }),
-  reserveProgramTransceivers: (peerConnection) =>
+  reserveProgramTransceivers: (peerConnection, negotiationRole) =>
     Effect.try({
       try: () => {
         const peer = peerConnectionValue(peerConnection);
+        if (negotiationRole === 'answerer') {
+          return {
+            value: {
+              _tag: 'offered-remotely',
+              peerConnection: peer,
+              offset: peer.getTransceivers().length,
+            } satisfies NativeProgramTransceiverReservation,
+          };
+        }
         // First-release mobile is a receive-only watcher: it never presents, so
         // its program transceivers do not advertise sending capability.
         return {
           value: {
+            _tag: 'reserved',
             video: peer.addTransceiver('video', { direction: 'recvonly' }),
             audio: peer.addTransceiver('audio', { direction: 'recvonly' }),
-          },
+          } satisfies NativeProgramTransceiverReservation,
         };
       },
       catch: (cause) => new PlatformError({ operation: 'reserve-program-transceivers', cause }),
     }),
-  activateProgramTransceivers: () => Effect.void,
+  activateProgramTransceivers: (transceiver) =>
+    resolveProgramTransceivers(transceiver).pipe(Effect.asVoid),
   replaceProgramTracks: (transceiver, stream) =>
-    Effect.tryPromise({
-      try: async () => {
-        const { video, audio } = programTransceiverValue(transceiver);
-        const media = stream === null ? null : mediaStreamValue(stream);
-        await Promise.all([
-          video.sender.replaceTrack(media?.getVideoTracks()[0] ?? null),
-          audio.sender.replaceTrack(media?.getAudioTracks()[0] ?? null),
-        ]);
-      },
-      catch: (cause) => new PlatformError({ operation: 'replace-program-tracks', cause }),
+    Effect.gen(function* () {
+      const { video, audio } = yield* resolveProgramTransceivers(transceiver);
+      yield* Effect.tryPromise({
+        try: async () => {
+          const media = stream === null ? null : mediaStreamValue(stream);
+          await Promise.all([
+            video.sender.replaceTrack(media?.getVideoTracks()[0] ?? null),
+            audio.sender.replaceTrack(media?.getAudioTracks()[0] ?? null),
+          ]);
+        },
+        catch: (cause) => new PlatformError({ operation: 'replace-program-tracks', cause }),
+      });
     }),
   observePeerConnection,
   createDataChannel: (peerConnection, label) =>
