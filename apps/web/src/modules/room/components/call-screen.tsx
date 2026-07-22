@@ -25,6 +25,7 @@ import { useScreenWakeLock } from '../hooks/use-screen-wake-lock';
 import { mediaStreamValue } from '../peer-session/platform';
 import type { InitialMediaSettings } from '../preflight/media';
 import { resolveRoomJourney, roomJourneyLabel } from '../scene/journey';
+import { ProgramAudio } from '../watch-along/program-audio';
 import { CallControlButton, MediaToggleControls } from './call-controls';
 import { CallControlsToolbar } from './call-controls-toolbar';
 import { JoinRequestOverlay } from './join-request-overlay';
@@ -143,6 +144,7 @@ export function CallScreen({
         muted={!audioPreferences.speakerEnabled}
         pendingJoinPeerIds={view.pendingJoinRequests.map((request) => request.peerId)}
       />
+      <ProgramAudio />
       {journey === 'outside' && (
         <section
           aria-label={displayLabel}

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { createRoomAudioEngine, type RoomAudioEngine } from '../scene/room-audio';
+import { attachAudioStream, setAudioSink } from './audio-element';
 
 export interface KnockPlaybackQueue {
   readonly enqueue: (peerIds: ReadonlyArray<string>) => void;
@@ -52,21 +53,6 @@ export function createKnockPlaybackQueue(): KnockPlaybackQueue {
   };
 }
 
-export function attachRemoteAudio(element: HTMLAudioElement, stream: MediaStream): () => void {
-  element.srcObject = stream;
-  void element.play().catch(() => {});
-  return () => {
-    element.pause();
-    element.srcObject = null;
-  };
-}
-
-export function setRemoteAudioSink(element: HTMLAudioElement, sinkId: string): void {
-  if (sinkId !== '' && typeof element.setSinkId === 'function') {
-    void element.setSinkId(sinkId).catch(() => {});
-  }
-}
-
 export function RemoteAudio({
   stream,
   sinkId,
@@ -100,12 +86,12 @@ export function RemoteAudio({
   useEffect(() => {
     const element = audioRef.current;
     if (element === null || stream === null) return;
-    return attachRemoteAudio(element, stream);
+    return attachAudioStream(element, stream);
   }, [stream]);
 
   useEffect(() => {
     const element = audioRef.current;
-    if (element !== null) setRemoteAudioSink(element, sinkId);
+    if (element !== null) setAudioSink(element, sinkId);
   }, [sinkId]);
 
   useEffect(() => {

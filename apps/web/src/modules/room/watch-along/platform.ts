@@ -4,6 +4,7 @@ import {
   WatchPlatformError,
   type ClaimedSourceHandle,
   type PreparedSourceHandle,
+  type ProgramStreamHandle,
   type WatchPlatformOperation,
 } from '@tether/client-runtime/modules/watch-along';
 import { Effect, Layer } from 'effect';
@@ -14,6 +15,8 @@ import {
   webWatchSourceResource,
   type WebWatchSourceResource,
 } from './source-adapter';
+
+export const programMediaStreamValue = (handle: ProgramStreamHandle) => handle.value as MediaStream;
 
 const invalidSource = (operation: WatchPlatformOperation) =>
   new WatchPlatformError({ operation, cause: 'Invalid web watch source handle' });

@@ -16,7 +16,7 @@ import {
 import { Effect, Fiber, Layer } from 'effect';
 import { afterEach, vi } from 'vitest';
 
-import { webWatchAlongPlatformLayer } from './platform';
+import { programMediaStreamValue, webWatchAlongPlatformLayer } from './platform';
 import {
   prepareWatchSource,
   waitForWatchSourceReady,
@@ -39,6 +39,12 @@ const capabilities: WatchCapabilities = {
 const installMediaReadyConstant = () => {
   vi.stubGlobal('HTMLMediaElement', { HAVE_FUTURE_DATA: 3 });
 };
+
+it('unwraps web program stream handles', () => {
+  const stream = {} as MediaStream;
+
+  assert.strictEqual(programMediaStreamValue({ value: stream }), stream);
+});
 
 const makeWebWatchPlatformHarness = (): WatchAlongPlatformTestHarness => {
   installMediaReadyConstant();
