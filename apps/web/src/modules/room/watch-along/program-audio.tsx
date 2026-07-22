@@ -16,9 +16,9 @@ export function ProgramAudio() {
 
   useEffect(() => {
     const element = audioRef.current;
-    if (element === null || stream === null) return;
+    if (element === null || stream === null || !preferences.speakerEnabled) return;
     return attachAudioStream(element, stream);
-  }, [stream]);
+  }, [preferences.speakerEnabled, stream]);
 
   useEffect(() => {
     const element = audioRef.current;
