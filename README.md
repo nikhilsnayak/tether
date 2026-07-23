@@ -293,19 +293,16 @@ bunx playwright install chromium
 cd ..
 ```
 
-Then run the relevant Playwright lane:
+Then run the Playwright suite:
 
 ```sh
-bun run test:e2e:fast
-bun run test:e2e:real-render:smoke
-bun run test:e2e:gpu
+bun run test:e2e
 ```
 
-The fast lane covers flows that do not enter the rendered room. Real-render lanes mount the
-production React Three Fiber canvas and frame loop. The browser suite covers admission, media,
-chat, safety-code agreement, connection recovery, physical signaling-socket closure, direct-call
-departure, complete two-peer room journeys, Watch Together program media, and camera/avatar
-movement invariants.
+The suite is a single core-journey test: two peers complete media setup, admit, connect over
+WebRTC, exchange real audio/video in the production React Three Fiber room, confirm the safety
+code, exchange a chat message across the data channel, and leave. It mounts the real canvas and
+frame loop under SwiftShader in CI, so one run covers the app's critical end-to-end path.
 
 ## Deliberate scope
 

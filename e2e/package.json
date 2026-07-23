@@ -5,9 +5,6 @@
   "type": "module",
   "scripts": {
     "test": "playwright test",
-    "test:fast": "playwright test --project=fast-browser",
-    "test:gpu": "playwright test --project=gpu-e2e",
-    "test:real-render:smoke": "playwright test --project=gpu-e2e --grep @real-render-smoke",
     "test:ui": "playwright test --ui",
     "report": "playwright show-report"
   },

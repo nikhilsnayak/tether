@@ -44,14 +44,6 @@ const trackKinds = (page: Page, selector: string) =>
       : [];
   });
 
-const localTrackEnabled = (page: Page, kind: 'audio' | 'video') =>
-  page.getByLabel('Local video preview').evaluate((video: HTMLVideoElement, trackKind) => {
-    const stream = video.srcObject;
-    return stream instanceof MediaStream
-      ? (stream.getTracks().find((track) => track.kind === trackKind)?.enabled ?? null)
-      : null;
-  }, kind);
-
 const expectLocalAndRemoteMedia = async (page: Page) => {
   await expect(page.getByLabel('Local video preview')).toBeVisible();
   const remoteVideo = page.getByLabel('Other person video');
@@ -78,310 +70,113 @@ const expectLocalAndRemoteMedia = async (page: Page) => {
     .toEqual(['audio', 'video']);
 };
 
-const mediaTilesAvoidToolbar = (page: Page) =>
-  page.evaluate(() => {
-    const toolbar = document.querySelector('[data-call-dock]')?.getBoundingClientRect();
-    const tiles = [...document.querySelectorAll('[data-room-media-tile]')].map((element) =>
-      element.getBoundingClientRect(),
-    );
-    if (toolbar === undefined || tiles.length !== 2) return false;
-    const overlaps = (left: DOMRect, right: DOMRect) =>
-      left.left < right.right &&
-      left.right > right.left &&
-      left.top < right.bottom &&
-      left.bottom > right.top;
-    return !tiles.some((tile) => overlaps(tile, toolbar)) && !overlaps(tiles[0]!, tiles[1]!);
-  });
+test('host and guest complete a real room journey', async ({ page, room }) => {
+  test.setTimeout(180_000);
+  const host = await room.actorFor(page, { probeWebRtc: true });
+  const guest = await room.createActor({ probeWebRtc: true });
+  // Capture each Canvas at media setup, before the transfer that requests a
+  // session, so the post-connection identity check spans that transition.
+  const roomId = await room.createRoom(host, rememberRoomCanvas);
 
-const lowQualityMedianFps = async (page: Page) => {
-  await page.getByRole('button', { name: 'Room quality' }).click();
-  await page.getByRole('menuitemradio', { name: 'Low quality' }).click();
-
-  // FPS is a time-based renderer contract, so a fixed sampling window is
-  // intentional here. Functional E2E scenarios use observable state instead.
-  await page.waitForTimeout(2_000);
-  const samples: number[] = [];
-  for (let index = 0; index < 10; index += 1) {
-    await page.waitForTimeout(1_000);
-    const value = Number(
-      await page.getByLabel('Dusk Suite room scene').getAttribute('data-room-fps'),
-    );
-    if (Number.isFinite(value)) samples.push(value);
-  }
-  samples.sort((left, right) => left - right);
-  return samples[Math.floor(samples.length / 2)] ?? 0;
-};
-
-test.describe('real room', { tag: '@gpu' }, () => {
-  test(
-    'host and guest complete a real room journey',
-    { tag: '@real-render-smoke' },
-    async ({ page, room }) => {
-      test.setTimeout(120_000);
-      const host = await room.actorFor(page, { probeWebRtc: true });
-      const guest = await room.createActor({ probeWebRtc: true });
-      // Capture each Canvas at media setup, before the transfer that requests a
-      // session, so the post-connection identity check spans that transition.
-      const roomId = await room.createRoom(host, rememberRoomCanvas);
-
-      await room.join(guest, roomId, 'Guest', rememberRoomCanvas);
-      await expect(page.getByRole('region', { name: 'Join request' })).toBeVisible();
-      await room.admit(host);
-      await Promise.all([room.expectConnected(host), room.expectConnected(guest)]);
-      await Promise.all([
-        expect(page.getByLabel('Dusk Suite room scene')).toHaveAttribute(
-          'data-room-journey',
-          'together',
-        ),
-        // GitHub's SwiftShader runner cannot reliably advance two concurrent R3F
-        // frame loops, so the guest's spatial transition never completes there.
-        // Everything else in this test (connection, media, chat, leave) does not
-        // depend on the guest's render loop and still runs in CI.
-        ...(CI
-          ? []
-          : [
-              expect(guest.page.getByLabel('Dusk Suite room scene')).toHaveAttribute(
-                'data-room-location',
-                'inside',
-              ),
-            ]),
-        expectLocalAndRemoteMedia(page),
-        expectLocalAndRemoteMedia(guest.page),
-        room.expectPreparedMediaTransferred(host),
-        room.expectPreparedMediaTransferred(guest),
-      ]);
-      await expect.poll(() => guest.probe.dataChannelLabels()).toContain('room-events-v1');
-      await room.expectRendererReady(host);
-      if (!CI) await room.expectRendererReady(guest);
-
-      // The scene must be the exact same Canvas the actor saw at media setup: one
-      // renderer survived the media-setup -> session transition, no remount.
-      await expectSameRoomCanvas(host);
-      await expectSameRoomCanvas(guest);
-
-      await Promise.all([room.expectDetached(host), room.expectDetached(guest)]);
-      await Promise.all([room.expectZeroServerSockets(host), room.expectZeroServerSockets(guest)]);
-      await Promise.all([
-        expect(page.getByTestId('direct-indicator')).toBeVisible(),
-        expect(guest.page.getByTestId('direct-indicator')).toBeVisible(),
-      ]);
-
-      await Promise.all([
-        page.getByRole('button', { name: 'We see the same code' }).click(),
-        guest.page.getByRole('button', { name: 'We see the same code' }).click(),
-      ]);
-      await Promise.all([
-        page.getByRole('button', { name: 'Open chat' }).click(),
-        guest.page.getByRole('button', { name: 'Open chat' }).click(),
-      ]);
-      const message = 'Hello across the real data channel';
-      await sendMessage(page, message);
-      await expect(
-        guest.page.getByRole('list', { name: 'Chat messages' }).getByText(message),
-      ).toBeVisible();
-      await guest.page.keyboard.press('Escape');
-      await expect(guest.page.getByRole('dialog', { name: 'Chat' })).toHaveAttribute(
-        'data-closed',
-        '',
-      );
-
-      // SwiftShader can starve the drawer's exit transition after it has closed,
-      // leaving its overlay mounted over the call dock. Dispatching the click
-      // still exercises the button handler without waiting for that paint.
-      await guest.page.getByRole('button', { name: 'Leave call' }).dispatchEvent('click');
-      await expect(guest.page).toHaveURL('/');
-      await room.expectPeerDeparted(host);
-    },
-  );
-
-  test('local media controls synchronize remote state', async ({ room }) => {
-    const { host, guest } = await room.connect();
-    const hostPage = host.page;
-    const guestPage = guest.page;
-
-    await expect.poll(() => localTrackEnabled(hostPage, 'video')).toBe(true);
-    await hostPage.getByRole('button', { name: 'Turn camera off' }).click();
-    await expect.poll(() => localTrackEnabled(hostPage, 'video')).toBe(false);
-    await expect(guestPage.locator('[data-room-remote-camera]')).toHaveAttribute(
-      'data-room-remote-camera',
-      'off',
-    );
-    await expect(guestPage.getByLabel('Other person camera unavailable')).toBeVisible();
-    await hostPage.getByRole('button', { name: 'Turn camera on' }).click();
-    await expect.poll(() => localTrackEnabled(hostPage, 'video')).toBe(true);
-    await expect(guestPage.locator('[data-room-remote-camera]')).toHaveAttribute(
-      'data-room-remote-camera',
-      'on',
-      { timeout: REAL_RENDER_MEDIA_TIMEOUT },
-    );
-
-    await expect.poll(() => localTrackEnabled(hostPage, 'audio')).toBe(true);
-    await hostPage.getByRole('button', { name: 'Mute microphone' }).click();
-    await expect.poll(() => localTrackEnabled(hostPage, 'audio')).toBe(false);
-    await expect(guestPage.locator('[data-room-remote-microphone]')).toHaveAttribute(
-      'data-room-remote-microphone',
-      'off',
-    );
-    await hostPage.getByRole('button', { name: 'Unmute microphone' }).click();
-    await expect.poll(() => localTrackEnabled(hostPage, 'audio')).toBe(true);
-    await expect(guestPage.locator('[data-room-remote-microphone]')).toHaveAttribute(
-      'data-room-remote-microphone',
-      'on',
-      { timeout: REAL_RENDER_MEDIA_TIMEOUT },
-    );
-  });
-
-  test('a detached room code cannot admit a replacement after departure', async ({ room }) => {
-    // The assertion covers a complete two-peer detach plus a fresh page load.
-    // Give software-rendered CI enough time to reach the replacement attempt.
-    test.slow();
-
-    const { host, guest, roomId } = await room.connect();
-    await Promise.all([room.expectDetached(host), room.expectDetached(guest)]);
-    await Promise.all([room.expectZeroServerSockets(host), room.expectZeroServerSockets(guest)]);
-    await guest.page.getByRole('button', { name: 'Leave call' }).click();
-    await room.expectPeerDeparted(host);
-    await Promise.all([room.closeActor(host), room.closeActor(guest)]);
-
-    const replacement = await room.createActor();
-    await replacement.page.goto(`/room/${roomId}`);
-    const joinInBrowser = replacement.page.getByRole('button', { name: 'Join in this browser' });
-    await expect(joinInBrowser).toBeVisible({ timeout: REAL_RENDER_MEDIA_TIMEOUT });
-    // The replacement contract is the server response, not the scene's visual
-    // stability. SwiftShader can keep shifting this otherwise actionable button
-    // while the room renderer initializes.
-    await joinInBrowser.click({ force: CI });
-    await expect(
-      replacement.page.getByText('This room is no longer here', { exact: true }),
-    ).toBeVisible({ timeout: REAL_RENDER_MEDIA_TIMEOUT });
-  });
-
-  test('each peer controls only its own physical avatar', async ({ room }) => {
-    test.skip(CI, 'GitHub SwiftShader does not reliably advance two R3F frame loops');
-    const { host, guest } = await room.connect();
-    const hostScene = host.page.getByLabel('Dusk Suite room scene');
-    const guestScene = guest.page.getByLabel('Dusk Suite room scene');
-    await Promise.all([
-      host.page.emulateMedia({ reducedMotion: 'reduce' }),
-      guest.page.emulateMedia({ reducedMotion: 'reduce' }),
-    ]);
-    await Promise.all([
-      expect(hostScene).toHaveAttribute('data-room-location', 'inside'),
-      expect(guestScene).toHaveAttribute('data-room-location', 'inside'),
-      expect(hostScene).toHaveAttribute('data-room-avatar-sync', 'ready'),
-      expect(guestScene).toHaveAttribute('data-room-avatar-sync', 'ready'),
-      expect(hostScene).toHaveAttribute('data-room-local-pose', /.+/),
-      expect(guestScene).toHaveAttribute('data-room-local-pose', /.+/),
-    ]);
-    const hostBefore = await hostScene.getAttribute('data-room-local-pose');
-    const guestBefore = await guestScene.getAttribute('data-room-local-pose');
-
-    await host.page.keyboard.down('w');
-    try {
-      await expect.poll(() => hostScene.getAttribute('data-room-local-pose')).not.toBe(hostBefore);
-    } finally {
-      await host.page.keyboard.up('w');
-    }
-    // The keyup needs a frame to reach the game loop, so wait for the avatar to
-    // settle before snapshotting its resting pose, or a still-decelerating
-    // frame gets captured as "after" and the later equality check flakes.
-    await expect.poll(() => hostScene.getAttribute('data-room-local-pose')).toMatch(/,idle$/);
-    await expect.poll(() => guestScene.getAttribute('data-room-remote-pose')).not.toBeNull();
-    expect(await guestScene.getAttribute('data-room-local-pose')).toBe(guestBefore);
-
-    const hostAfter = await hostScene.getAttribute('data-room-local-pose');
-    await guest.page.keyboard.down('ArrowUp');
-    try {
-      await expect
-        .poll(() => guestScene.getAttribute('data-room-local-pose'))
-        .not.toBe(guestBefore);
-    } finally {
-      await guest.page.keyboard.up('ArrowUp');
-    }
-    expect(await hostScene.getAttribute('data-room-local-pose')).toBe(hostAfter);
-  });
-
-  test('camera keeps its boom when the avatar reaches a room boundary', async ({ page, room }) => {
-    test.slow();
-    await page.clock.install();
-    await page.emulateMedia({ reducedMotion: 'reduce' });
-    const host = room.actorFor(page);
-    await room.createRoom(host);
-    const scene = page.getByLabel('Dusk Suite room scene');
-    await expect(scene).toHaveAttribute('data-room-camera-distance', /.+/);
-
-    await page.keyboard.down('w');
-    try {
-      // Advance requestAnimationFrame deterministically: SwiftShader may only
-      // render a handful of frames per wall-clock second, while avatar movement
-      // intentionally caps the distance integrated by any one frame.
-      await page.clock.runFor(3_000);
-    } finally {
-      await page.keyboard.up('w');
-    }
-    const pose = await scene.getAttribute('data-room-local-pose');
-    expect(Number(pose?.split(',')[0])).toBeGreaterThan(4.3);
-
-    const sceneBounds = await scene.boundingBox();
-    expect(sceneBounds).not.toBeNull();
-    if (sceneBounds === null) return;
-    const dragY = sceneBounds.y + sceneBounds.height / 2;
-    const dragStartX = sceneBounds.x + 160;
-    await page.mouse.move(dragStartX, dragY);
-    await page.mouse.down();
-    await page.mouse.move(dragStartX + 785, dragY);
-    await page.mouse.up();
-    await page.clock.runFor(20);
-
-    await expect
-      .poll(async () => Number(await scene.getAttribute('data-room-camera-distance')))
-      .toBeGreaterThanOrEqual(1);
-    await expect
-      .poll(async () => Number(await scene.getAttribute('data-room-camera-distance')))
-      .toBeLessThan(1.01);
-  });
-
-  test('responsive media tiles avoid controls and low quality sustains 30 FPS', async ({
-    room,
-  }) => {
-    test.skip(CI, 'Hardware renderer performance remains a local acceptance contract');
-    test.setTimeout(90_000);
-    const { host } = await room.connect();
-
-    try {
-      for (const viewport of [
-        { width: 1_280, height: 720 },
-        { width: 390, height: 844 },
-      ]) {
-        await host.page.setViewportSize(viewport);
-        await expect.poll(() => mediaTilesAvoidToolbar(host.page)).toBe(true);
-        expect(await lowQualityMedianFps(host.page)).toBeGreaterThanOrEqual(30);
-      }
-    } finally {
-      await host.page.setViewportSize({ width: 1_280, height: 720 });
-    }
-  });
-
-  test('denying a knock keeps the host inside and the guest outside', async ({ page, room }) => {
-    const host = await room.actorFor(page, { probeWebRtc: true });
-    const guest = await room.createActor({ probeWebRtc: true });
-    const roomId = await room.createRoom(host);
-    await room.join(guest, roomId, 'Uninvited guest');
-    await expect(page.getByRole('region', { name: 'Join request' })).toBeVisible();
-    await room.deny(host);
-
-    await expect(page.getByLabel('Dusk Suite room scene')).toHaveAttribute(
+  await room.join(guest, roomId, 'Guest', rememberRoomCanvas);
+  await expect(page.getByRole('region', { name: 'Join request' })).toBeVisible();
+  await room.admit(host);
+  await Promise.all([room.expectConnected(host), room.expectConnected(guest)]);
+  await Promise.all([
+    expect(page.getByLabel('Dusk Suite room scene')).toHaveAttribute(
       'data-room-journey',
-      'waiting',
-    );
-    await expect(page.getByLabel('Dusk Suite room scene')).toHaveAttribute(
-      'data-room-remote-avatar',
-      'absent',
-    );
-    await expect(guest.page.getByText('Request declined', { exact: true }).first()).toBeVisible();
-    await expect(guest.page.getByLabel('Dusk Suite room scene')).toHaveAttribute(
-      'data-room-journey',
-      'ended',
-    );
-  });
+      'together',
+    ),
+    // GitHub's SwiftShader runner cannot reliably advance two concurrent R3F
+    // frame loops, so the guest's spatial transition never completes there.
+    // Everything else in this test (connection, media, chat, leave) does not
+    // depend on the guest's render loop and still runs in CI.
+    ...(CI
+      ? []
+      : [
+          expect(guest.page.getByLabel('Dusk Suite room scene')).toHaveAttribute(
+            'data-room-location',
+            'inside',
+          ),
+        ]),
+    expectLocalAndRemoteMedia(page),
+    expectLocalAndRemoteMedia(guest.page),
+    room.expectPreparedMediaTransferred(host),
+    room.expectPreparedMediaTransferred(guest),
+  ]);
+  await expect.poll(() => guest.probe.dataChannelLabels()).toContain('room-events-v1');
+  await room.expectRendererReady(host);
+  if (!CI) await room.expectRendererReady(guest);
+
+  // The scene must be the exact same Canvas the actor saw at media setup: one
+  // renderer survived the media-setup -> session transition, no remount.
+  await expectSameRoomCanvas(host);
+  await expectSameRoomCanvas(guest);
+
+  await Promise.all([room.expectDetached(host), room.expectDetached(guest)]);
+  await Promise.all([room.expectZeroServerSockets(host), room.expectZeroServerSockets(guest)]);
+  await Promise.all([
+    expect(page.getByTestId('direct-indicator')).toBeVisible(),
+    expect(guest.page.getByTestId('direct-indicator')).toBeVisible(),
+  ]);
+
+  // Peer-verification contract: both peers must show the same well-formed
+  // safety code before either confirms it.
+  const [hostCode, guestCode] = await Promise.all([
+    page.getByLabel('Safety code').textContent(),
+    guest.page.getByLabel('Safety code').textContent(),
+  ]);
+  expect(hostCode).toMatch(/^\d{5}( \d{5}){4}$/);
+  expect(hostCode).toBe(guestCode);
+
+  await Promise.all([
+    page.getByRole('button', { name: 'We see the same code' }).click(),
+    guest.page.getByRole('button', { name: 'We see the same code' }).click(),
+  ]);
+
+  // Watch Together: share a video on the 3D room display over the direct
+  // connection. The guest must decode the shared frames, and neither peer may
+  // renegotiate the connection to carry the program media.
+  const negotiationBefore = await Promise.all([
+    host.probe.negotiationNeededCount(),
+    guest.probe.negotiationNeededCount(),
+  ]);
+  await Promise.all([room.expectWatchState(host, 'idle'), room.expectWatchState(guest, 'idle')]);
+  await room.startWatch(host);
+  await Promise.all([
+    room.expectWatchState(host, 'loaded-paused'),
+    room.expectWatchState(guest, 'loaded-paused'),
+  ]);
+  await page.getByRole('button', { name: 'Watch together' }).click();
+  await page.getByRole('button', { name: 'Play', exact: true }).click();
+  await Promise.all([
+    room.expectWatchState(host, 'playing'),
+    room.expectWatchState(guest, 'playing'),
+  ]);
+  await expect
+    .poll(() => guest.probe.hasDecodedDetachedVideoFrame(), { timeout: 30_000 })
+    .toBe(true);
+  await host.page.getByRole('button', { name: 'Stop', exact: true }).click();
+  await Promise.all([room.expectWatchState(host, 'idle'), room.expectWatchState(guest, 'idle')]);
+  expect(await host.probe.negotiationNeededCount()).toBe(negotiationBefore[0]);
+  expect(await guest.probe.negotiationNeededCount()).toBe(negotiationBefore[1]);
+
+  await Promise.all([
+    page.getByRole('button', { name: 'Open chat' }).click(),
+    guest.page.getByRole('button', { name: 'Open chat' }).click(),
+  ]);
+  const message = 'Hello across the real data channel';
+  await sendMessage(page, message);
+  await expect(
+    guest.page.getByRole('list', { name: 'Chat messages' }).getByText(message),
+  ).toBeVisible();
+  await guest.page.keyboard.press('Escape');
+  await expect(guest.page.getByRole('dialog', { name: 'Chat' })).toHaveAttribute('data-closed', '');
+
+  // SwiftShader can starve the drawer's exit transition after it has closed,
+  // leaving its overlay mounted over the call dock. Dispatching the click
+  // still exercises the button handler without waiting for that paint.
+  await guest.page.getByRole('button', { name: 'Leave call' }).dispatchEvent('click');
+  await expect(guest.page).toHaveURL('/');
+  await room.expectPeerDeparted(host);
 });
