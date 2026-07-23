@@ -7,8 +7,16 @@ import { colors, mono } from '@/lib/theme';
 
 import { usePinnedDraggableTile } from '../hooks/use-pinned-draggable-tile';
 
-export function RemoteVideo({ stream }: { readonly stream: MediaStream }) {
-  return <RTCView streamURL={stream.toURL()} style={StyleSheet.absoluteFill} objectFit='cover' />;
+export function RemoteVideo({
+  stream,
+  objectFit = 'cover',
+}: {
+  readonly stream: MediaStream;
+  readonly objectFit?: 'contain' | 'cover';
+}) {
+  return (
+    <RTCView streamURL={stream.toURL()} style={StyleSheet.absoluteFill} objectFit={objectFit} />
+  );
 }
 
 export function SelfPreview({

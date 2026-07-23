@@ -125,7 +125,7 @@ manually or left on automatic, which lowers quality after a sustained frame-rate
 | -------- | --------------------------------------------------------------------------------------------------------------- |
 | Web      | Spatial room, admission, calls, chat, safety codes, media controls, and Watch Together                          |
 | Desktop  | Electron shell around the web app, including Watch Together, Linux `.deb` packaging, and `tether://` room links |
-| Mobile   | Native admission, audio/video, chat, and deep links; no Watch Together player or presentation UI                |
+| Mobile   | Native admission, audio/video, chat, deep links, and receive-only Watch Together playback and controls          |
 
 ## Privacy and current limits
 

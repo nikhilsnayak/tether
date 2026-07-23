@@ -9,11 +9,13 @@ import {
 import { ShieldCheck, User } from 'lucide-react-native';
 import { useRef, useState } from 'react';
 import { LayoutChangeEvent, Pressable, StyleSheet, Text, View } from 'react-native';
+import type { MediaStream } from 'react-native-webrtc';
 
 import { LogoMark } from '@/components/logo';
 import { colors, mono } from '@/lib/theme';
 
 import { mediaStreamValue } from '../peer-session/platform';
+import type { MobileWatchPresentation } from '../watch-along/presentation';
 import { RemoteVideo, SelfPreview } from './media-stage';
 import { SafetyCodeCard } from './safety-code-card';
 
@@ -27,9 +29,13 @@ const INDICATOR_TONE_COLOR = {
 export function CallStage({
   cameraOn,
   onLeave,
+  programStream,
+  watchPresentation,
 }: {
   readonly cameraOn: boolean;
   readonly onLeave: () => void;
+  readonly programStream: MediaStream | null;
+  readonly watchPresentation: MobileWatchPresentation;
 }) {
   const view = useAtomValue(peerSessionViewAtom);
   const localHandle = useAtomValue(peerLocalStreamAtom);
@@ -51,7 +57,9 @@ export function CallStage({
   };
   return (
     <View ref={stageRef} style={styles.stage} onLayout={onLayout}>
-      {remoteStream ? (
+      {programStream !== null ? (
+        <RemoteVideo objectFit='contain' stream={programStream} />
+      ) : remoteStream ? (
         <RemoteVideo stream={remoteStream} />
       ) : (
         <View style={styles.placeholder}>
@@ -60,6 +68,12 @@ export function CallStage({
           </View>
           <Text style={styles.label}>{presentation.label}</Text>
           <Text style={styles.hint}>{presentation.hint}</Text>
+        </View>
+      )}
+      {watchPresentation.active && programStream === null && (
+        <View pointerEvents='none' style={styles.watchStatus}>
+          <Text style={styles.label}>{watchPresentation.label}</Text>
+          <Text style={styles.hint}>{watchPresentation.hint}</Text>
         </View>
       )}
       <View style={styles.header}>
@@ -111,6 +125,15 @@ const styles = StyleSheet.create({
   },
   label: { ...mono, color: colors.foreground, fontSize: 13, textAlign: 'center' },
   hint: { color: colors.mutedForeground, fontSize: 13, textAlign: 'center' },
+  watchStatus: {
+    position: 'absolute',
+    top: '50%',
+    left: 24,
+    right: 24,
+    alignItems: 'center',
+    gap: 8,
+    transform: [{ translateY: -32 }],
+  },
   header: {
     position: 'absolute',
     top: 0,
