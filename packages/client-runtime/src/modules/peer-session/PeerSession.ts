@@ -428,6 +428,10 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
 
     const { peerId, reconnectAttempts } = state;
     const role = state.negotiation.role;
+    const retryDiagnostics =
+      state.peerConnectionState === 'connected'
+        ? makeConnectionDiagnosticTracker()
+        : state.generation.diagnostics.nextGeneration();
     yield* closeGeneration(state.generation);
 
     if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
@@ -437,9 +441,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       return yield* eventSink.emit({ _tag: 'TransportLost', peerId, diagnostic });
     }
 
-    const generation = yield* acquirePeerConnectionGeneration(
-      state.generation.diagnostics.nextGeneration(),
-    );
+    const generation = yield* acquirePeerConnectionGeneration(retryDiagnostics);
     memory.roomEvents.resetGeneration();
     yield* eventSink.emit({ _tag: 'PeerInterrupted', peerId });
 

@@ -474,6 +474,40 @@ describe('peer-session actor', () => {
     ).pipe(Effect.orDie),
   );
 
+  it.effect('starts fresh discovery evidence after a replacement connection succeeds', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makePeerSessionTestHarness();
+
+        yield* fixture.openRoom(bob);
+        const initialConnection = fixture.peerConnections[0]!;
+        yield* fixture.actor({
+          _tag: 'LocalIceCandidate',
+          peerConnection: initialConnection,
+          candidate: {
+            candidate: 'candidate:1 1 udp 1 203.0.113.1 9 typ srflx',
+            sdpMid: '0',
+            sdpMLineIndex: 0,
+            usernameFragment: null,
+          },
+        });
+        yield* fixture.connectionFailed(initialConnection);
+
+        const recoveredConnection = fixture.peerConnections[1]!;
+        yield* fixture.connectionConnected(recoveredConnection);
+        yield* fixture.connectionFailed(recoveredConnection);
+        yield* fixture.connectionFailed(fixture.peerConnections[2]!);
+        yield* fixture.connectionFailed(fixture.peerConnections[3]!);
+
+        assert.deepStrictEqual(fixture.events.at(-1), {
+          _tag: 'TransportLost',
+          peerId: bob,
+          diagnostic: 'no-network-candidates',
+        });
+      }),
+    ).pipe(Effect.orDie),
+  );
+
   it.effect('rejects a delayed old answer and accepts the current answer after reconnecting', () =>
     Effect.scoped(
       Effect.gen(function* () {
