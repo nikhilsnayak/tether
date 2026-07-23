@@ -39,6 +39,17 @@ describe('connection diagnostics', () => {
     assert.strictEqual(tracker.diagnose('negotiation-deadline', false), 'negotiation-timeout');
   });
 
+  it('retains discovery evidence but resets gathering state for a new generation', () => {
+    const first = makeConnectionDiagnosticTracker();
+    first.observeCandidate(candidate('candidate:1 1 udp 1 203.0.113.1 9 typ srflx'));
+    first.markGatheringComplete();
+    const retry = first.nextGeneration();
+
+    assert.strictEqual(first.diagnose('negotiation-deadline', false), 'direct-path-unavailable');
+    assert.strictEqual(retry.diagnose('negotiation-deadline', false), 'negotiation-timeout');
+    assert.strictEqual(retry.diagnose('connection-failed', false), 'direct-path-unavailable');
+  });
+
   it('prioritizes a lost detached call over discovery details', () => {
     const tracker = makeConnectionDiagnosticTracker();
 

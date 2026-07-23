@@ -437,7 +437,9 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       return yield* eventSink.emit({ _tag: 'TransportLost', peerId, diagnostic });
     }
 
-    const generation = yield* acquirePeerConnectionGeneration(state.generation.diagnostics);
+    const generation = yield* acquirePeerConnectionGeneration(
+      state.generation.diagnostics.nextGeneration(),
+    );
     memory.roomEvents.resetGeneration();
     yield* eventSink.emit({ _tag: 'PeerInterrupted', peerId });
 

@@ -395,6 +395,47 @@ describe('peer-session actor', () => {
     ).pipe(Effect.orDie),
   );
 
+  it.effect('uses only the final generation gathering state for retry timeouts', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makePeerSessionTestHarness();
+
+        yield* fixture.openRoom(bob);
+        const initialConnection = fixture.peerConnections[0]!;
+        yield* fixture.actor({
+          _tag: 'LocalIceCandidate',
+          peerConnection: initialConnection,
+          candidate: {
+            candidate: 'candidate:1 1 udp 1 203.0.113.1 9 typ srflx',
+            sdpMid: '0',
+            sdpMLineIndex: 0,
+            usernameFragment: null,
+          },
+        });
+        yield* fixture.gatheringComplete(initialConnection);
+        yield* fixture.actor({
+          _tag: 'NegotiationDeadlineElapsed',
+          peerConnection: initialConnection,
+        });
+        yield* fixture.actor({
+          _tag: 'NegotiationDeadlineElapsed',
+          peerConnection: fixture.peerConnections[1]!,
+        });
+        const finalConnection = fixture.peerConnections[2]!;
+        yield* fixture.actor({
+          _tag: 'NegotiationDeadlineElapsed',
+          peerConnection: finalConnection,
+        });
+
+        assert.deepStrictEqual(fixture.events.at(-1), {
+          _tag: 'NegotiationStalled',
+          peerId: bob,
+          diagnostic: 'negotiation-timeout',
+        });
+      }),
+    ).pipe(Effect.orDie),
+  );
+
   it.effect('refills the reconnect budget after the replacement connection succeeds', () =>
     Effect.scoped(
       Effect.gen(function* () {
