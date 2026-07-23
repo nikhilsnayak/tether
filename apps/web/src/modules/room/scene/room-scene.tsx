@@ -139,7 +139,7 @@ export function RoomScene({
         shadows={rendering.canvas.shadows}
         renderer={ROOM_RENDERER_SETTINGS}
       >
-        <color attach='background' args={['#090b13']} />
+        <color attach='background' args={[template.background]} />
         <RoomTransitionController
           journey={journey}
           reducedMotion={reducedMotion}

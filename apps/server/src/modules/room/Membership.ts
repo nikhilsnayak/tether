@@ -1,5 +1,5 @@
 import {
-  DUSK_SUITE_TEMPLATE_ID,
+  ROOM_TEMPLATE_CATALOG,
   JoinCancelledEvent,
   JoinDenied,
   PeerLeftEvent,
@@ -28,6 +28,10 @@ import {
 } from './Constants';
 import type { BroadcastRoomEvent, CreateOutcome, PendingJoin } from './Model';
 import { RoomRegistry } from './Registry';
+
+const SUPPORTED_ROOM_TEMPLATE_IDS: ReadonlySet<RoomTemplateId> = new Set(
+  ROOM_TEMPLATE_CATALOG.map((template) => template.id),
+);
 
 export class RoomMembership extends Context.Service<RoomMembership>()(
   '@tether/server/room/Membership',
@@ -173,7 +177,7 @@ export class RoomMembership extends Context.Service<RoomMembership>()(
         selfId: PeerId,
         roomTemplateId: RoomTemplateId,
       ) {
-        if (roomTemplateId !== DUSK_SUITE_TEMPLATE_ID) {
+        if (!SUPPORTED_ROOM_TEMPLATE_IDS.has(roomTemplateId)) {
           return yield* new UnsupportedRoomTemplate({ roomTemplateId });
         }
         for (let attempt = 0; attempt < ROOM_ID_MINT_ATTEMPTS; attempt++) {

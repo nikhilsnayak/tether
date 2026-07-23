@@ -15,6 +15,7 @@ export const RoomTemplateId = RoomTemplateIdString.pipe(Schema.brand('RoomTempla
 export type RoomTemplateId = typeof RoomTemplateId.Type;
 
 export const DUSK_SUITE_TEMPLATE_ID = RoomTemplateId.make('dusk-suite');
+export const DAWN_ATRIUM_TEMPLATE_ID = RoomTemplateId.make('dawn-atrium');
 
 export const SessionToken = Schema.String.check(
   Schema.isMinLength(1),

@@ -16,12 +16,6 @@ import {
 } from './platform';
 
 describe('mobile Watch Together platform', () => {
-  it('unwraps the native program stream', () => {
-    const stream = {};
-
-    expect(programMediaStreamValue({ value: stream })).toBe(stream);
-  });
-
   it.effect('advertises receive-only playback and control capabilities', () =>
     Effect.gen(function* () {
       const capabilities = yield* WatchLocalCapabilities;
@@ -35,44 +29,44 @@ describe('mobile Watch Together platform', () => {
     }).pipe(Effect.provide(mobileWatchLocalCapabilitiesLayer)),
   );
 
-  it.effect('rejects local presentation operations', () =>
-    Effect.gen(function* () {
-      const platform = yield* WatchAlongPlatform;
-      const source: PreparedSourceHandle = { _tag: 'PreparedSource', value: {} };
-      const claimedSource: ClaimedSourceHandle = { _tag: 'ClaimedSource', value: {} };
-      const programStream: ProgramStreamHandle = { value: {} };
-      const operations = yield* Effect.all(
-        [
-          platform.cancelPreparedSource(source),
-          platform.claimSource(source),
-          platform.programStream(claimedSource),
-          platform.play(claimedSource),
-          platform.pause(claimedSource),
-          platform.replay(claimedSource),
-          platform.observeSource(claimedSource, () => undefined),
-          platform.primeFirstFrame(claimedSource),
-          platform.attachProgramTracks(programStream),
-          platform.clearProgramTracks,
-        ].map((operation) =>
-          operation.pipe(
-            Effect.flip,
-            Effect.map((error) => error.operation),
-          ),
-        ),
-      );
+  it.effect('rejects every local presentation operation', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const platform = yield* WatchAlongPlatform;
+        const prepared: PreparedSourceHandle = { _tag: 'PreparedSource', value: {} };
+        const claimed: ClaimedSourceHandle = { _tag: 'ClaimedSource', value: {} };
+        const stream: ProgramStreamHandle = { value: {} };
+        const errors = yield* Effect.all([
+          platform.cancelPreparedSource(prepared).pipe(Effect.flip),
+          platform.claimSource(prepared).pipe(Effect.flip),
+          platform.programStream(claimed).pipe(Effect.flip),
+          platform.play(claimed).pipe(Effect.flip),
+          platform.pause(claimed).pipe(Effect.flip),
+          platform.replay(claimed).pipe(Effect.flip),
+          platform.observeSource(claimed, () => undefined).pipe(Effect.flip),
+          platform.primeFirstFrame(claimed).pipe(Effect.flip),
+          platform.attachProgramTracks(stream).pipe(Effect.flip),
+          platform.clearProgramTracks.pipe(Effect.flip),
+        ]);
 
-      expect(operations).toEqual([
-        'cancel-prepared-source',
-        'claim-source',
-        'program-stream',
-        'play',
-        'pause',
-        'replay',
-        'observe-source',
-        'prime-first-frame',
-        'attach-program-tracks',
-        'clear-program-tracks',
-      ]);
-    }).pipe(Effect.provide(mobileWatchAlongPlatformLayer)),
+        expect(errors.map((error) => error.operation)).toEqual([
+          'cancel-prepared-source',
+          'claim-source',
+          'program-stream',
+          'play',
+          'pause',
+          'replay',
+          'observe-source',
+          'prime-first-frame',
+          'attach-program-tracks',
+          'clear-program-tracks',
+        ]);
+      }),
+    ).pipe(Effect.provide(mobileWatchAlongPlatformLayer)),
   );
+
+  it('unwraps the native program media stream', () => {
+    const stream = { id: 'program' };
+    expect(programMediaStreamValue({ value: stream })).toBe(stream);
+  });
 });
