@@ -43,6 +43,9 @@ admission, calling, and chat flow with a conventional call interface.
   and stream it directly to both peers, with shared playback controls in the call dock.
 - **Connection safety codes.** Both people can compare a code derived from the negotiated DTLS
   fingerprints to check that they see the same connection.
+- **Local connection diagnostics.** When a direct connection cannot be established, each client
+  distinguishes missing candidates, blocked STUN discovery, direct-path rejection, and negotiation
+  timeout without retaining addresses, SDP, or ICE candidate contents.
 
 ## How a call works
 

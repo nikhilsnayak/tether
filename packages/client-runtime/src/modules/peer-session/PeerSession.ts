@@ -19,6 +19,7 @@ import type {
   PeerSessionInputOutcome,
   PeerSessionLocalInputDispatch,
 } from './ActorModel';
+import { makeConnectionDiagnosticTracker } from './ConnectionDiagnostics';
 import {
   type DataChannelHandle,
   type IceCandidate,
@@ -271,7 +272,12 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       );
     }
 
-    return { scope: connectionScope, peerConnection, programTransceivers };
+    return {
+      scope: connectionScope,
+      peerConnection,
+      programTransceivers,
+      diagnostics: makeConnectionDiagnosticTracker(),
+    };
   });
 
   /**
@@ -396,7 +402,9 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     yield* Scope.close(generation.scope, Exit.void);
   });
 
-  const beginPeerReconnect = Effect.fnUntraced(function* () {
+  const beginPeerReconnect = Effect.fnUntraced(function* (
+    trigger: 'connection-failed' | 'negotiation-deadline',
+  ) {
     // Unreachable: both callers (peer-connection failure and negotiation
     // deadline) narrow to PeerKnown first. This guard only narrows the state
     // for the field access below.
@@ -406,11 +414,12 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     }
 
     if (memory.detachment.isDetached()) {
-      const { peerId } = state;
+      const { peerId, generation } = state;
+      const diagnostic = generation.diagnostics.diagnose(trigger, true);
       yield* closeGeneration(state.generation);
       state = { _tag: 'TransportLost', peerId };
       yield* Effect.logWarning('Direct transport failed after detachment');
-      return yield* eventSink.emit({ _tag: 'TransportLost', peerId });
+      return yield* eventSink.emit({ _tag: 'TransportLost', peerId, diagnostic });
     }
 
     memory.detachment.resetGeneration();
@@ -420,9 +429,10 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     yield* closeGeneration(state.generation);
 
     if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      const diagnostic = state.generation.diagnostics.diagnose(trigger, false);
       state = { _tag: 'TransportLost', peerId };
       yield* Effect.logWarning('Reconnect attempts exhausted');
-      return yield* eventSink.emit({ _tag: 'TransportLost', peerId });
+      return yield* eventSink.emit({ _tag: 'TransportLost', peerId, diagnostic });
     }
 
     const generation = yield* acquirePeerConnectionGeneration();
@@ -781,13 +791,11 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     peerConnection: PeerConnectionHandle,
     candidate: IceCandidate,
   ) {
-    if (
-      memory.detachment.isDetached() ||
-      state._tag !== 'PeerKnown' ||
-      state.generation.peerConnection !== peerConnection
-    ) {
+    if (state._tag !== 'PeerKnown' || state.generation.peerConnection !== peerConnection) {
       return;
     }
+    state.generation.diagnostics.observeCandidate(candidate);
+    if (memory.detachment.isDetached()) return;
     if (state.negotiation.phase === 'awaiting-offer') {
       return yield* Effect.logWarning('Ignored local ICE candidate without an active epoch');
     }
@@ -811,7 +819,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
 
     if (state._tag === 'PeerKnown') {
       yield* Effect.logWarning('Peer connection failed');
-      return yield* beginPeerReconnect();
+      return yield* beginPeerReconnect('connection-failed');
     }
 
     yield* Scope.close(state.generation.scope, Exit.void);
@@ -848,6 +856,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       }
 
       state = { ...state, iceGatheringComplete: true };
+      state.generation.diagnostics.markGatheringComplete();
     });
 
   const handleDataChannelClosed = Effect.fnUntraced(function* (dataChannel: DataChannelHandle) {
@@ -1159,11 +1168,16 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     }
 
     if (state.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      const diagnostic = state.generation.diagnostics.diagnose('negotiation-deadline', false);
       yield* Effect.logWarning('Negotiation stalled');
-      return yield* eventSink.emit({ _tag: 'NegotiationStalled', peerId: state.peerId });
+      return yield* eventSink.emit({
+        _tag: 'NegotiationStalled',
+        peerId: state.peerId,
+        diagnostic,
+      });
     }
 
-    return yield* beginPeerReconnect();
+    return yield* beginPeerReconnect('negotiation-deadline');
   });
 
   const handleUiSendMessage = Effect.fnUntraced(function* (text: string) {

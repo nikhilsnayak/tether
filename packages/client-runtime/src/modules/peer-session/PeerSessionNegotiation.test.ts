@@ -340,12 +340,56 @@ describe('peer-session actor', () => {
           roomOpened,
           { _tag: 'PeerInterrupted', peerId: bob },
           { _tag: 'PeerInterrupted', peerId: bob },
-          { _tag: 'TransportLost', peerId: bob },
+          {
+            _tag: 'TransportLost',
+            peerId: bob,
+            diagnostic: 'no-network-candidates',
+          },
         ]);
         assert.lengthOf(
           fixture.operations.filter((operation) => operation === 'acquirePeerConnection'),
           3,
         );
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('reports when address discovery succeeded but no direct path connected', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makePeerSessionTestHarness();
+
+        yield* fixture.openRoom(bob);
+        yield* fixture.actor({
+          _tag: 'PeerConnectionFailed',
+          peerConnection: fixture.peerConnections[0]!,
+        });
+        yield* fixture.actor({
+          _tag: 'PeerConnectionFailed',
+          peerConnection: fixture.peerConnections[1]!,
+        });
+        const finalConnection = fixture.peerConnections[2]!;
+        yield* fixture.actor({
+          _tag: 'LocalIceCandidate',
+          peerConnection: finalConnection,
+          candidate: {
+            candidate: 'candidate:1 1 udp 1 203.0.113.1 9 typ srflx',
+            sdpMid: '0',
+            sdpMLineIndex: 0,
+            usernameFragment: null,
+          },
+        });
+        yield* fixture.gatheringComplete(finalConnection);
+        yield* fixture.actor({
+          _tag: 'PeerConnectionFailed',
+          peerConnection: finalConnection,
+        });
+
+        assert.deepStrictEqual(fixture.events.at(-1), {
+          _tag: 'TransportLost',
+          peerId: bob,
+          diagnostic: 'direct-path-unavailable',
+        });
       }),
     ).pipe(Effect.orDie),
   );
@@ -543,6 +587,7 @@ describe('peer-session actor', () => {
         assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), {
           _tag: 'NegotiationStalled',
           peerId: bob,
+          diagnostic: 'negotiation-timeout',
         });
         assert.strictEqual(offerCount, 3);
       }),

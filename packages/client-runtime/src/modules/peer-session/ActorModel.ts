@@ -4,6 +4,7 @@ import type { Scope } from 'effect';
 import type { PreparedSourceHandle } from '../watch-along/Model';
 import type { WatchControlCommand } from '../watch-along/Protocol';
 import type { WatchRuntime, WatchRuntimeTerminationReason } from '../watch-along/Supervisor';
+import type { ConnectionDiagnosticTracker } from './ConnectionDiagnostics';
 import type {
   DataChannelHandle,
   MediaStreamHandle,
@@ -23,6 +24,7 @@ export type DataChannelState =
 export type PeerConnectionGeneration = {
   readonly scope: Scope.Closeable;
   readonly peerConnection: PeerConnectionHandle;
+  readonly diagnostics: ConnectionDiagnosticTracker;
   /** Present only when the room template enables watch-along. */
   readonly programTransceivers: ProgramTransceiverHandle | null;
 };

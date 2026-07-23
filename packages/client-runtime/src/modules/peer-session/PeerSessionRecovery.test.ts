@@ -754,7 +754,11 @@ describe('peer-session actor — recovery and ownership', () => {
           _tag: 'PeerConnectionFailed',
           peerConnection: fixture.peerConnections[2]!,
         });
-        assert.deepStrictEqual(fixture.events.at(-1), { _tag: 'TransportLost', peerId: bob });
+        assert.deepStrictEqual(fixture.events.at(-1), {
+          _tag: 'TransportLost',
+          peerId: bob,
+          diagnostic: 'no-network-candidates',
+        });
 
         const acquiredBefore = fixture.operations.filter(
           (operation) => operation === 'acquirePeerConnection',

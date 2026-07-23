@@ -43,7 +43,11 @@ it.effect('projects session events into the atom registry', () =>
       assert.strictEqual(registry.get(peerSessionViewAtom).remoteAvatarPose?.x, 1);
       assert.isFalse(registry.get(peerSessionViewAtom).remoteMediaState?.cameraOn);
 
-      yield* sink.emit({ _tag: 'TransportLost', peerId });
+      yield* sink.emit({
+        _tag: 'TransportLost',
+        peerId,
+        diagnostic: 'direct-path-unavailable',
+      });
       assert.isNull(registry.get(peerRemoteStreamAtom));
       assert.strictEqual(registry.get(peerSessionViewAtom).status, 'transport-lost');
       assert.isNull(registry.get(peerSessionViewAtom).remoteAvatarPose);

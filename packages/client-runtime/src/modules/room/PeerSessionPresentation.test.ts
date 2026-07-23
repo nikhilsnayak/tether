@@ -80,6 +80,37 @@ describe('PeerSessionPresentation', () => {
     });
   });
 
+  it('turns privacy-safe diagnostics into actionable connection guidance', () => {
+    const cases = [
+      ['no-network-candidates', 'could not expose a usable network path'],
+      ['address-discovery-failed', 'could not discover a public address through Google STUN'],
+      ['direct-path-unavailable', 'did not permit a direct peer-to-peer path'],
+      ['negotiation-timeout', 'timed out before address discovery finished'],
+    ] as const;
+
+    for (const [diagnostic, expected] of cases) {
+      const presentation = peerSessionStatusPresentation(
+        diagnostic === 'negotiation-timeout' ? 'negotiation-stalled' : 'transport-lost',
+        false,
+        diagnostic,
+      );
+      assert.include(presentation.hint, expected);
+    }
+  });
+
+  it('explains that detached connection loss requires a new room', () => {
+    assert.deepStrictEqual(
+      peerSessionStatusPresentation('transport-lost', true, 'connection-lost'),
+      {
+        tone: 'warning',
+        pulse: false,
+        label: 'Connection lost',
+        hint: 'The direct connection ended after Tether detached from its server. Create a new room to reconnect.',
+        direct: false,
+      },
+    );
+  });
+
   it('does not promise rejoining after a detached peer departure', () => {
     assert.deepStrictEqual(peerSessionStatusPresentation('peer-departed', true), {
       tone: 'warning',
