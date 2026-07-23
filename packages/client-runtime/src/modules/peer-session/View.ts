@@ -7,6 +7,7 @@ export const initialPeerSessionView: PeerSessionView = {
   messages: [],
   roomEventsReady: false,
   detached: false,
+  connectionDiagnostic: null,
   remoteAvatarPose: null,
   remoteMediaState: null,
   sas: null,
@@ -30,7 +31,7 @@ export const reducePeerSessionView = (
     case 'WaitingForPeer':
       return { ...view, status: 'waiting-for-peer' };
     case 'Connected':
-      return { ...view, status: 'connected' };
+      return { ...view, status: 'connected', connectionDiagnostic: null };
     case 'RoomEventsReady':
       return { ...view, roomEventsReady: true };
     case 'RoomEventsUnavailable':
@@ -49,6 +50,7 @@ export const reducePeerSessionView = (
       return {
         ...view,
         status: 'disconnected',
+        connectionDiagnostic: null,
         roomEventsReady: false,
         remoteAvatarPose: null,
         remoteMediaState: null,
@@ -58,6 +60,7 @@ export const reducePeerSessionView = (
       return {
         ...view,
         status: 'failed',
+        connectionDiagnostic: null,
         roomEventsReady: false,
         remoteAvatarPose: null,
         remoteMediaState: null,
@@ -67,24 +70,30 @@ export const reducePeerSessionView = (
       return {
         ...view,
         status: 'transport-lost',
+        connectionDiagnostic: event.diagnostic,
         roomEventsReady: false,
         remoteAvatarPose: null,
         remoteMediaState: null,
         sas: null,
       };
     case 'NegotiationStalled':
-      return { ...view, status: 'negotiation-stalled' };
+      return {
+        ...view,
+        status: 'negotiation-stalled',
+        connectionDiagnostic: event.diagnostic,
+      };
     // Hide verification while transport is interrupted. A replacement
     // connection mints fresh certificates; a transient recovery re-emits it.
     case 'PeerInterrupted':
       return {
         ...view,
         status: 'reconnecting',
+        connectionDiagnostic: null,
         roomEventsReady: false,
         sas: null,
       };
     case 'PeerRestored':
-      return { ...view, status: 'connected' };
+      return { ...view, status: 'connected', connectionDiagnostic: null };
     case 'RoomOpened':
       return {
         ...view,

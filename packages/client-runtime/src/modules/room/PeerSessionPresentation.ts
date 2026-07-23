@@ -1,4 +1,4 @@
-import type { PeerSessionView } from '../peer-session/Model';
+import type { ConnectionDiagnostic, PeerSessionView } from '../peer-session/Model';
 
 const ERROR_STATUSES = new Set<PeerSessionView['status']>([
   'room-full',
@@ -23,9 +23,32 @@ export interface PeerSessionStatusPresentation {
   readonly direct: boolean;
 }
 
+const connectionDiagnosticHint = (
+  diagnostic: ConnectionDiagnostic | null,
+  detached: boolean,
+): string | null => {
+  switch (diagnostic) {
+    case 'no-network-candidates':
+      return 'This device could not expose a usable network path. Check your connection, VPN, and firewall, then create a new room.';
+    case 'address-discovery-failed':
+      return 'Tether could not discover a public address through Google STUN. Check whether your network, VPN, or firewall blocks UDP or STUN, then create a new room.';
+    case 'direct-path-unavailable':
+      return 'Address discovery succeeded on this device, but the networks did not permit a direct peer-to-peer path. Try another network, then create a new room.';
+    case 'negotiation-timeout':
+      return 'Direct connection setup timed out before address discovery finished. Check your connection, VPN, and firewall, then create a new room.';
+    case 'connection-lost':
+      return detached
+        ? 'The direct connection ended after Tether detached from its server. Create a new room to reconnect.'
+        : 'The direct connection ended. Create a new room to reconnect.';
+    case null:
+      return null;
+  }
+};
+
 export function peerSessionStatusPresentation(
   status: PeerSessionView['status'],
   detached: boolean,
+  diagnostic: ConnectionDiagnostic | null = null,
 ): PeerSessionStatusPresentation {
   const direct = status === 'connected' && detached;
   switch (status) {
@@ -60,9 +83,11 @@ export function peerSessionStatusPresentation(
         tone: 'warning',
         pulse: false,
         label: detached ? 'Connection lost' : 'Connection dropped',
-        hint: detached
-          ? 'The direct connection failed. Create a new room to reconnect.'
-          : 'Trying to get you reconnected. You can also leave and retry.',
+        hint:
+          connectionDiagnosticHint(diagnostic, detached) ??
+          (detached
+            ? 'The direct connection failed. Create a new room to reconnect.'
+            : 'Trying to get you reconnected. You can also leave and retry.'),
         direct,
       };
     case 'waiting-for-peer':
@@ -96,7 +121,9 @@ export function peerSessionStatusPresentation(
         tone: 'warning',
         pulse: false,
         label: 'Taking longer than expected',
-        hint: 'Still connecting. You can leave and retry.',
+        hint:
+          connectionDiagnosticHint(diagnostic, detached) ??
+          'Still connecting. You can leave and retry.',
         direct,
       };
     case 'disconnected':

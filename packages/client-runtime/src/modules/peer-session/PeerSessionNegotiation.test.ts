@@ -340,12 +340,98 @@ describe('peer-session actor', () => {
           roomOpened,
           { _tag: 'PeerInterrupted', peerId: bob },
           { _tag: 'PeerInterrupted', peerId: bob },
-          { _tag: 'TransportLost', peerId: bob },
+          {
+            _tag: 'TransportLost',
+            peerId: bob,
+            diagnostic: 'no-network-candidates',
+          },
         ]);
         assert.lengthOf(
           fixture.operations.filter((operation) => operation === 'acquirePeerConnection'),
           3,
         );
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('retains address discovery evidence across reconnect generations', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makePeerSessionTestHarness();
+
+        yield* fixture.openRoom(bob);
+        const initialConnection = fixture.peerConnections[0]!;
+        yield* fixture.actor({
+          _tag: 'LocalIceCandidate',
+          peerConnection: initialConnection,
+          candidate: {
+            candidate: 'candidate:1 1 udp 1 203.0.113.1 9 typ srflx',
+            sdpMid: '0',
+            sdpMLineIndex: 0,
+            usernameFragment: null,
+          },
+        });
+        yield* fixture.gatheringComplete(initialConnection);
+        yield* fixture.actor({
+          _tag: 'PeerConnectionFailed',
+          peerConnection: initialConnection,
+        });
+        yield* fixture.actor({
+          _tag: 'PeerConnectionFailed',
+          peerConnection: fixture.peerConnections[1]!,
+        });
+        const finalConnection = fixture.peerConnections[2]!;
+        yield* fixture.actor({
+          _tag: 'PeerConnectionFailed',
+          peerConnection: finalConnection,
+        });
+
+        assert.deepStrictEqual(fixture.events.at(-1), {
+          _tag: 'TransportLost',
+          peerId: bob,
+          diagnostic: 'direct-path-unavailable',
+        });
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('uses only the final generation gathering state for retry timeouts', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makePeerSessionTestHarness();
+
+        yield* fixture.openRoom(bob);
+        const initialConnection = fixture.peerConnections[0]!;
+        yield* fixture.actor({
+          _tag: 'LocalIceCandidate',
+          peerConnection: initialConnection,
+          candidate: {
+            candidate: 'candidate:1 1 udp 1 203.0.113.1 9 typ srflx',
+            sdpMid: '0',
+            sdpMLineIndex: 0,
+            usernameFragment: null,
+          },
+        });
+        yield* fixture.gatheringComplete(initialConnection);
+        yield* fixture.actor({
+          _tag: 'NegotiationDeadlineElapsed',
+          peerConnection: initialConnection,
+        });
+        yield* fixture.actor({
+          _tag: 'NegotiationDeadlineElapsed',
+          peerConnection: fixture.peerConnections[1]!,
+        });
+        const finalConnection = fixture.peerConnections[2]!;
+        yield* fixture.actor({
+          _tag: 'NegotiationDeadlineElapsed',
+          peerConnection: finalConnection,
+        });
+
+        assert.deepStrictEqual(fixture.events.at(-1), {
+          _tag: 'NegotiationStalled',
+          peerId: bob,
+          diagnostic: 'negotiation-timeout',
+        });
       }),
     ).pipe(Effect.orDie),
   );
@@ -384,6 +470,72 @@ describe('peer-session actor', () => {
           fixture.events.filter((event) => event._tag === 'TransportLost'),
           0,
         );
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('starts fresh discovery evidence after a replacement connection succeeds', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makePeerSessionTestHarness();
+
+        yield* fixture.openRoom(bob);
+        const initialConnection = fixture.peerConnections[0]!;
+        yield* fixture.actor({
+          _tag: 'LocalIceCandidate',
+          peerConnection: initialConnection,
+          candidate: {
+            candidate: 'candidate:1 1 udp 1 203.0.113.1 9 typ srflx',
+            sdpMid: '0',
+            sdpMLineIndex: 0,
+            usernameFragment: null,
+          },
+        });
+        yield* fixture.connectionFailed(initialConnection);
+
+        const recoveredConnection = fixture.peerConnections[1]!;
+        yield* fixture.connectionConnected(recoveredConnection);
+        yield* fixture.connectionFailed(recoveredConnection);
+        yield* fixture.connectionFailed(fixture.peerConnections[2]!);
+        yield* fixture.connectionFailed(fixture.peerConnections[3]!);
+
+        assert.deepStrictEqual(fixture.events.at(-1), {
+          _tag: 'TransportLost',
+          peerId: bob,
+          diagnostic: 'no-network-candidates',
+        });
+      }),
+    ).pipe(Effect.orDie),
+  );
+
+  it.effect('starts fresh discovery evidence when an interrupted connection fails', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makePeerSessionTestHarness();
+
+        yield* fixture.openRoom(bob);
+        const establishedConnection = fixture.peerConnections[0]!;
+        yield* fixture.actor({
+          _tag: 'LocalIceCandidate',
+          peerConnection: establishedConnection,
+          candidate: {
+            candidate: 'candidate:1 1 udp 1 203.0.113.1 9 typ srflx',
+            sdpMid: '0',
+            sdpMLineIndex: 0,
+            usernameFragment: null,
+          },
+        });
+        yield* fixture.connectionConnected(establishedConnection);
+        yield* fixture.connectionInterrupted(establishedConnection);
+        yield* fixture.connectionFailed(establishedConnection);
+        yield* fixture.connectionFailed(fixture.peerConnections[1]!);
+        yield* fixture.connectionFailed(fixture.peerConnections[2]!);
+
+        assert.deepStrictEqual(fixture.events.at(-1), {
+          _tag: 'TransportLost',
+          peerId: bob,
+          diagnostic: 'no-network-candidates',
+        });
       }),
     ).pipe(Effect.orDie),
   );
@@ -543,6 +695,7 @@ describe('peer-session actor', () => {
         assert.deepStrictEqual(yield* Queue.take(fixture.eventQueue), {
           _tag: 'NegotiationStalled',
           peerId: bob,
+          diagnostic: 'negotiation-timeout',
         });
         assert.strictEqual(offerCount, 3);
       }),

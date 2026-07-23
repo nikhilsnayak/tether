@@ -64,6 +64,17 @@ export interface ProgramTransceiverHandle {
   readonly value: unknown;
 }
 
+/**
+ * Privacy-safe explanation of a direct-connection failure. These values never
+ * contain candidate strings, addresses, SDP, or other connection identifiers.
+ */
+export type ConnectionDiagnostic =
+  | 'no-network-candidates'
+  | 'address-discovery-failed'
+  | 'direct-path-unavailable'
+  | 'negotiation-timeout'
+  | 'connection-lost';
+
 export type PlatformEvent =
   | {
       readonly _tag: 'RemoteDataChannel';
@@ -160,10 +171,12 @@ export type PeerSessionEvent =
   | {
       readonly _tag: 'TransportLost';
       readonly peerId: PeerId;
+      readonly diagnostic: ConnectionDiagnostic;
     }
   | {
       readonly _tag: 'NegotiationStalled';
       readonly peerId: PeerId;
+      readonly diagnostic: ConnectionDiagnostic;
     }
   | {
       readonly _tag: 'PeerInterrupted';
@@ -240,6 +253,7 @@ export interface PeerSessionView {
   readonly messages: ReadonlyArray<ChatMessage>;
   readonly roomEventsReady: boolean;
   readonly detached: boolean;
+  readonly connectionDiagnostic: ConnectionDiagnostic | null;
   readonly remoteAvatarPose: SequencedAvatarPose | null;
   readonly remoteMediaState: RevisionedMediaState | null;
   /** Safety code both peers compare aloud. */

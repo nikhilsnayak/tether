@@ -81,7 +81,11 @@ export function CallScreen({
   const [confirmedSas, setConfirmedSas] = useState<string | null>(null);
   const [handlingJoinPeerIds, setHandlingJoinPeerIds] = useState<ReadonlySet<PeerId>>(new Set());
   const selfPreviewBoundaryRef = useRef<HTMLDivElement>(null);
-  const presentation = peerSessionStatusPresentation(view.status, view.detached);
+  const presentation = peerSessionStatusPresentation(
+    view.status,
+    view.detached,
+    view.connectionDiagnostic,
+  );
   const pendingJoin =
     view.pendingJoinRequests.find((request) => !handlingJoinPeerIds.has(request.peerId)) ?? null;
   const sasConfirmed = view.sas !== null && confirmedSas === view.sas;

@@ -39,7 +39,11 @@ export function CallStage({
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
   const [confirmedSas, setConfirmedSas] = useState<string | null>(null);
   const stageRef = useRef<View>(null);
-  const presentation = peerSessionStatusPresentation(view.status, view.detached);
+  const presentation = peerSessionStatusPresentation(
+    view.status,
+    view.detached,
+    view.connectionDiagnostic,
+  );
   const sasConfirmed = view.sas !== null && confirmedSas === view.sas;
   const onLayout = (event: LayoutChangeEvent) => {
     const { width, height } = event.nativeEvent.layout;

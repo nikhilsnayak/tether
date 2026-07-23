@@ -14,6 +14,7 @@ const connectedView: PeerSessionView = {
   messages: [],
   roomEventsReady: true,
   detached: false,
+  connectionDiagnostic: null,
   remoteAvatarPose: null,
   remoteMediaState: null,
   sas: '11111 22222 33333 44444 55555',
@@ -24,6 +25,7 @@ const connectedView: PeerSessionView = {
 const peerId = PeerId.make('pppppppppppp');
 const unavailableRoomEvents = {
   detached: false,
+  connectionDiagnostic: null,
   remoteAvatarPose: null,
   remoteMediaState: null,
 } as const;
@@ -44,8 +46,11 @@ describe('reducePeerSessionView', () => {
 
   it('projects transport lifecycle events', () => {
     const events: ReadonlyArray<readonly [PeerSessionEvent, PeerSessionView['status']]> = [
-      [{ _tag: 'TransportLost', peerId }, 'transport-lost'],
-      [{ _tag: 'NegotiationStalled', peerId }, 'negotiation-stalled'],
+      [{ _tag: 'TransportLost', peerId, diagnostic: 'direct-path-unavailable' }, 'transport-lost'],
+      [
+        { _tag: 'NegotiationStalled', peerId, diagnostic: 'negotiation-timeout' },
+        'negotiation-stalled',
+      ],
       [{ _tag: 'PeerInterrupted', peerId }, 'reconnecting'],
       [{ _tag: 'PeerRestored', peerId }, 'connected'],
     ];
@@ -63,6 +68,7 @@ describe('reducePeerSessionView', () => {
     const lost = reducePeerSessionView(connectedView, {
       _tag: 'TransportLost',
       peerId,
+      diagnostic: 'direct-path-unavailable',
     });
     const disconnected = reducePeerSessionView(connectedView, {
       _tag: 'SignalingDisconnected',
@@ -80,6 +86,7 @@ describe('reducePeerSessionView', () => {
     assert.deepStrictEqual(lost, {
       ...connectedView,
       status: 'transport-lost',
+      connectionDiagnostic: 'direct-path-unavailable',
       roomEventsReady: false,
       sas: null,
     });
@@ -126,7 +133,11 @@ describe('reducePeerSessionView', () => {
     assert.isNull(departed.remoteAvatarPose);
     assert.isNull(departed.remoteMediaState);
 
-    const lost = reducePeerSessionView(withMedia, { _tag: 'TransportLost', peerId });
+    const lost = reducePeerSessionView(withMedia, {
+      _tag: 'TransportLost',
+      peerId,
+      diagnostic: 'direct-path-unavailable',
+    });
     assert.isNull(lost.remoteAvatarPose);
     assert.isNull(lost.remoteMediaState);
   });

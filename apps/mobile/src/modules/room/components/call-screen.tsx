@@ -52,7 +52,11 @@ export function CallScreen({
   const [handlingJoinPeerIds, setHandlingJoinPeerIds] = useState<ReadonlySet<PeerId>>(new Set());
   const messageCount = view.messages.length;
   const hasUnread = !chatOpen && messageCount > readCount;
-  const presentation = peerSessionStatusPresentation(view.status, view.detached);
+  const presentation = peerSessionStatusPresentation(
+    view.status,
+    view.detached,
+    view.connectionDiagnostic,
+  );
   const pendingJoin =
     view.pendingJoinRequests.find((request) => !handlingJoinPeerIds.has(request.peerId)) ?? null;
 

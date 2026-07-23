@@ -1,3 +1,4 @@
+export * from './ConnectionDiagnostics';
 export * from './PeerSession';
 export * from './Model';
 export * from './Platform';
