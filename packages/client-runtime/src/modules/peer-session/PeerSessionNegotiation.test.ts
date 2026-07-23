@@ -354,24 +354,16 @@ describe('peer-session actor', () => {
     ).pipe(Effect.orDie),
   );
 
-  it.effect('reports when address discovery succeeded but no direct path connected', () =>
+  it.effect('retains address discovery evidence across reconnect generations', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const fixture = yield* makePeerSessionTestHarness();
 
         yield* fixture.openRoom(bob);
-        yield* fixture.actor({
-          _tag: 'PeerConnectionFailed',
-          peerConnection: fixture.peerConnections[0]!,
-        });
-        yield* fixture.actor({
-          _tag: 'PeerConnectionFailed',
-          peerConnection: fixture.peerConnections[1]!,
-        });
-        const finalConnection = fixture.peerConnections[2]!;
+        const initialConnection = fixture.peerConnections[0]!;
         yield* fixture.actor({
           _tag: 'LocalIceCandidate',
-          peerConnection: finalConnection,
+          peerConnection: initialConnection,
           candidate: {
             candidate: 'candidate:1 1 udp 1 203.0.113.1 9 typ srflx',
             sdpMid: '0',
@@ -379,7 +371,16 @@ describe('peer-session actor', () => {
             usernameFragment: null,
           },
         });
-        yield* fixture.gatheringComplete(finalConnection);
+        yield* fixture.gatheringComplete(initialConnection);
+        yield* fixture.actor({
+          _tag: 'PeerConnectionFailed',
+          peerConnection: initialConnection,
+        });
+        yield* fixture.actor({
+          _tag: 'PeerConnectionFailed',
+          peerConnection: fixture.peerConnections[1]!,
+        });
+        const finalConnection = fixture.peerConnections[2]!;
         yield* fixture.actor({
           _tag: 'PeerConnectionFailed',
           peerConnection: finalConnection,

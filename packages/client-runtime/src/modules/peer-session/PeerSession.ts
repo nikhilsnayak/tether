@@ -247,7 +247,9 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     },
   );
 
-  const acquirePeerConnectionGeneration = Effect.fnUntraced(function* () {
+  const acquirePeerConnectionGeneration = Effect.fnUntraced(function* (
+    diagnostics = makeConnectionDiagnosticTracker(),
+  ) {
     const connectionScope = yield* Scope.fork(actorScope);
     const peerConnection = yield* platform
       .acquirePeerConnection(iceServers)
@@ -276,7 +278,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       scope: connectionScope,
       peerConnection,
       programTransceivers,
-      diagnostics: makeConnectionDiagnosticTracker(),
+      diagnostics,
     };
   });
 
@@ -435,7 +437,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       return yield* eventSink.emit({ _tag: 'TransportLost', peerId, diagnostic });
     }
 
-    const generation = yield* acquirePeerConnectionGeneration();
+    const generation = yield* acquirePeerConnectionGeneration(state.generation.diagnostics);
     memory.roomEvents.resetGeneration();
     yield* eventSink.emit({ _tag: 'PeerInterrupted', peerId });
 

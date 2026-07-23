@@ -111,6 +111,19 @@ describe('PeerSessionPresentation', () => {
     );
   });
 
+  it('uses generic recovery guidance when connection loss is not detached', () => {
+    assert.deepStrictEqual(
+      peerSessionStatusPresentation('transport-lost', false, 'connection-lost'),
+      {
+        tone: 'warning',
+        pulse: false,
+        label: 'Connection dropped',
+        hint: 'The direct connection ended. Create a new room to reconnect.',
+        direct: false,
+      },
+    );
+  });
+
   it('does not promise rejoining after a detached peer departure', () => {
     assert.deepStrictEqual(peerSessionStatusPresentation('peer-departed', true), {
       tone: 'warning',
