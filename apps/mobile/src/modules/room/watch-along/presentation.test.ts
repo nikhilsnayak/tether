@@ -24,4 +24,16 @@ describe('mobileWatchPresentation', () => {
       control: null,
     });
   });
+
+  it.each(['unavailable', 'idle', 'preparing-local'] as const)(
+    'stays inactive for watcher status %s',
+    (status) => {
+      expect(mobileWatchPresentation({ status, role: 'watcher', canPresent: false })).toMatchObject(
+        {
+          active: false,
+          control: null,
+        },
+      );
+    },
+  );
 });

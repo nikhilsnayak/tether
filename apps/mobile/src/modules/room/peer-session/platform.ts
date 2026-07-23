@@ -358,6 +358,11 @@ const nativePeerSessionPlatform = PeerSessionPlatform.of({
     }),
   observeDataChannel,
   dataChannelLabel: (dataChannel) => dataChannelValue(dataChannel).label,
+  closeDataChannel: (dataChannel) =>
+    Effect.try({
+      try: () => dataChannelValue(dataChannel).close(),
+      catch: (cause) => new PlatformError({ operation: 'close-data-channel', cause }),
+    }),
   createOffer: (peerConnection) =>
     Effect.tryPromise({
       try: () => peerConnectionValue(peerConnection).createOffer({}),
