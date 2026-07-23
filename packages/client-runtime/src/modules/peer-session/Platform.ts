@@ -2,6 +2,10 @@ import { Data, Predicate } from 'effect';
 
 import type { IceServer } from './Model';
 
+/**
+ * Product invariant: use STUN only for direct-path discovery. Do not add TURN
+ * or any relay fallback; an unreachable direct peer connection must fail.
+ */
 export const GOOGLE_STUN_SERVERS: ReadonlyArray<IceServer> = [
   { urls: ['stun:stun.l.google.com:19302'] },
 ];

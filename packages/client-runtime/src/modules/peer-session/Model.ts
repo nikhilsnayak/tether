@@ -2,6 +2,10 @@ import type { DisplayName, PeerId, RoomId, RoomTemplateId } from '@tether/contra
 
 import type { RevisionedMediaState, SequencedAvatarPose } from './RoomEvents';
 
+/**
+ * STUN-only discovery configuration. Credentials are deliberately absent:
+ * Tether must fail when no direct path exists rather than route content through TURN.
+ */
 export interface IceServer {
   readonly urls: ReadonlyArray<string>;
 }

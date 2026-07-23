@@ -50,7 +50,8 @@ export function DisclaimerGate({ children }: { readonly children: ReactNode }) {
           <p>
             The server coordinates admission and connection setup, then disconnects after a call
             becomes direct. Call content is peer-to-peer and encrypted, and the operator keeps no
-            call history.
+            call history. Tether never relays call content; a call fails when the two devices cannot
+            establish a direct connection.
           </p>
           <p>
             You are solely responsible for your use of the service and for the content of your

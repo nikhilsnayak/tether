@@ -144,8 +144,10 @@ fails. Either person leaving is communicated over the existing data channel.
 The safety code is useful only when both people compare it over a separate trusted channel, such as
 reading it aloud. It does not protect a compromised browser, device, or client build.
 
-Tether currently uses Google's public STUN service and does not provide a TURN relay. Calls work
-only when both networks permit a direct WebRTC path. Before detachment, signaling is single-process
+Tether intentionally uses Google's public STUN service only for address discovery and will not use
+or provide a TURN relay. Call content is never routed through a media relay: if both networks do not
+permit a direct WebRTC path, the call fails. This privacy constraint deliberately trades connection
+coverage for a strictly peer-to-peer content path. Before detachment, signaling is single-process
 and in-memory; a server restart ends rooms that are still connecting.
 
 The service is provided as-is, without an uptime commitment. See
@@ -184,8 +186,8 @@ No database, object storage, or additional local service is required.
 | `HOST`   | `0.0.0.0` | HTTP server bind address       |
 | `PORT`   | `8008`    | HTTP and WebSocket server port |
 
-ICE discovery currently uses `stun:stun.l.google.com:19302`. The ICE server list is not yet
-configurable.
+ICE discovery uses the fixed STUN endpoint `stun:stun.l.google.com:19302`. This is intentionally
+limited to STUN: Tether does not accept TURN configuration or fall back to a media relay.
 
 ### Web and desktop
 
@@ -305,8 +307,9 @@ movement invariants.
 ## Deliberate scope
 
 The current product is limited to two people, one procedural room, ground-plane movement, and
-ephemeral content. It does not yet include TURN relaying, accounts, persistent rooms, avatar
-customization, positional audio, object interaction, native 3D rendering, or multi-person calls.
+ephemeral content. TURN relaying is permanently excluded so call content always travels directly
+between the two peers. The current scope also excludes accounts, persistent rooms, avatar
+customization, positional audio, object interaction, native 3D rendering, and multi-person calls.
 
 ## License
 

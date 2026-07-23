@@ -89,6 +89,11 @@ function TermsPage() {
               caller or use the server to recover a failed peer connection.
             </p>
             <p>
+              Tether uses STUN only for address discovery and does not use a TURN or media relay.
+              Call content is never routed through the operator or another relay provider. If the
+              callers cannot establish a direct WebRTC path, the call fails.
+            </p>
+            <p>
               Room, admission, and signaling state are held in server memory and discarded when the
               associated sessions close. There are no accounts, recordings, call histories, or
               message databases.
