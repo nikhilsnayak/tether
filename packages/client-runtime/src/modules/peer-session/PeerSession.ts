@@ -1,8 +1,11 @@
-import type { PeerId, RoomTemplateId } from '@tether/contracts/modules/room';
+import {
+  resolveRoomTemplateFeatures,
+  type PeerId,
+  type RoomTemplateId,
+} from '@tether/contracts/modules/room';
 import { Crypto, Duration, Effect, Exit, Result, Scope } from 'effect';
 
 import { deriveSasCode } from '../call-verification';
-import { resolveRoomFeatureManifest } from '../room-template';
 import type { WatchActorInput } from '../watch-along/ActorModel';
 import type { PreparedSourceHandle, WatchCapabilities } from '../watch-along/Model';
 import { decodeWatchMessage } from '../watch-along/Protocol';
@@ -508,7 +511,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
 
     memory.watch.setEnabled(
       canProvisionWatchTransport(
-        resolveRoomFeatureManifest(roomTemplateId).watchAlong,
+        resolveRoomTemplateFeatures(roomTemplateId).watchAlong,
         watch.capabilities,
       ),
     );

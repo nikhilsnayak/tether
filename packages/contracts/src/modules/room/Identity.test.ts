@@ -1,7 +1,14 @@
 import { assert, describe, it } from '@effect/vitest';
 import { Schema } from 'effect';
 
-import { DisplayName, PeerId, RoomId, RoomTemplateId } from './index';
+import {
+  DAWN_ATRIUM_TEMPLATE_ID,
+  DisplayName,
+  DUSK_SUITE_TEMPLATE_ID,
+  PeerId,
+  RoomId,
+  RoomTemplateId,
+} from './index';
 import { succeeds } from './test-helpers';
 
 describe('room identity schemas', () => {
@@ -30,6 +37,11 @@ describe('room identity schemas', () => {
     ]) {
       assert.isFalse(succeeds(RoomTemplateId, value));
     }
+  });
+
+  it('provides stable identifiers for the supported room templates', () => {
+    assert.strictEqual(DUSK_SUITE_TEMPLATE_ID, 'dusk-suite');
+    assert.strictEqual(DAWN_ATRIUM_TEMPLATE_ID, 'dawn-atrium');
   });
 
   it('accepts valid identifiers and rejects malformed values', () => {

@@ -1,5 +1,6 @@
 import { assert, describe, it } from '@effect/vitest';
 import {
+  DAWN_ATRIUM_TEMPLATE_ID,
   DUSK_SUITE_TEMPLATE_ID,
   DetachedEvent,
   DisplayName,
@@ -83,6 +84,23 @@ const offer = (sdp: string, negotiationEpoch = 0) =>
   new SessionDescriptionSignal({ negotiationEpoch, type: 'offer', sdp });
 
 describe('RoomService knock-to-join', () => {
+  it.effect('creates a Dawn Atrium room', () =>
+    withRoomService(
+      Effect.gen(function* () {
+        const room = yield* RoomService;
+        const events = yield* room.host(alice, DAWN_ATRIUM_TEMPLATE_ID);
+        const opened = requireOpenedEvent(
+          (yield* events.pipe(Stream.take(1), Stream.runCollect))[0],
+        );
+
+        assert.strictEqual(opened.roomTemplateId, DAWN_ATRIUM_TEMPLATE_ID);
+        assert.deepStrictEqual(yield* room.getRoomMetadata(opened.roomId), {
+          roomTemplateId: DAWN_ATRIUM_TEMPLATE_ID,
+        });
+      }),
+    ),
+  );
+
   it.effect('deletes template metadata when the ephemeral room closes', () =>
     withRoomService(
       Effect.gen(function* () {
