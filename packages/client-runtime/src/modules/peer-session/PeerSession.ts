@@ -429,7 +429,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     const { peerId, reconnectAttempts } = state;
     const role = state.negotiation.role;
     const retryDiagnostics =
-      state.peerConnectionState === 'connected'
+      state.peerConnectionState === 'connected' || state.peerConnectionState === 'interrupted'
         ? makeConnectionDiagnosticTracker()
         : state.generation.diagnostics.nextGeneration();
     yield* closeGeneration(state.generation);
