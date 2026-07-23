@@ -107,7 +107,7 @@ export const DUSK_SUITE_TEMPLATE: RoomTemplate = {
 
 export const DAWN_ATRIUM_TEMPLATE: RoomTemplate = {
   ...roomTemplateIdentity(DAWN_ATRIUM_DEFINITION),
-  background: '#b8d4d5',
+  background: '#82999a',
   scene: lazy(loadDawnAtriumScene),
   gameplay: {
     walkableBounds: { minX: -4.25, maxX: 4.25, minZ: -3.25, maxZ: 4.25 },
@@ -129,9 +129,9 @@ export const DAWN_ATRIUM_TEMPLATE: RoomTemplate = {
   camera: {
     landscape: { position: [0, 2.15, 8.3], target: [0, 1.4, -0.6], fieldOfView: 46 },
     portrait: { position: [0, 2.55, 10.4], target: [0, 1.45, -0.5], fieldOfView: 54 },
-    outside: { position: [10.2, 2.15, 0], target: [4.8, 1.45, 0], fieldOfView: 50 },
+    outside: { position: [11.3, 2.55, 0], target: [5.2, 1.55, 0], fieldOfView: 48 },
     look: {
-      yaw: [-0.42, 0.42],
+      yaw: [-0.32, 0.32],
       pitch: [-0.2, 0.18],
       recenterAfterMs: 2_800,
       recenterSeconds: 1.15,
