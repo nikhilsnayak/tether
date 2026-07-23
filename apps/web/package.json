@@ -21,7 +21,7 @@
     "@rolldown/plugin-babel": "catalog:",
     "@tailwindcss/vite": "catalog:",
     "@tanstack/devtools-vite": "catalog:",
-    "@tanstack/react-devtools": "^0.10.8",
+    "@tanstack/react-devtools": "^0.10.9",
     "@tanstack/react-hotkeys": "catalog:",
     "@tanstack/react-router": "^1.170.18",
     "@tanstack/react-router-devtools": "^1.167.0",
