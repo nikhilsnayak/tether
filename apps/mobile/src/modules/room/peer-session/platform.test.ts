@@ -36,6 +36,7 @@ const native = vi.hoisted(() => {
   class FakeDataChannel {
     readonly listeners = new Map<string, Set<(event: never) => void>>();
     readonly send = vi.fn();
+    readonly close = vi.fn();
     readyState = 'connecting';
     readonly label: string;
 
@@ -229,6 +230,24 @@ afterEach(() => {
 describePeerSessionPlatformContract('native', makeNativePlatformTestHarness);
 
 describe('native peer-session platform', () => {
+  it.effect('closes native data channels and maps close failures', () => {
+    const harness = makeNativePlatformTestHarness();
+    return Effect.gen(function* () {
+      const platform = yield* PeerSessionPlatform;
+      const peerConnection = yield* platform.acquirePeerConnection([]);
+      const dataChannel = yield* platform.createDataChannel(peerConnection, 'watch-control-v1');
+      const channel = dataChannel.value as InstanceType<typeof native.FakeDataChannel>;
+
+      assert.isDefined(platform.closeDataChannel);
+      if (platform.closeDataChannel === undefined) return;
+      yield* platform.closeDataChannel(dataChannel);
+      assert.strictEqual(channel.close.mock.calls.length, 1);
+
+      const error = yield* platform.closeDataChannel({ value: {} }).pipe(Effect.flip);
+      assert.strictEqual(error.operation, 'close-data-channel');
+    }).pipe(Effect.scoped, Effect.provide(harness.layer));
+  });
+
   it.effect('provides native cryptography', () => {
     makeNativePlatformTestHarness();
     return Effect.gen(function* () {

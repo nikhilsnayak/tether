@@ -7,6 +7,7 @@ import {
   peerSessionStatusPresentation,
   peerSessionViewAtom,
 } from '@tether/client-runtime/modules/room';
+import { watchProgramStreamAtom, watchViewAtom } from '@tether/client-runtime/modules/watch-along';
 import type { PeerId } from '@tether/contracts/modules/room';
 import { useKeepAwake } from 'expo-keep-awake';
 import { useState } from 'react';
@@ -20,6 +21,9 @@ import { useCallAudioRouting } from '../hooks/use-call-audio-routing';
 import { usePeerConnection } from '../hooks/use-peer-connection';
 import { useRemoteAudioVolume } from '../hooks/use-remote-audio-volume';
 import { mediaStreamValue } from '../peer-session/platform';
+import { programMediaStreamValue } from '../watch-along/platform';
+import { mobileWatchPresentation } from '../watch-along/presentation';
+import { WatchControls } from '../watch-along/watch-controls';
 import { ActionButton } from './action-button';
 import { AudioOutputModal } from './audio-output-modal';
 import { CallControls } from './call-controls';
@@ -36,12 +40,18 @@ export function CallScreen({
   readonly session: RoomSession;
 }) {
   useKeepAwake();
-  const { leave, sendMessage, respondToJoin } = usePeerConnection({ input: session });
+  const { leave, sendMessage, respondToJoin, requestWatchControl } = usePeerConnection({
+    input: session,
+  });
   const view = useAtomValue(peerSessionViewAtom);
   const localHandle = useAtomValue(peerLocalStreamAtom);
   const remoteHandle = useAtomValue(peerRemoteStreamAtom);
+  const watchView = useAtomValue(watchViewAtom);
+  const programHandle = useAtomValue(watchProgramStreamAtom);
   const localStream = localHandle === null ? null : mediaStreamValue(localHandle);
   const remoteStream = remoteHandle === null ? null : mediaStreamValue(remoteHandle);
+  const programStream = programHandle === null ? null : programMediaStreamValue(programHandle);
+  const watchPresentation = mobileWatchPresentation(watchView);
   const [micOn, setMicOn] = useState(true);
   const [cameraOn, setCameraOn] = useState(true);
   const [remoteAudioOn, setRemoteAudioOn] = useState(true);
@@ -61,6 +71,7 @@ export function CallScreen({
     view.pendingJoinRequests.find((request) => !handlingJoinPeerIds.has(request.peerId)) ?? null;
 
   useRemoteAudioVolume(remoteStream, remoteAudioOn);
+  useRemoteAudioVolume(programStream, remoteAudioOn);
   const handleLeave = () => void leave().then(onLeaveRoom, onLeaveRoom);
   const handleMicToggle = () => {
     const enabled = !micOn;
@@ -107,7 +118,18 @@ export function CallScreen({
     );
   return (
     <SafeAreaView style={styles.screen}>
-      <CallStage cameraOn={cameraOn} onLeave={handleLeave} />
+      <CallStage
+        cameraOn={cameraOn}
+        onLeave={handleLeave}
+        programStream={watchPresentation.active ? programStream : null}
+        watchPresentation={watchPresentation}
+      />
+      <WatchControls
+        presentation={watchPresentation}
+        requestControl={(control) => {
+          requestWatchControl(control);
+        }}
+      />
       <CallControls
         micOn={micOn}
         cameraOn={cameraOn}
