@@ -39,23 +39,6 @@ type ActorOptions = {
   readonly storageState?: BrowserContextOptions['storageState'];
 };
 
-type ConnectOptions = {
-  readonly confirmSafety?: boolean;
-  readonly probeWebRtc?: boolean;
-};
-
-type ConnectedRoom = {
-  readonly guest: RoomActor;
-  readonly host: RoomActor;
-  readonly roomId: string;
-};
-
-type ProbedConnectedRoom = {
-  readonly guest: ProbedRoomActor;
-  readonly host: ProbedRoomActor;
-  readonly roomId: string;
-};
-
 type TrackedServerSocket = {
   readonly url: string;
   closed: boolean;
@@ -98,38 +81,10 @@ export class RoomDriver {
     }
   }
 
-  async closeActor(actor: RoomActor) {
-    await actor.context.close();
-    const index = this.#contexts.indexOf(actor.context);
-    if (index !== -1) this.#contexts.splice(index, 1);
-  }
-
   async completeMediaSetup(actor: RoomActor, actionLabel: string, atThreshold?: ThresholdHook) {
     await this.prepareMediaSetup(actor);
     await atThreshold?.(actor);
     await actor.page.getByRole('button', { name: actionLabel, exact: true }).click();
-  }
-
-  connect(options: ConnectOptions & { readonly probeWebRtc: true }): Promise<ProbedConnectedRoom>;
-  connect(options?: ConnectOptions): Promise<ConnectedRoom>;
-  async connect(options: ConnectOptions = {}): Promise<ConnectedRoom> {
-    const host = options.probeWebRtc
-      ? await this.createActor({ probeWebRtc: true })
-      : await this.createActor();
-    const guest = options.probeWebRtc
-      ? await this.createActor({ probeWebRtc: true })
-      : await this.createActor();
-    const roomId = await this.createRoom(host);
-    await this.join(guest, roomId);
-    await this.admit(host);
-    await Promise.all([this.expectConnected(host), this.expectConnected(guest)]);
-    if (options.confirmSafety !== false) {
-      await Promise.all([
-        host.page.getByRole('button', { name: 'We see the same code' }).click(),
-        guest.page.getByRole('button', { name: 'We see the same code' }).click(),
-      ]);
-    }
-    return { host, guest, roomId };
   }
 
   createActor(options: ActorOptions & { readonly probeWebRtc: true }): Promise<ProbedRoomActor>;
@@ -155,6 +110,10 @@ export class RoomDriver {
     await page.goto('/');
     await page.getByRole('button', { name: 'Call' }).click();
     await expect(page).toHaveURL(/\/host$/);
+    // The host chooses a room template before media setup. Dusk Suite is the
+    // default selection and backs the scene assertions in the specs.
+    await page.getByRole('button', { name: /^Dusk Suite/ }).click();
+    await page.getByRole('button', { name: 'Continue', exact: true }).click();
     await this.startHostingRoom(actor, atThreshold);
     const inviteLink = page.getByRole('textbox', { name: 'Room invite link' });
     await expect(inviteLink).toBeVisible({ timeout: 20_000 });
@@ -166,10 +125,6 @@ export class RoomDriver {
     await page.getByRole('button', { name: 'Close' }).click();
     await this.expectWaitingForPeer(actor);
     return decodeURIComponent(roomId);
-  }
-
-  deny(actor: RoomActor) {
-    return actor.page.getByRole('button', { name: 'Keep out', exact: true }).click();
   }
 
   expectConnected(actor: RoomActor) {
@@ -262,18 +217,6 @@ export class RoomDriver {
     await this.prepareGuestAtThreshold(actor, roomId, displayName);
     await atThreshold?.(actor);
     await actor.page.getByRole('button', { name: 'Knock on door', exact: true }).click();
-  }
-
-  newPage(actor: ProbedRoomActor): Promise<ProbedRoomActor>;
-  newPage(actor: RoomActor): Promise<RoomActor>;
-  async newPage(actor: RoomActor): Promise<RoomActor> {
-    const page = await actor.context.newPage();
-    this.#trackServerSockets(page);
-    return {
-      context: actor.context,
-      page,
-      probe: actor.probe === undefined ? undefined : new WebRtcProbe(page),
-    };
   }
 
   async prepareGuestAtThreshold(actor: RoomActor, roomId: string, displayName = 'Guest') {
