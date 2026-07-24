@@ -35,6 +35,7 @@ import {
   RendererStatusObserver,
 } from './renderer-observers';
 import { RoomTransitionController } from './room-transition-controller';
+import { SpatialAudioWriter } from './spatial-audio-writer';
 import { ThirdPersonCamera } from './third-person-camera';
 
 export function RoomScene({
@@ -201,6 +202,12 @@ export function RoomScene({
           }}
         />
         <ContextLossGuard updateContextLost={setContextLost} />
+        <SpatialAudioWriter
+          localPoseRef={localPoseRef}
+          remotePoseRef={remotePoseRef}
+          cameraYawRef={cameraYawRef}
+          remotePresent={presentation.remote !== 'absent'}
+        />
         {watchCapability !== undefined && <WatchDisplay capability={watchCapability} />}
         <Suspense fallback={null}>
           <SceneEnvironment
