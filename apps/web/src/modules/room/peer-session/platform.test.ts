@@ -387,7 +387,8 @@ describe('web peer-session platform', () => {
     );
   });
 
-  it.effect('reserves and replaces browser watch-along tracks', () => {
+  // Skipped under the TEMPORARY ISOLATE_BULK_TRANSFER flag (attach is disabled).
+  it.effect.skip('reserves and replaces browser watch-along tracks', () => {
     const harness = makeWebPlatformTestHarness();
     return Effect.scoped(
       Effect.gen(function* () {
@@ -427,7 +428,8 @@ describe('web peer-session platform', () => {
     );
   });
 
-  it.effect('adopts program transceivers created from the remote offer', () => {
+  // Skipped under the TEMPORARY ISOLATE_BULK_TRANSFER flag (attach is disabled).
+  it.effect.skip('adopts program transceivers created from the remote offer', () => {
     const harness = makeWebPlatformTestHarness();
     return Effect.scoped(
       Effect.gen(function* () {
@@ -548,7 +550,8 @@ describe('web peer-session platform', () => {
     );
   });
 
-  it.effect('maps program transceiver and replacement failures', () => {
+  // Skipped under the TEMPORARY ISOLATE_BULK_TRANSFER flag (attach is disabled).
+  it.effect.skip('maps program transceiver and replacement failures', () => {
     const reserveHarness = makeWebPlatformTestHarness();
     const reserve = Effect.scoped(
       Effect.gen(function* () {

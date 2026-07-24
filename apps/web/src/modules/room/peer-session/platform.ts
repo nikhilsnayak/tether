@@ -57,6 +57,10 @@ const resolveProgramTransceivers = (handle: ProgramTransceiverHandle) =>
     catch: (cause) => new PlatformError({ operation: 'replace-program-tracks', cause }),
   });
 
+// TEMPORARY: hard-on to isolate watch-media bulk-transfer throughput from the
+// live stream competing for the uplink. Revert before merge.
+const ISOLATE_BULK_TRANSFER = true;
+
 export type SenderTrafficClass = 'voice-audio' | 'program-audio' | 'program-video';
 
 const senderTuning = {
@@ -446,6 +450,12 @@ const webPeerSessionPlatform = PeerSessionPlatform.of({
     }),
   replaceProgramTracks: (transceiver, stream) =>
     Effect.gen(function* () {
+      // TEMPORARY isolation switch: skip attaching the live tracks so the
+      // watch-media bulk transfer has the uplink to itself for a clean throughput
+      // measurement. Revert before merge.
+      if (stream !== null && ISOLATE_BULK_TRANSFER) {
+        return;
+      }
       const { video, audio } = yield* resolveProgramTransceivers(transceiver);
       const media = stream === null ? null : mediaStreamValue(stream);
       const videoTrack = media?.getVideoTracks()[0] ?? null;
