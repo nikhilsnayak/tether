@@ -151,7 +151,7 @@ export function CallScreen({
         pendingJoinPeerIds={view.pendingJoinRequests.map((request) => request.peerId)}
         graph={spatialGraph}
       />
-      <ProgramAudio />
+      <ProgramAudio graph={spatialGraph} />
       {journey === 'outside' && (
         <section
           aria-label={displayLabel}
