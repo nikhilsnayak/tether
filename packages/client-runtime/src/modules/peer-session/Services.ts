@@ -79,7 +79,7 @@ export class PeerSessionPlatform extends Context.Service<
       dataChannel: DataChannelHandle,
       message: string,
     ) => Effect.Effect<void, PlatformError>;
-    /** Sends a raw binary frame; the transport for bulk file transfer. */
+    /** Sends a raw binary frame; the transport for streaming file bytes. */
     readonly sendDataChannelBinary: (
       dataChannel: DataChannelHandle,
       data: ArrayBuffer,

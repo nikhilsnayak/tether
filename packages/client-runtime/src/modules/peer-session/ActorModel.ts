@@ -68,6 +68,11 @@ export type PeerSessionActorState =
        * lifecycle while the supervised watch runtime owns payload semantics.
        */
       readonly watchChannel: DataChannelHandle | null;
+      /**
+       * Generation-scoped watch-media transport (the watch media plane). The peer
+       * session owns its lifecycle; its byte consumer is wired in a later change.
+       */
+      readonly watchMediaChannel: DataChannelHandle | null;
       /** Stream assembled from the generation's reserved remote transceivers. */
       readonly remoteSharedStream: MediaStreamHandle | null;
       /** Monotonic within one peer-connection generation. */

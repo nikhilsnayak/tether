@@ -44,7 +44,7 @@ import {
   encodeRoomEvent,
 } from './RoomEvents';
 import { PeerSessionEventSink, PeerSessionPlatform, PeerSessionSignaling } from './Services';
-import { WATCH_CONTROL_CHANNEL_LABEL } from './WatchTransport';
+import { WATCH_MEDIA_CHANNEL_LABEL, WATCH_CONTROL_CHANNEL_LABEL } from './WatchTransport';
 
 /**
  * How long a peer may stay mid-negotiation (offer/answer/data-channel opening)
@@ -323,6 +323,23 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     return watchChannel;
   });
 
+  // The offerer provisions the watch-media channel beside watch control so
+  // watch media can start after detachment without renegotiating. Its inbound
+  // bytes are parked until the media pump is wired in a later change.
+  const openWatchMediaChannelIfEnabled = Effect.fnUntraced(function* (
+    generation: PeerConnectionGeneration,
+  ) {
+    if (!memory.watch.isEnabled()) return null;
+    const watchMediaChannel = yield* platform.createDataChannel(
+      generation.peerConnection,
+      WATCH_MEDIA_CHANNEL_LABEL,
+    );
+    yield* platform
+      .observeDataChannel(watchMediaChannel, dispatchLocalInput)
+      .pipe(Scope.provide(generation.scope));
+    return watchMediaChannel;
+  });
+
   const startWatchRuntimeForChannel = Effect.fnUntraced(function* (dataChannel: DataChannelHandle) {
     if (
       state._tag !== 'PeerKnown' ||
@@ -458,6 +475,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
         iceGatheringComplete: false,
         dataChannelState: { _tag: 'AwaitingRemoteDataChannel' },
         watchChannel: null,
+        watchMediaChannel: null,
         remoteSharedStream: null,
         remoteProgramStreamVersion: 0,
         watchRuntime: null,
@@ -476,6 +494,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       .observeDataChannel(dataChannel, dispatchLocalInput)
       .pipe(Scope.provide(generation.scope));
     const watchChannel = yield* openWatchChannelIfEnabled(generation);
+    const watchMediaChannel = yield* openWatchMediaChannelIfEnabled(generation);
     yield* armNegotiationDeadline(generation);
     const negotiationEpoch = memory.negotiation.takeLocalOfferEpoch();
     const offerSdp = yield* createAndSendOffer(generation.peerConnection, negotiationEpoch);
@@ -493,6 +512,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       iceGatheringComplete: false,
       dataChannelState: { _tag: 'DataChannelConnecting', dataChannel },
       watchChannel,
+      watchMediaChannel,
       remoteSharedStream: null,
       remoteProgramStreamVersion: 0,
       watchRuntime: null,
@@ -533,6 +553,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       .pipe(Scope.provide(generation.scope));
 
     const watchChannel = yield* openWatchChannelIfEnabled(generation);
+    const watchMediaChannel = yield* openWatchMediaChannelIfEnabled(generation);
     yield* armNegotiationDeadline(generation);
     const negotiationEpoch = memory.negotiation.takeLocalOfferEpoch();
     const offerSdp = yield* createAndSendOffer(generation.peerConnection, negotiationEpoch);
@@ -551,6 +572,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       iceGatheringComplete: false,
       dataChannelState: { _tag: 'DataChannelConnecting', dataChannel },
       watchChannel,
+      watchMediaChannel,
       remoteSharedStream: null,
       remoteProgramStreamVersion: 0,
       watchRuntime: null,
@@ -575,6 +597,7 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       iceGatheringComplete: false,
       dataChannelState: { _tag: 'AwaitingRemoteDataChannel' },
       watchChannel: null,
+      watchMediaChannel: null,
       remoteSharedStream: null,
       remoteProgramStreamVersion: 0,
       watchRuntime: null,
@@ -760,6 +783,21 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       !state.watchTerminated
     ) {
       state = { ...state, watchChannel: dataChannel };
+      yield* platform
+        .observeDataChannel(dataChannel, dispatchLocalInput)
+        .pipe(Scope.provide(generationScope));
+      return;
+    }
+
+    // The watch-media channel mirrors watch control: a parallel,
+    // generation-scoped handle whose byte consumer is wired in a later change.
+    if (
+      label === WATCH_MEDIA_CHANNEL_LABEL &&
+      memory.watch.isEnabled() &&
+      state.watchMediaChannel === null &&
+      !state.watchTerminated
+    ) {
+      state = { ...state, watchMediaChannel: dataChannel };
       yield* platform
         .observeDataChannel(dataChannel, dispatchLocalInput)
         .pipe(Scope.provide(generationScope));
@@ -1024,11 +1062,15 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
 
     const runtime = state.watchRuntime;
     const watchChannel = state.watchChannel;
+    const watchMediaChannel = state.watchMediaChannel;
     state = { ...state, peerConnectionState: 'interrupted', watchTerminated: true };
     if (runtime !== null) {
       yield* runtime.shutdown('transport-interrupted');
     } else if (watchChannel !== null && platform.closeDataChannel !== undefined) {
       yield* platform.closeDataChannel(watchChannel).pipe(Effect.catchCause(() => Effect.void));
+    }
+    if (watchMediaChannel !== null && platform.closeDataChannel !== undefined) {
+      yield* platform.closeDataChannel(watchMediaChannel).pipe(Effect.catchCause(() => Effect.void));
     }
     yield* Effect.logWarning('Peer connection interrupted');
     yield* eventSink.emit({ _tag: 'PeerInterrupted', peerId: state.peerId });
@@ -1101,6 +1143,11 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       const decoded = decodeWatchMessage(data);
       if (Result.isFailure(decoded)) return;
       state.watchRuntime.dispatch({ _tag: 'RemoteMessage', message: decoded.success });
+      return;
+    }
+    // Watch-media bytes are parked until the media pump is wired in a later
+    // change; the channel is negotiated now so it exists before detachment.
+    if (state._tag === 'PeerKnown' && state.watchMediaChannel === dataChannel) {
       return;
     }
     if (

@@ -252,8 +252,8 @@ const observeDataChannel = Effect.fnUntraced(function* (
 ) {
   const dataChannel = dataChannelValue(dataChannelHandle);
 
-  // Deliver binary frames as ArrayBuffer rather than Blob so bulk transfer can
-  // read bytes synchronously. Inert for the text-only control channels.
+  // Deliver binary frames as ArrayBuffer rather than Blob so streamed file bytes
+  // can be read synchronously. Inert for the text-only control channels.
   dataChannel.binaryType = 'arraybuffer';
 
   const handleOpen = () => {

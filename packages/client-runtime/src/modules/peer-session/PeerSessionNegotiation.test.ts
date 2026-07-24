@@ -28,7 +28,7 @@ import {
   session,
   type TestDataChannel,
 } from './test/PeerSessionTestHarness';
-import { WATCH_CONTROL_CHANNEL_LABEL } from './WatchTransport';
+import { WATCH_MEDIA_CHANNEL_LABEL, WATCH_CONTROL_CHANNEL_LABEL } from './WatchTransport';
 
 describe('peer-session actor', () => {
   const fingerprintSdp = (fingerprint: string) =>
@@ -734,6 +734,8 @@ describe('peer-session actor', () => {
           `observeDataChannel:${ROOM_EVENTS_CHANNEL_LABEL}`,
           `createDataChannel:${WATCH_CONTROL_CHANNEL_LABEL}`,
           `observeDataChannel:${WATCH_CONTROL_CHANNEL_LABEL}`,
+          `createDataChannel:${WATCH_MEDIA_CHANNEL_LABEL}`,
+          `observeDataChannel:${WATCH_MEDIA_CHANNEL_LABEL}`,
           'createOffer',
           'setLocalDescription:offer:offer-sdp',
           'sendSignal:offer:offer-sdp',
