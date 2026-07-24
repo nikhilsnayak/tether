@@ -233,8 +233,11 @@ export const makeWatchActor = Effect.fnUntraced(function* (dispatch: WatchActorI
         mimeType: info.mimeType,
       });
       yield* pumpMedia(claimed, info.byteLength).pipe(
+        Effect.andThen(Effect.logInfo('watch-media pump complete').pipe(
+          Effect.annotateLogs('byteLength', info.byteLength),
+        )),
         Effect.catchCause((cause) =>
-          Effect.logDebug('watch-media pump stopped').pipe(
+          Effect.logInfo('watch-media pump stopped').pipe(
             Effect.annotateLogs('cause', String(cause)),
           ),
         ),
@@ -351,7 +354,7 @@ export const makeWatchActor = Effect.fnUntraced(function* (dispatch: WatchActorI
       case 'media-offer':
         mediaExpected = message.byteLength;
         mediaReceived = 0;
-        return yield* Effect.logDebug('watch-media offer received').pipe(
+        return yield* Effect.logInfo('watch-media offer received').pipe(
           Effect.annotateLogs({ byteLength: message.byteLength, mimeType: message.mimeType }),
         );
     }
@@ -441,7 +444,7 @@ export const makeWatchActor = Effect.fnUntraced(function* (dispatch: WatchActorI
         if (mediaExpected === 0 || mediaReceived < mediaExpected) return;
         const total = mediaReceived;
         mediaExpected = 0;
-        return yield* Effect.logDebug('watch-media transfer complete').pipe(
+        return yield* Effect.logInfo('watch-media transfer complete').pipe(
           Effect.annotateLogs({ received: total }),
         );
       }
