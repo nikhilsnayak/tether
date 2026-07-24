@@ -5,6 +5,7 @@ import { peerSessionViewAtom } from '@tether/client-runtime/modules/room';
 import { watchViewAtom } from '@tether/client-runtime/modules/watch-along';
 import { Suspense, useRef, useState } from 'react';
 
+import { useLazyRef } from '@/hooks/use-lazy-ref';
 import { useReducedMotionPreference } from '@/hooks/use-reduced-motion-preference';
 
 import { AvatarControls } from '../components/avatar-controls';
@@ -53,10 +54,10 @@ export function RoomScene({
   );
   const [contextLost, setContextLost] = useState(false);
   const surfaceRef = useRef<HTMLDivElement>(null);
-  const localPoseRef = useRef<AvatarPose>(avatarSpawn(template.gameplay, sessionIntent));
-  const cameraYawRef = useRef(localPoseRef.current.yaw);
+  const localPoseRef = useLazyRef<AvatarPose>(() => avatarSpawn(template.gameplay, sessionIntent));
+  const cameraYawRef = useLazyRef(() => localPoseRef.current.yaw);
   const remoteIntent: RoomSession['intent'] = sessionIntent === 'host' ? 'join' : 'host';
-  const remotePoseRef = useRef<AvatarPose>(avatarSpawn(template.gameplay, remoteIntent));
+  const remotePoseRef = useLazyRef<AvatarPose>(() => avatarSpawn(template.gameplay, remoteIntent));
   const reducedMotion = useReducedMotionPreference();
   const journey = resolveRoomJourney({
     entryStage,

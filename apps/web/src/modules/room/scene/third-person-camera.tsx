@@ -3,6 +3,8 @@ import type { AvatarPose } from '@tether/client-runtime/modules/peer-session';
 import { useEffect, useEffectEvent, useRef, type RefObject } from 'react';
 import { MathUtils, Matrix4, Quaternion, Vector3, type Camera } from 'three';
 
+import { useLazyRef } from '@/hooks/use-lazy-ref';
+
 import type { RoomTemplate } from '../templates/registry';
 import { cameraContainmentScale, resolveCameraClearance } from './camera-containment';
 import {
@@ -59,17 +61,17 @@ export function ThirdPersonCamera({
   const drag = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   const touchPointers = useRef(new Map<number, { x: number; y: number }>());
   const pinchDistance = useRef<number | null>(null);
-  const followed = useRef(new Vector3(poseRef.current.x, 0, poseRef.current.z));
-  const desiredPosition = useRef(new Vector3());
-  const desiredFollow = useRef(new Vector3());
-  const cameraOrigin = useRef(new Vector3());
-  const avatarOrigin = useRef(new Vector3());
-  const cameraOffset = useRef(new Vector3());
-  const target = useRef(new Vector3());
-  const lookDirection = useRef(new Vector3());
-  const lookRight = useRef(new Vector3());
-  const lookMatrix = useRef(new Matrix4());
-  const desiredRotation = useRef(new Quaternion());
+  const followed = useLazyRef(() => new Vector3(poseRef.current.x, 0, poseRef.current.z));
+  const desiredPosition = useLazyRef(() => new Vector3());
+  const desiredFollow = useLazyRef(() => new Vector3());
+  const cameraOrigin = useLazyRef(() => new Vector3());
+  const avatarOrigin = useLazyRef(() => new Vector3());
+  const cameraOffset = useLazyRef(() => new Vector3());
+  const target = useLazyRef(() => new Vector3());
+  const lookDirection = useLazyRef(() => new Vector3());
+  const lookRight = useLazyRef(() => new Vector3());
+  const lookMatrix = useLazyRef(() => new Matrix4());
+  const desiredRotation = useLazyRef(() => new Quaternion());
   const previousRecenterSignal = useRef(recenterSignal.current);
   const wasOutside = useRef(outside);
   const previousWatchFraming = useRef(watchFraming);

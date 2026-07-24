@@ -11,9 +11,11 @@ export function useAudioOutputDevices(localStream: MediaStream | null) {
     const mediaDevices = navigator.mediaDevices;
     if (mediaDevices === undefined) return;
 
+    let ignore = false;
     const refresh = async () => {
       try {
         const devices = await mediaDevices.enumerateDevices();
+        if (ignore) return;
         setAudioOutputs(devices.filter(isAudioOutput));
       } catch {
         // Device enumeration is optional; retain the current output list when unavailable.
@@ -22,7 +24,10 @@ export function useAudioOutputDevices(localStream: MediaStream | null) {
 
     void refresh();
     mediaDevices.addEventListener('devicechange', refresh);
-    return () => mediaDevices.removeEventListener('devicechange', refresh);
+    return () => {
+      ignore = true;
+      mediaDevices.removeEventListener('devicechange', refresh);
+    };
   }, [localStream]);
 
   return audioOutputs;
