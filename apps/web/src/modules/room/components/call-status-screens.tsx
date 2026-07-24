@@ -200,33 +200,3 @@ export function SessionAcquisitionErrorScreen({
     />
   );
 }
-
-export function CallSessionErrorScreen({
-  label,
-  pillLabel,
-  hint,
-  onLeaveRoom,
-  indicatorClassName,
-}: {
-  readonly label: string;
-  readonly pillLabel: string;
-  readonly hint: string;
-  readonly onLeaveRoom: () => void;
-  readonly indicatorClassName: string;
-}) {
-  return (
-    <CallStatusScreen
-      indicatorClassName={indicatorClassName}
-      pillLabel={pillLabel}
-      icon={<AlertTriangle className='size-9' />}
-      iconClassName='bg-destructive/15 text-destructive'
-      label={label}
-      hint={hint}
-      action={
-        <Button variant='secondary' onClick={onLeaveRoom}>
-          Back to room setup
-        </Button>
-      }
-    />
-  );
-}

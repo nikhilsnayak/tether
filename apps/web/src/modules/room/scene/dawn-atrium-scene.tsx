@@ -261,6 +261,9 @@ function buildJets(detailed: boolean): Jet[] {
   return jets;
 }
 
+const sprayDummy = new Object3D();
+const sprayTint = new Color();
+
 function FountainSpray({
   detailed,
   reducedMotion,
@@ -271,8 +274,6 @@ function FountainSpray({
   const instances = useRef<InstancedMesh>(null);
   const froths = useRef<(Mesh | null)[]>([]);
   const elapsed = useRef(0);
-  const dummy = new Object3D();
-  const tint = new Color();
   const jets = buildJets(detailed);
 
   const frothData: Froth[] = [];
@@ -298,17 +299,17 @@ function FountainSpray({
         const t = ((time * 0.9 + jet.offset) % 1) * jet.life;
         // Rises fast then thins to nothing: droplets are born and die as mist.
         const fade = Math.sin((t / jet.life) * Math.PI);
-        dummy.position.set(
+        sprayDummy.position.set(
           jet.vx * t,
           SPRAY_ORIGIN_Y + jet.vy * t - 0.5 * SPRAY_GRAVITY * t * t,
           jet.vz * t,
         );
-        dummy.scale.setScalar(Math.max(0.0001, jet.size * (0.35 + fade * 0.95)));
-        dummy.updateMatrix();
-        mesh.setMatrixAt(index, dummy.matrix);
+        sprayDummy.scale.setScalar(Math.max(0.0001, jet.size * (0.35 + fade * 0.95)));
+        sprayDummy.updateMatrix();
+        mesh.setMatrixAt(index, sprayDummy.matrix);
         const brightness = 0.55 + fade * 0.45;
-        tint.setRGB(jet.r * brightness, jet.g * brightness, jet.b * brightness);
-        mesh.setColorAt(index, tint);
+        sprayTint.setRGB(jet.r * brightness, jet.g * brightness, jet.b * brightness);
+        mesh.setColorAt(index, sprayTint);
       }
       mesh.instanceMatrix.needsUpdate = true;
       if (mesh.instanceColor != null) mesh.instanceColor.needsUpdate = true;
