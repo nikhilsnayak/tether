@@ -92,6 +92,16 @@ export const makeWatchActorTestHarness = Effect.fn('makeWatchActorTestHarness')(
         () => Effect.sync(() => operations.push('unobserveSource')),
       ),
     primeFirstFrame: () => Effect.sync(() => operations.push('primeFirstFrame')),
+    sourceMediaInfo: () =>
+      Effect.sync(() => {
+        operations.push('sourceMediaInfo');
+        return { byteLength: 0, mimeType: '' };
+      }),
+    readSourceBytes: () =>
+      Effect.sync(() => {
+        operations.push('readSourceBytes');
+        return new Uint8Array();
+      }),
     attachProgramTracks: () => Effect.sync(() => operations.push('attachProgramTracks')),
     clearProgramTracks: Effect.sync(() => operations.push('clearProgramTracks')),
   };

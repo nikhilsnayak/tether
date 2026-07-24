@@ -236,6 +236,8 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
     replay: () => Effect.sync(() => operations.push('watch:replay')),
     observeSource: () => Effect.void,
     primeFirstFrame: () => Effect.void,
+    sourceMediaInfo: () => Effect.succeed({ byteLength: 0, mimeType: '' }),
+    readSourceBytes: () => Effect.succeed(new Uint8Array()),
     attachProgramTracks: () => Effect.void,
     clearProgramTracks: Effect.void,
   };

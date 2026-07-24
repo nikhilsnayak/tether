@@ -261,6 +261,7 @@ describe('web watch source', () => {
     const resource: WebWatchSourceResource = {
       element: {} as WebWatchSourceResource['element'],
       stream: {} as MediaStream,
+      file: new File([], 'test'),
       claim: Effect.fail(sourceFailure),
       cancel: Effect.void,
       play: Effect.fail(sourceFailure),

@@ -27,6 +27,8 @@ export const mobileWatchAlongPlatform = WatchAlongPlatform.of({
   replay: () => unsupportedPresentationOperation('replay'),
   observeSource: () => unsupportedPresentationOperation('observe-source'),
   primeFirstFrame: () => unsupportedPresentationOperation('prime-first-frame'),
+  sourceMediaInfo: () => unsupportedPresentationOperation('source-media-info'),
+  readSourceBytes: () => unsupportedPresentationOperation('read-source-bytes'),
   // Peer-session supervision replaces these two operations with the reserved
   // program-transceiver implementation before the watch actor starts.
   attachProgramTracks: () => unsupportedPresentationOperation('attach-program-tracks'),

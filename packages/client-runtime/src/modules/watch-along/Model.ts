@@ -12,6 +12,12 @@ export interface ProgramStreamHandle {
   readonly value: unknown;
 }
 
+/** Size and codec of a presenter's local source, announced before its bytes stream. */
+export interface WatchMediaInfo {
+  readonly byteLength: number;
+  readonly mimeType: string;
+}
+
 export interface WatchCapabilities {
   readonly canPresentLocalFile: boolean;
   readonly canReceiveProgramMedia: boolean;

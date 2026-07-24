@@ -111,6 +111,8 @@ const disabledWatchPlatform = WatchAlongPlatform.of({
   replay: () => disabledWatchOperation('replay'),
   observeSource: () => disabledWatchOperation('observe-source'),
   primeFirstFrame: () => disabledWatchOperation('prime-first-frame'),
+  sourceMediaInfo: () => disabledWatchOperation('source-media-info'),
+  readSourceBytes: () => disabledWatchOperation('read-source-bytes'),
   attachProgramTracks: () => disabledWatchOperation('attach-program-tracks'),
   clearProgramTracks: disabledWatchOperation('clear-program-tracks'),
 });

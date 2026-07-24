@@ -75,6 +75,7 @@ export const waitForWatchSourceReady = (
 export interface WebWatchSourceResource {
   readonly element: CapturableVideoElement;
   readonly stream: MediaStream;
+  readonly file: File;
   readonly claim: Effect.Effect<ClaimedSourceHandle, WebWatchSourceError, Scope.Scope>;
   readonly cancel: Effect.Effect<void>;
   readonly play: Effect.Effect<void, WebWatchSourceError>;
@@ -202,6 +203,7 @@ export const prepareWatchSourceWith = Effect.fn('prepareWatchSourceWith')(functi
   resource = {
     element,
     stream,
+    file,
     claim,
     cancel: Effect.suspend(() => (ownership === 'prepared' ? close : Effect.void)),
     play: trySourcePromise('play', () => element.play()),

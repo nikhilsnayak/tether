@@ -77,6 +77,23 @@ export const webWatchAlongPlatform = WatchAlongPlatform.of({
       Effect.flatMap((resource) => resource.primeFirstFrame),
       Effect.mapError((cause) => mapSourceError('prime-first-frame', cause)),
     ),
+  sourceMediaInfo: (source) =>
+    claimedResource('source-media-info', source).pipe(
+      Effect.map((resource) => ({
+        byteLength: resource.file.size,
+        mimeType: resource.file.type,
+      })),
+    ),
+  readSourceBytes: (source, offset, length) =>
+    claimedResource('read-source-bytes', source).pipe(
+      Effect.flatMap((resource) =>
+        Effect.tryPromise({
+          try: () => resource.file.slice(offset, offset + length).arrayBuffer(),
+          catch: (cause) => mapSourceError('read-source-bytes', cause),
+        }),
+      ),
+      Effect.map((buffer) => new Uint8Array(buffer)),
+    ),
   attachProgramTracks: () => Effect.fail(invalidSource('attach-program-tracks')),
   clearProgramTracks: Effect.fail(invalidSource('clear-program-tracks')),
 });

@@ -7,6 +7,7 @@ import type {
   ProgramStreamHandle,
   WatchCapabilities,
   WatchEvent,
+  WatchMediaInfo,
 } from './Model';
 import type { WatchMessage } from './Protocol';
 
@@ -19,6 +20,8 @@ export type WatchPlatformOperation =
   | 'replay'
   | 'observe-source'
   | 'prime-first-frame'
+  | 'source-media-info'
+  | 'read-source-bytes'
   | 'attach-program-tracks'
   | 'clear-program-tracks';
 
@@ -57,6 +60,16 @@ export class WatchAlongPlatform extends Context.Service<
     readonly primeFirstFrame: (
       source: ClaimedSourceHandle,
     ) => Effect.Effect<void, WatchPlatformError>;
+    /** Size and codec of the presenter's source, for the media-offer announce. */
+    readonly sourceMediaInfo: (
+      source: ClaimedSourceHandle,
+    ) => Effect.Effect<WatchMediaInfo, WatchPlatformError>;
+    /** Reads a byte range of the source; the pump streams these over watch-media. */
+    readonly readSourceBytes: (
+      source: ClaimedSourceHandle,
+      offset: number,
+      length: number,
+    ) => Effect.Effect<Uint8Array, WatchPlatformError>;
     readonly attachProgramTracks: (
       stream: ProgramStreamHandle,
     ) => Effect.Effect<void, WatchPlatformError>;
