@@ -88,7 +88,7 @@ describe('web watch source', () => {
       assert.strictEqual(fixture.video.captureCount, 1);
       assert.strictEqual(fixture.video.loadCount, 1);
       assert.isTrue(fixture.video.muted);
-      assert.strictEqual(fixture.stream.videoTrack?.contentHint, 'detail');
+      assert.strictEqual(fixture.stream.videoTrack?.contentHint, 'motion');
 
       yield* Effect.promise(fixture.prepared.cancel);
       yield* Effect.promise(fixture.prepared.cancel);

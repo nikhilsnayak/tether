@@ -62,7 +62,7 @@ export type SenderTrafficClass = 'voice-audio' | 'program-audio' | 'program-vide
 const senderTuning = {
   'voice-audio': { priority: 'high' },
   'program-audio': { priority: 'medium' },
-  'program-video': { priority: 'low', degradationPreference: 'maintain-resolution' },
+  'program-video': { priority: 'low', degradationPreference: 'maintain-framerate' },
 } as const satisfies Record<
   SenderTrafficClass,
   { readonly priority: RTCPriorityType; readonly degradationPreference?: RTCDegradationPreference }
@@ -433,7 +433,7 @@ const webPeerSessionPlatform = PeerSessionPlatform.of({
       const { video, audio } = yield* resolveProgramTransceivers(transceiver);
       const media = stream === null ? null : mediaStreamValue(stream);
       const videoTrack = media?.getVideoTracks()[0] ?? null;
-      if (videoTrack !== null) videoTrack.contentHint = 'detail';
+      if (videoTrack !== null) videoTrack.contentHint = 'motion';
       yield* Effect.all(
         [tuneSender(video.sender, 'program-video'), tuneSender(audio.sender, 'program-audio')],
         { concurrency: 'unbounded', discard: true },
