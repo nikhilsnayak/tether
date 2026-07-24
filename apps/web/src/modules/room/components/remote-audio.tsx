@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
+import type { SpatialAudioGraph } from '../audio/spatial-audio-graph';
 import { createRoomAudioEngine, type RoomAudioEngine } from '../scene/room-audio';
 import { attachAudioStream, setAudioSink } from './audio-element';
 
@@ -58,11 +59,13 @@ export function RemoteAudio({
   sinkId,
   muted,
   pendingJoinPeerIds,
+  graph,
 }: {
   readonly stream: MediaStream | null;
   readonly sinkId: string;
   readonly muted: boolean;
   readonly pendingJoinPeerIds: ReadonlyArray<string>;
+  readonly graph: SpatialAudioGraph | null;
 }) {
   const [activated, setActivated] = useState(false);
   const [knockQueue] = useState(createKnockPlaybackQueue);
@@ -89,10 +92,21 @@ export function RemoteAudio({
     return attachAudioStream(element, stream);
   }, [stream]);
 
+  // Spatial mode: the audible path is the Web Audio graph; the muted <audio>
+  // above stays as the Chrome silence-bug keepalive (§6) — a
+  // MediaStreamAudioSourceNode outputs silence unless the same stream is also on
+  // a live, playing HTMLMediaElement.
+  useEffect(() => {
+    if (graph === null || stream === null) return;
+    graph.connectVoice(stream);
+  }, [graph, stream]);
+
+  // Fallback only: in spatial mode the sink lives on the AudioContext (set by the
+  // graph hook), not the element.
   useEffect(() => {
     const element = audioRef.current;
-    if (element !== null) setAudioSink(element, sinkId);
-  }, [sinkId]);
+    if (element !== null && graph === null) setAudioSink(element, sinkId);
+  }, [graph, sinkId]);
 
   useEffect(() => {
     if (!activated || typeof AudioContext === 'undefined') return;
@@ -124,6 +138,11 @@ export function RemoteAudio({
 
   return (
     // oxlint-disable-next-line jsx-a11y/media-has-caption -- live call audio has no captions
-    <audio ref={audioRef} aria-label='Remote audio' autoPlay muted={muted} />
+    <audio
+      ref={audioRef}
+      aria-label='Remote audio'
+      autoPlay
+      muted={graph !== null ? true : muted}
+    />
   );
 }
