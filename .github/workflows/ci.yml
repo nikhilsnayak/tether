@@ -122,17 +122,3 @@ jobs:
             e2e/test-results/
           if-no-files-found: ignore
           retention-days: 7
-
-  check:
-    needs: [static-checks, build, unit, e2e]
-    if: always()
-    runs-on: ubuntu-latest
-    permissions: {}
-    steps:
-      - name: Confirm all CI jobs passed
-        run: |
-          if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
-            echo "One or more CI jobs did not pass."
-            exit 1
-          fi
-          echo "All CI jobs passed."

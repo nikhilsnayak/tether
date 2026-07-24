@@ -99,6 +99,7 @@ export function RemoteAudio({
   useEffect(() => {
     if (graph === null || stream === null) return;
     graph.connectVoice(stream);
+    return () => graph.disconnectVoice();
   }, [graph, stream]);
 
   // Fallback only: in spatial mode the sink lives on the AudioContext (set by the

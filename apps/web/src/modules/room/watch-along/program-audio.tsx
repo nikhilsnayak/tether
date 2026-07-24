@@ -23,8 +23,9 @@ export function ProgramAudio({ graph }: { readonly graph: SpatialAudioGraph | nu
   }, [graph, preferences.speakerEnabled, stream]);
 
   useEffect(() => {
-    if (graph === null || stream === null) return;
+    if (graph === null || stream === null || stream.getAudioTracks().length === 0) return;
     graph.connectProgram(stream);
+    return () => graph.disconnectProgram();
   }, [graph, stream]);
 
   // Fallback only: the graph owns volume + sink in spatial mode.

@@ -20,7 +20,9 @@ interface Source {
 
 export interface SpatialAudioGraph {
   readonly connectVoice: (stream: MediaStream) => void;
+  readonly disconnectVoice: () => void;
   readonly connectProgram: (stream: MediaStream) => void;
+  readonly disconnectProgram: () => void;
   readonly updateListener: (position: Vec2, orientation: ListenerOrientation) => void;
   readonly updateVoice: (remote: Vec2, present: boolean, listener: Vec2) => void;
   readonly updateProgram: (screen: Vec2, listener: Vec2) => void;
@@ -42,6 +44,7 @@ export function createSpatialAudioGraph(
   let program: Source | null = null;
   let programVolume = 1;
   let programSpatial = 1;
+  let disposed = false;
 
   const makeSource = (stream: MediaStream): Source => {
     const source = context.createMediaStreamSource(stream);
@@ -78,15 +81,28 @@ export function createSpatialAudioGraph(
 
   return {
     connectVoice(stream) {
+      if (disposed) return;
       disposeSource(voice);
       voice = makeSource(stream);
     },
+    disconnectVoice() {
+      if (disposed) return;
+      disposeSource(voice);
+      voice = null;
+    },
     connectProgram(stream) {
+      if (disposed) return;
       disposeSource(program);
       program = makeSource(stream);
       applyProgramGain();
     },
+    disconnectProgram() {
+      if (disposed) return;
+      disposeSource(program);
+      program = null;
+    },
     updateListener(position, orientation) {
+      if (disposed) return;
       const listener = context.listener;
       listener.positionX.value = position.x;
       listener.positionY.value = 0;
@@ -99,19 +115,20 @@ export function createSpatialAudioGraph(
       listener.upZ.value = 0;
     },
     updateVoice(remote, present, listener) {
-      if (voice === null) return;
+      if (disposed || voice === null) return;
       // Absent remote → coincident with the listener (pans center) at full gain,
       // so a missing peer never sounds phantom-distant.
       setPosition(voice.panner, present ? remote : listener);
       setGain(voice.gain, present ? spatialGain(distance2d(remote, listener), config) : 1);
     },
     updateProgram(screen, listener) {
-      if (program === null) return;
+      if (disposed || program === null) return;
       setPosition(program.panner, screen);
       programSpatial = spatialGain(distance2d(screen, listener), config);
       applyProgramGain();
     },
     setProgramVolume(volume) {
+      if (disposed) return;
       programVolume = clampVolume(volume);
       applyProgramGain();
     },
@@ -128,8 +145,12 @@ export function createSpatialAudioGraph(
       }
     },
     dispose() {
+      if (disposed) return;
+      disposed = true;
       disposeSource(voice);
       disposeSource(program);
+      voice = null;
+      program = null;
       master.disconnect();
       void context.close().catch(() => {});
     },

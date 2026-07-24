@@ -146,6 +146,21 @@ describe('spatial audio graph', () => {
     expect(ctx.gainA.disconnect).toHaveBeenCalledOnce();
   });
 
+  it('disconnects a cleared voice source', () => {
+    const ctx = audioContext();
+    stub(ctx);
+
+    const graph = createSpatialAudioGraph();
+    graph.connectVoice(stream());
+    graph.disconnectVoice();
+
+    expect(ctx.sourceA.disconnect).toHaveBeenCalledOnce();
+    expect(ctx.pannerA.disconnect).toHaveBeenCalledOnce();
+    expect(ctx.gainA.disconnect).toHaveBeenCalledOnce();
+    graph.updateVoice({ x: 1, z: 1 }, true, { x: 0, z: 0 });
+    expect(ctx.gainA.gain.setTargetAtTime).not.toHaveBeenCalled();
+  });
+
   it('applies program gain immediately on connectProgram', () => {
     const ctx = audioContext();
     stub(ctx);
@@ -155,6 +170,19 @@ describe('spatial audio graph', () => {
 
     // slot A is the program source gain; initial programSpatial × volume = 1.
     expect(ctx.gainA.gain.setTargetAtTime).toHaveBeenCalledWith(1, NOW, SMOOTHING);
+  });
+
+  it('disconnects a cleared program source', () => {
+    const ctx = audioContext();
+    stub(ctx);
+
+    const graph = createSpatialAudioGraph();
+    graph.connectProgram(stream());
+    graph.disconnectProgram();
+
+    expect(ctx.sourceA.disconnect).toHaveBeenCalledOnce();
+    expect(ctx.pannerA.disconnect).toHaveBeenCalledOnce();
+    expect(ctx.gainA.disconnect).toHaveBeenCalledOnce();
   });
 
   it('ignores updateVoice when no voice is connected', () => {
@@ -308,5 +336,28 @@ describe('spatial audio graph', () => {
     expect(ctx.sourceA.disconnect).toHaveBeenCalledOnce();
     expect(ctx.sourceB.disconnect).toHaveBeenCalledOnce();
     expect(ctx.master.disconnect).toHaveBeenCalledOnce();
+  });
+
+  it('makes source and spatial updates no-ops after dispose', () => {
+    const ctx = audioContext();
+    stub(ctx);
+
+    const graph = createSpatialAudioGraph();
+    graph.dispose();
+
+    graph.connectVoice(stream());
+    graph.disconnectVoice();
+    graph.connectProgram(stream());
+    graph.disconnectProgram();
+    graph.setProgramVolume(0.5);
+    graph.updateVoice({ x: 1, z: 1 }, true, { x: 0, z: 0 });
+    graph.updateProgram({ x: 1, z: 1 }, { x: 0, z: 0 });
+    graph.updateListener({ x: 1, z: 1 }, { forwardX: 0, forwardZ: -1 });
+    graph.dispose();
+
+    expect(ctx.context.createMediaStreamSource).not.toHaveBeenCalled();
+    expect(ctx.listener.positionX.value).toBe(0);
+    expect(ctx.master.disconnect).toHaveBeenCalledOnce();
+    expect(ctx.context.close).toHaveBeenCalledOnce();
   });
 });
