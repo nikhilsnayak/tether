@@ -61,6 +61,7 @@ class FakeDataChannel {
   });
   readyState = 'connecting';
   bufferedAmount = 0;
+  binaryType = 'blob';
   readonly label: string;
 
   constructor(label: string) {
@@ -359,6 +360,29 @@ describe('web peer-session platform', () => {
         if (platform.closeDataChannel === undefined) return;
         yield* platform.closeDataChannel(dataChannel);
         assert.strictEqual(channel.close.mock.calls.length, 1);
+      }).pipe(Effect.provide(harness.layer)),
+    );
+  });
+
+  it.effect('marks observed channels for arraybuffer receipt and sends binary frames', () => {
+    const harness = makeWebPlatformTestHarness();
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const platform = yield* PeerSessionPlatform;
+        const peerConnection = yield* platform.acquirePeerConnection([]);
+        const dataChannel = yield* platform.createDataChannel(
+          peerConnection,
+          ROOM_EVENTS_CHANNEL_LABEL,
+        );
+        const channel = dataChannel.value as FakeDataChannel;
+
+        yield* platform.observeDataChannel(dataChannel, () => {});
+        assert.strictEqual(channel.binaryType, 'arraybuffer');
+
+        const payload = new Uint8Array([1, 2, 3, 4]).buffer;
+        yield* platform.sendDataChannelBinary(dataChannel, payload);
+        assert.strictEqual(channel.send.mock.calls.length, 1);
+        assert.strictEqual(channel.send.mock.calls[0]?.[0], payload);
       }).pipe(Effect.provide(harness.layer)),
     );
   });

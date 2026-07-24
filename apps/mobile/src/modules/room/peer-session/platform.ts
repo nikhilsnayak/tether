@@ -252,6 +252,10 @@ const observeDataChannel = Effect.fnUntraced(function* (
 ) {
   const dataChannel = dataChannelValue(dataChannelHandle);
 
+  // Deliver binary frames as ArrayBuffer rather than Blob so bulk transfer can
+  // read bytes synchronously. Inert for the text-only control channels.
+  dataChannel.binaryType = 'arraybuffer';
+
   const handleOpen = () => {
     if (dataChannel.readyState !== 'open') return;
 
@@ -397,6 +401,11 @@ const nativePeerSessionPlatform = PeerSessionPlatform.of({
     Effect.try({
       try: () => dataChannelValue(dataChannel).send(message),
       catch: (cause) => new PlatformError({ operation: 'send-message', cause }),
+    }),
+  sendDataChannelBinary: (dataChannel, data) =>
+    Effect.try({
+      try: () => dataChannelValue(dataChannel).send(data),
+      catch: (cause) => new PlatformError({ operation: 'send-binary', cause }),
     }),
 });
 

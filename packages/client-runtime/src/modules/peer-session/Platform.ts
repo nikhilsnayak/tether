@@ -23,6 +23,7 @@ export type PlatformOperation =
   | 'set-remote-description'
   | 'add-ice-candidate'
   | 'send-message'
+  | 'send-binary'
   | 'close-data-channel';
 
 /** Identifies the failed WebRTC step without inspecting its untyped cause. */

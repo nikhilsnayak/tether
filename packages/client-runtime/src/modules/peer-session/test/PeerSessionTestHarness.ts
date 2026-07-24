@@ -210,6 +210,8 @@ export const makePeerSessionTestHarness = Effect.fn('makePeerSessionTestHarness'
       Effect.sync(() => operations.push(`addIceCandidate:${candidate.candidate}`)),
     sendDataChannelMessage: (_, message) =>
       Effect.sync(() => operations.push(`sendDataChannelMessage:${message}`)),
+    sendDataChannelBinary: (_, data) =>
+      Effect.sync(() => operations.push(`sendDataChannelBinary:${data.byteLength}`)),
   };
   const platform = PeerSessionPlatform.of({ ...basePlatform, ...overrides });
   const watchCapabilities: WatchCapabilities = {
