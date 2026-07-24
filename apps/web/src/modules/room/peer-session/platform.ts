@@ -62,10 +62,18 @@ export type SenderTrafficClass = 'voice-audio' | 'program-audio' | 'program-vide
 const senderTuning = {
   'voice-audio': { priority: 'high' },
   'program-audio': { priority: 'medium' },
-  'program-video': { priority: 'low', degradationPreference: 'maintain-framerate' },
+  'program-video': {
+    priority: 'low',
+    degradationPreference: 'maintain-framerate',
+    maxBitrate: 8_000_000,
+  },
 } as const satisfies Record<
   SenderTrafficClass,
-  { readonly priority: RTCPriorityType; readonly degradationPreference?: RTCDegradationPreference }
+  {
+    readonly priority: RTCPriorityType;
+    readonly degradationPreference?: RTCDegradationPreference;
+    readonly maxBitrate?: number;
+  }
 >;
 
 /** Feature-detects encoding priorities and applies standard degradation preference best-effort. */
@@ -82,6 +90,10 @@ export const tuneSenderParameters = (
     }
     if ('networkPriority' in encoding && encoding.networkPriority !== tuning.priority) {
       encoding.networkPriority = tuning.priority;
+      changed = true;
+    }
+    if ('maxBitrate' in tuning && encoding.maxBitrate !== tuning.maxBitrate) {
+      encoding.maxBitrate = tuning.maxBitrate;
       changed = true;
     }
   }

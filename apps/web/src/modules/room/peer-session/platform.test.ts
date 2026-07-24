@@ -460,6 +460,7 @@ describe('web peer-session platform', () => {
     assert.deepStrictEqual(programVideo.encodings[0], {
       priority: 'low',
       networkPriority: 'low',
+      maxBitrate: 8_000_000,
     });
     assert.strictEqual(programVideo.degradationPreference, 'maintain-framerate');
   });
