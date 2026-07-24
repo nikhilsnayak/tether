@@ -39,6 +39,10 @@ admission, calling, and chat flow with a conventional call interface.
   closes its signaling WebSocket. The web app shows a quiet `Direct` indicator at that point.
 - **A shared spatial room on web and desktop.** Each person controls an avatar while camera feeds
   remain in movable utility tiles.
+- **Distance-based spatial audio (Chromium).** The remote voice softens as your avatars move apart,
+  Watch Together audio softens as you step back from the wall display, and both pan with your view —
+  kept above a floor so they never fall silent. Browsers without it keep plain stereo audio and
+  output-device selection unchanged.
 - **Watch Together on the room display.** A compatible web or desktop peer can select a local video
   and stream it directly to both peers, with shared playback controls in the call dock.
 - **Connection safety codes.** Both people can compare a code derived from the negotiated DTLS
@@ -96,6 +100,12 @@ On web and desktop, callers meet as two procedural avatars in the Dusk Suite. Ea
 local avatar and receives the other person's pose over the data channel. Movement stays within the
 room, and the avatars act as soft obstacles to each other.
 
+On Chromium, sound is spatial: the other person's voice and any shared video soften as your avatars
+move apart or as you step back from the wall display, and pan with your view, so distance in the
+room is something you can hear. A floor keeps sources quiet-but-audible rather than ever silent, and
+output-device selection, volume, and speaker mute continue to work. Other browsers fall back to
+plain stereo playback with the same controls.
+
 Video remains separate from the avatars in two draggable tiles. Turning a camera off changes the
 tile to a placeholder without removing the avatar. In rooms with Watch Together, the wall display
 shows a local video selected by either compatible peer. Open **Watch** in the bottom call dock to
@@ -123,7 +133,7 @@ manually or left on automatic, which lowers quality after a sustained frame-rate
 
 | Platform | Status                                                                                                          |
 | -------- | --------------------------------------------------------------------------------------------------------------- |
-| Web      | Spatial room, admission, calls, chat, safety codes, media controls, and Watch Together                          |
+| Web      | Spatial room and spatial audio, admission, calls, chat, safety codes, media controls, and Watch Together        |
 | Desktop  | Electron shell around the web app, including Watch Together, Linux `.deb` packaging, and `tether://` room links |
 | Mobile   | Native admission, audio/video, chat, deep links, and receive-only Watch Together playback and controls          |
 
@@ -309,7 +319,7 @@ frame loop under SwiftShader in CI, so one run covers the app's critical end-to-
 The current product is limited to two people, one procedural room, ground-plane movement, and
 ephemeral content. TURN relaying is permanently excluded so call content always travels directly
 between the two peers. The current scope also excludes accounts, persistent rooms, avatar
-customization, positional audio, object interaction, native 3D rendering, and multi-person calls.
+customization, object interaction, native 3D rendering, and multi-person calls.
 
 ## License
 

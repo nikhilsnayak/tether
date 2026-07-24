@@ -23,7 +23,7 @@ export function useSharedSpatialAudioGraph(): SpatialAudioGraph | null {
     };
   }, [activated]);
 
-  // D10: only Chromium keeps device selection once audio routes through Web Audio.
+  // Only Chromium keeps device selection once audio routes through Web Audio.
   // Elsewhere this stays null and callers fall back to plain <audio>.
   useEffect(() => {
     if (!activated || !isSpatialAudioSupported()) return;
@@ -40,7 +40,7 @@ export function useSharedSpatialAudioGraph(): SpatialAudioGraph | null {
     };
   }, [activated]);
 
-  // D7: if the Canvas unmounts on context loss the ref freezes and audio keeps
+  // If the Canvas unmounts on context loss the ref freezes and audio keeps
   // playing at last-known positions — frozen but audible, never silent.
   useEffect(() => {
     if (graph === null) return;

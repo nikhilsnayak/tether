@@ -11,7 +11,7 @@ export interface ListenerOrientation {
 export interface FalloffConfig {
   readonly refDistance: number;
   readonly maxDistance: number;
-  // Minimum gain, so a source is never fully silent (D5).
+  // Minimum gain, so a source is never fully silent.
   readonly floor: number;
 }
 
@@ -22,7 +22,7 @@ export const DEFAULT_FALLOFF: FalloffConfig = {
 };
 
 // Gates spatial audio on setSinkId: routing through Web Audio forfeits
-// HTMLMediaElement device selection, and only Chromium restores it here (D10).
+// HTMLMediaElement device selection, and only Chromium restores it here.
 export function isSpatialAudioSupported(): boolean {
   if (typeof AudioContext === 'undefined') return false;
   return typeof (AudioContext.prototype as { setSinkId?: unknown }).setSinkId === 'function';

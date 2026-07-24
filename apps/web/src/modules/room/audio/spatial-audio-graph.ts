@@ -46,8 +46,8 @@ export function createSpatialAudioGraph(
   const makeSource = (stream: MediaStream): Source => {
     const source = context.createMediaStreamSource(stream);
     const panner = context.createPanner();
-    // Azimuth panning only (D4); the GainNode owns floored distance (D5), so the
-    // panner must not attenuate by distance.
+    // Azimuth panning only; the GainNode owns floored distance, so the panner
+    // must not attenuate by distance.
     panner.panningModel = 'equalpower';
     panner.rolloffFactor = 0;
     const gain = context.createGain();
@@ -101,7 +101,7 @@ export function createSpatialAudioGraph(
     updateVoice(remote, present, listener) {
       if (voice === null) return;
       // Absent remote → coincident with the listener (pans center) at full gain,
-      // so a missing peer never sounds phantom-distant (§9 edge case).
+      // so a missing peer never sounds phantom-distant.
       setPosition(voice.panner, present ? remote : listener);
       setGain(voice.gain, present ? spatialGain(distance2d(remote, listener), config) : 1);
     },

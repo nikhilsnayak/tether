@@ -13,7 +13,7 @@ export function ProgramAudio({ graph }: { readonly graph: SpatialAudioGraph | nu
   const audioRef = useRef<HTMLAudioElement>(null);
   const stream = streamHandle !== null ? programMediaStreamValue(streamHandle) : null;
 
-  // In spatial mode the element is a muted keepalive (§6) attached whenever a
+  // In spatial mode the element is a muted keepalive attached whenever a
   // stream exists; in fallback it is the audible path, gated on speakerEnabled.
   useEffect(() => {
     const element = audioRef.current;

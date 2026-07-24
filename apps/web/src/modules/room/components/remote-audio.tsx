@@ -93,7 +93,7 @@ export function RemoteAudio({
   }, [stream]);
 
   // Spatial mode: the audible path is the Web Audio graph; the muted <audio>
-  // above stays as the Chrome silence-bug keepalive (§6) — a
+  // above stays as the Chrome silence-bug keepalive — a
   // MediaStreamAudioSourceNode outputs silence unless the same stream is also on
   // a live, playing HTMLMediaElement.
   useEffect(() => {
