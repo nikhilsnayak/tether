@@ -70,11 +70,15 @@ export class WatchLocalCapabilities extends Context.Service<
   WatchCapabilities
 >()('@tether/client-runtime/watch-along/WatchLocalCapabilities') {}
 
-/** Serialized `watch-control-v1` message transport. */
+/**
+ * Watch transport: discrete control messages on `watch-control-v1`, raw media
+ * bytes on `watch-media-v1`.
+ */
 export class WatchTransport extends Context.Service<
   WatchTransport,
   {
     readonly sendDiscrete: (message: WatchMessage) => Effect.Effect<void, WatchTransportError>;
+    readonly sendMedia: (data: ArrayBuffer) => Effect.Effect<void, WatchTransportError>;
   }
 >()('@tether/client-runtime/watch-along/WatchTransport') {}
 

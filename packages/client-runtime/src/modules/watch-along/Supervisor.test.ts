@@ -54,6 +54,7 @@ describe('watch runtime', () => {
           const runtime = yield* startWatchRuntime({
             capabilities,
             sendRaw: (payload) => Effect.sync(() => sent.push(JSON.parse(payload))),
+            sendMediaRaw: () => Effect.void,
             closeWatchChannel: Effect.sync(() => operations.push('close-channel')),
             attach: () => Effect.sync(() => operations.push('attach')),
             clear: Effect.sync(() => operations.push('clear')),
@@ -113,6 +114,7 @@ describe('watch runtime', () => {
           const runtime = yield* startWatchRuntime({
             capabilities,
             sendRaw: () => Effect.void,
+            sendMediaRaw: () => Effect.void,
             closeWatchChannel: Effect.sync(() => operations.push('close-channel')),
             attach: () => Effect.void,
             clear: Effect.sync(() => operations.push('clear')),
@@ -148,6 +150,7 @@ describe('watch runtime', () => {
           const runtime = yield* startWatchRuntime({
             capabilities,
             sendRaw: () => Effect.void,
+            sendMediaRaw: () => Effect.void,
             closeWatchChannel: Effect.sync(() => operations.push('close-channel')),
             attach: () => Effect.void,
             clear: Effect.sync(() => operations.push('clear')),
@@ -183,6 +186,7 @@ describe('watch runtime', () => {
           const runtime = yield* startWatchRuntime({
             capabilities,
             sendRaw: (payload) => Effect.sync(() => sent.push(JSON.parse(payload))),
+            sendMediaRaw: () => Effect.void,
             closeWatchChannel: Effect.sync(() => operations.push('close-channel')),
             attach: () => Effect.void,
             clear: Effect.sync(() => operations.push('clear')),
@@ -225,6 +229,7 @@ describe('watch runtime', () => {
           const runtime = yield* startWatchRuntime({
             capabilities,
             sendRaw: () => Effect.void,
+            sendMediaRaw: () => Effect.void,
             closeWatchChannel: Effect.sync(() => operations.push('close-channel')),
             attach: () => Effect.void,
             clear: Effect.sync(() => operations.push('clear')),
@@ -285,6 +290,7 @@ describe('watch runtime', () => {
               Effect.sync(() => {
                 actorBlocked = true;
               }).pipe(Effect.andThen(Effect.never)),
+            sendMediaRaw: () => Effect.void,
             closeWatchChannel: Effect.sync(() => operations.push('close-channel')),
             attach: () => Effect.void,
             clear: Effect.sync(() => operations.push('clear')),
@@ -335,6 +341,7 @@ describe('watch runtime', () => {
           const runtime = yield* startWatchRuntime({
             capabilities,
             sendRaw: (payload) => Effect.sync(() => sent.push(JSON.parse(payload))),
+            sendMediaRaw: () => Effect.void,
             closeWatchChannel: Effect.sync(() => operations.push('close-channel')),
             attach: () => Effect.sync(() => operations.push('attach')),
             clear: Effect.sync(() => operations.push('clear')),
@@ -398,6 +405,7 @@ describe('watch runtime', () => {
           const presenter = yield* startWatchRuntime({
             capabilities,
             sendRaw: (payload) => Effect.sync(() => sent.push(JSON.parse(payload))),
+            sendMediaRaw: () => Effect.void,
             closeWatchChannel: Effect.sync(() => presenterOperations.push('close-channel')),
             attach: () => Effect.sync(() => presenterOperations.push('attach')),
             clear: Effect.sync(() => presenterOperations.push('clear')),
@@ -444,6 +452,7 @@ describe('watch runtime', () => {
           const watcher = yield* startWatchRuntime({
             capabilities,
             sendRaw: () => Effect.void,
+            sendMediaRaw: () => Effect.void,
             closeWatchChannel: Effect.sync(() => watcherOperations.push('close-channel')),
             attach: () => Effect.void,
             clear: Effect.sync(() => watcherOperations.push('clear')),
@@ -507,6 +516,7 @@ describe('watch runtime', () => {
           const runtime = yield* startWatchRuntime({
             capabilities,
             sendRaw: () => Effect.fail('send-failed'),
+            sendMediaRaw: () => Effect.void,
             closeWatchChannel: Effect.sync(() => operations.push('close-channel')),
             attach: () => Effect.void,
             clear: Effect.void,
@@ -538,6 +548,7 @@ describe('watch runtime', () => {
               sendBroken
                 ? Effect.fail('send-failed')
                 : Effect.sync(() => sent.push(JSON.parse(payload))),
+            sendMediaRaw: () => Effect.void,
             closeWatchChannel: Effect.sync(() => operations.push('close-channel')),
             attach: () => Effect.sync(() => operations.push('attach')),
             clear: Effect.sync(() => operations.push('clear')),
@@ -600,6 +611,7 @@ describe('watch runtime', () => {
           const runtime = yield* startWatchRuntime({
             capabilities,
             sendRaw: () => Effect.void,
+            sendMediaRaw: () => Effect.void,
             closeWatchChannel: Effect.sync(() => operations.push('close-channel')),
             attach: () => Effect.void,
             clear: Effect.void,
@@ -651,6 +663,7 @@ describe('watch runtime', () => {
           const runtime = yield* startWatchRuntime({
             capabilities,
             sendRaw: () => Effect.void,
+            sendMediaRaw: () => Effect.void,
             closeWatchChannel: Effect.die('close-defect'),
             attach: () => Effect.void,
             clear: Effect.die('clear-defect'),
@@ -677,6 +690,7 @@ describe('watch runtime', () => {
           const runtime = yield* startWatchRuntime({
             capabilities,
             sendRaw: () => Effect.never,
+            sendMediaRaw: () => Effect.void,
             closeWatchChannel: Effect.void,
             attach: () => Effect.void,
             clear: Effect.void,

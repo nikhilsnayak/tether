@@ -28,6 +28,7 @@ export interface WatchRuntime {
 export interface StartWatchRuntimeDependencies {
   readonly capabilities: WatchCapabilities;
   readonly sendRaw: (payload: string) => Effect.Effect<void, unknown>;
+  readonly sendMediaRaw: (data: ArrayBuffer) => Effect.Effect<void, unknown>;
   readonly closeWatchChannel: Effect.Effect<void, unknown>;
   readonly attach: (
     stream: Parameters<WatchAlongPlatform['Service']['attachProgramTracks']>[0],
@@ -69,6 +70,8 @@ export const startWatchRuntime = Effect.fnUntraced(function* (deps: StartWatchRu
         .sendRaw(encoded.success)
         .pipe(Effect.mapError((cause) => new WatchTransportError({ cause })));
     },
+    sendMedia: (data) =>
+      deps.sendMediaRaw(data).pipe(Effect.mapError((cause) => new WatchTransportError({ cause }))),
   });
   const platform = WatchAlongPlatform.of({
     ...deps.platform,

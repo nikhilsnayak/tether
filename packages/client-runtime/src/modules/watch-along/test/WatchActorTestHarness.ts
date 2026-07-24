@@ -105,6 +105,7 @@ export const makeWatchActorTestHarness = Effect.fn('makeWatchActorTestHarness')(
         : Effect.sync(() => {
             sent.push(message);
           }),
+    sendMedia: () => Effect.void,
   });
 
   const dependencies = Layer.mergeAll(

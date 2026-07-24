@@ -364,6 +364,12 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     const runtime = yield* startWatchRuntime({
       capabilities: watch.capabilities,
       sendRaw: (payload) => platform.sendDataChannelMessage(dataChannel, payload),
+      // Resolved per send: the control channel can open before the media channel
+      // is accepted, but sends only happen after both are established.
+      sendMediaRaw: (data) =>
+        state._tag === 'PeerKnown' && state.watchMediaChannel !== null
+          ? platform.sendDataChannelBinary(state.watchMediaChannel, data)
+          : Effect.fail(new Error('watch-media channel unavailable')),
       closeWatchChannel: closeDataChannel(dataChannel),
       attach: (stream) =>
         platform
@@ -1145,9 +1151,12 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       state.watchRuntime.dispatch({ _tag: 'RemoteMessage', message: decoded.success });
       return;
     }
-    // Watch-media bytes are parked until the media pump is wired in a later
-    // change; the channel is negotiated now so it exists before detachment.
+    // Route watch-media bytes into the runtime. Only binary frames are valid on
+    // this channel; anything else is ignored.
     if (state._tag === 'PeerKnown' && state.watchMediaChannel === dataChannel) {
+      if (!state.watchRuntime?.isAlive()) return;
+      if (!(data instanceof ArrayBuffer)) return;
+      state.watchRuntime.dispatch({ _tag: 'WatchMediaChunkReceived', chunk: data });
       return;
     }
     if (
