@@ -303,6 +303,9 @@ export const makeWatchActor = Effect.fnUntraced(function* (dispatch: WatchActorI
           return yield* reset('idle');
         }
         return;
+      case 'media-offer':
+        // Parked: the watcher's transfer receiver is wired in a later change.
+        return;
     }
   });
 
@@ -385,6 +388,9 @@ export const makeWatchActor = Effect.fnUntraced(function* (dispatch: WatchActorI
       case 'SourceEnded':
       case 'SourceFailed':
         return yield* handleSourceEvent(input);
+      case 'WatchMediaChunkReceived':
+        // Parked: the watcher buffers these into playback in a later change.
+        return;
     }
   });
 

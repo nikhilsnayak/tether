@@ -75,6 +75,17 @@ export const WatchEndedMessage = Schema.Struct({
   watchSessionId: WatchSessionId,
 });
 
+// Announces a watch-media transfer on the control plane: the media channel then
+// carries only the raw ordered bytes, and the receiver knows the total size and
+// codec from here. The bytes themselves never travel as a watch message.
+export const MediaOfferMessage = Schema.Struct({
+  version,
+  type: Schema.Literal('media-offer'),
+  watchSessionId: WatchSessionId,
+  byteLength: Schema.Number,
+  mimeType: Schema.String,
+});
+
 export const WatchMessageSchema = Schema.Union([
   HelloWatchMessage,
   WatchProposedMessage,
@@ -84,6 +95,7 @@ export const WatchMessageSchema = Schema.Union([
   PlaybackStateChangedMessage,
   WatchFailedMessage,
   WatchEndedMessage,
+  MediaOfferMessage,
 ]);
 
 const WatchMessageJsonSchema = Schema.fromJsonString(WatchMessageSchema);
@@ -95,6 +107,7 @@ const encodeWatchMessageJson = Schema.encodeResult(WatchMessageJsonSchema, {
 });
 
 export type WatchMessage = typeof WatchMessageSchema.Type;
+export type MediaOffer = typeof MediaOfferMessage.Type;
 export type WatchControlCommand = typeof WatchControl.Type;
 export type WatchStatus = typeof WatchStatus.Type;
 export type FailureReason = typeof FailureReason.Type;

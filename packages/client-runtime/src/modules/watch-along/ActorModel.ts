@@ -15,6 +15,7 @@ export type WatchActorInput =
       readonly _tag: 'RemoteProgramStreamChanged';
       readonly stream: ProgramStreamHandle | null;
       readonly version: number;
-    };
+    }
+  | { readonly _tag: 'WatchMediaChunkReceived'; readonly chunk: ArrayBuffer };
 
 export type WatchActorInputDispatch = (input: WatchActorInput) => void;
