@@ -22,6 +22,7 @@ import { useProgramAudioPreferences } from '../hooks/use-program-audio-preferenc
 import { useRemoteVideoAvailability } from '../hooks/use-remote-video-availability';
 import { useRoomQualityPreference } from '../hooks/use-room-quality-preference';
 import { useScreenWakeLock } from '../hooks/use-screen-wake-lock';
+import { useSharedSpatialAudioGraph } from '../hooks/use-shared-spatial-audio-graph';
 import { mediaStreamValue } from '../peer-session/platform';
 import type { InitialMediaSettings } from '../preflight/media';
 import { resolveRoomJourney, roomJourneyLabel } from '../scene/journey';
@@ -62,6 +63,7 @@ export function CallScreen({
   useScreenWakeLock();
   const { active, binding, entryStage } = useRoomExperience();
   const { preferences: audioPreferences } = useProgramAudioPreferences();
+  const spatialGraph = useSharedSpatialAudioGraph();
   const { qualityPreference, setQualityPreference } = useRoomQualityPreference();
   const controller = binding.controller;
   const view = useAtomValue(peerSessionViewAtom);
@@ -147,8 +149,9 @@ export function CallScreen({
         sinkId={audioPreferences.sinkId}
         muted={!audioPreferences.speakerEnabled}
         pendingJoinPeerIds={view.pendingJoinRequests.map((request) => request.peerId)}
+        graph={spatialGraph}
       />
-      <ProgramAudio />
+      <ProgramAudio graph={spatialGraph} />
       {journey === 'outside' && (
         <section
           aria-label={displayLabel}

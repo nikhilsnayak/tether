@@ -6,6 +6,7 @@ import type { RoomEntryState } from '../entry/room-entry-state';
 import { RoomScene } from '../scene/room-scene';
 import type { RoomTemplate } from '../templates/registry';
 import { RoomExperienceProvider } from './room-experience-context';
+import { SpatialAudioProvider } from './spatial-audio-context';
 
 type RoomExperienceProps = {
   readonly session: RoomSession;
@@ -24,10 +25,12 @@ export function RoomExperience({ session, template, entryStage, children }: Room
         entryStage={entryStage}
         watchAlongEnabled={template.watchAlong !== undefined}
       >
-        <div className='relative min-h-svh overflow-hidden'>
-          <RoomScene template={template} sessionIntent={session.intent} />
-          {children}
-        </div>
+        <SpatialAudioProvider screenPosition={template.watchAlong?.display.position ?? null}>
+          <div className='relative min-h-svh overflow-hidden'>
+            <RoomScene template={template} sessionIntent={session.intent} />
+            {children}
+          </div>
+        </SpatialAudioProvider>
       </RoomExperienceProvider>
     </RegistryProvider>
   );
