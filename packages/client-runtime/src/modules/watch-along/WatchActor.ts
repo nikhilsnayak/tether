@@ -23,6 +23,8 @@ import {
   isWatchPlatformError,
 } from './Services';
 
+const WATCH_MEDIA_CHUNK_BYTES = 16 * 1024;
+
 interface SessionBase {
   readonly watchSessionId: WatchSessionId;
   readonly role: 'presenter' | 'watcher';
@@ -69,6 +71,10 @@ export const makeWatchActor = Effect.fnUntraced(function* (dispatch: WatchActorI
   let state: State = { _tag: 'Unavailable' };
   let remoteStream: ProgramStreamHandle | null = null;
   let remoteStreamVersion = -1;
+  // Transient watcher-side transfer counters (validation only; playback replaces
+  // this in a later change).
+  let mediaReceived = 0;
+  let mediaExpected = 0;
 
   const send = (message: WatchMessage) => transport.sendDiscrete(message);
   const emitView = () => {
@@ -170,6 +176,27 @@ export const makeWatchActor = Effect.fnUntraced(function* (dispatch: WatchActorI
     });
   });
 
+  // Streams the source file byte range by range over watch-media. Backpressure
+  // lives in the transport, so this just reads and sends until the file is done.
+  const pumpMedia = (source: ClaimedSourceHandle, byteLength: number) => {
+    const step = (offset: number): Effect.Effect<void, unknown> =>
+      offset >= byteLength
+        ? Effect.void
+        : platform.readSourceBytes(source, offset, WATCH_MEDIA_CHUNK_BYTES).pipe(
+            Effect.flatMap((chunk) => {
+              if (chunk.byteLength === 0) return Effect.void;
+              const buffer = chunk.buffer.slice(
+                chunk.byteOffset,
+                chunk.byteOffset + chunk.byteLength,
+              ) as ArrayBuffer;
+              return transport.sendMedia(buffer).pipe(
+                Effect.andThen(step(offset + chunk.byteLength)),
+              );
+            }),
+          );
+    return step(0);
+  };
+
   const startPresenting = Effect.fnUntraced(function* (
     preparing: Extract<State, { readonly _tag: 'Preparing' }>,
   ) {
@@ -195,6 +222,24 @@ export const makeWatchActor = Effect.fnUntraced(function* (dispatch: WatchActorI
       yield* send(playbackMessage(session));
       yield* events.emit({ _tag: 'WatchProgramStreamReady', stream });
       yield* emitView();
+      // Announce the transfer, then stream the bytes on a fiber scoped to the
+      // session so it is cancelled on eject, source end, or failure.
+      const info = yield* platform.sourceMediaInfo(claimed);
+      yield* send({
+        version: WATCH_PROTOCOL_VERSION,
+        type: 'media-offer',
+        watchSessionId,
+        byteLength: info.byteLength,
+        mimeType: info.mimeType,
+      });
+      yield* pumpMedia(claimed, info.byteLength).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logDebug('watch-media pump stopped').pipe(
+            Effect.annotateLogs('cause', String(cause)),
+          ),
+        ),
+        Effect.forkIn(sourceScope),
+      );
     }).pipe(
       Effect.catchIf(isWatchPlatformError, () =>
         Effect.gen(function* () {
@@ -304,8 +349,11 @@ export const makeWatchActor = Effect.fnUntraced(function* (dispatch: WatchActorI
         }
         return;
       case 'media-offer':
-        // Parked: the watcher's transfer receiver is wired in a later change.
-        return;
+        mediaExpected = message.byteLength;
+        mediaReceived = 0;
+        return yield* Effect.logDebug('watch-media offer received').pipe(
+          Effect.annotateLogs({ byteLength: message.byteLength, mimeType: message.mimeType }),
+        );
     }
   });
 
@@ -388,9 +436,15 @@ export const makeWatchActor = Effect.fnUntraced(function* (dispatch: WatchActorI
       case 'SourceEnded':
       case 'SourceFailed':
         return yield* handleSourceEvent(input);
-      case 'WatchMediaChunkReceived':
-        // Parked: the watcher buffers these into playback in a later change.
-        return;
+      case 'WatchMediaChunkReceived': {
+        mediaReceived += input.chunk.byteLength;
+        if (mediaExpected === 0 || mediaReceived < mediaExpected) return;
+        const total = mediaReceived;
+        mediaExpected = 0;
+        return yield* Effect.logDebug('watch-media transfer complete').pipe(
+          Effect.annotateLogs({ received: total }),
+        );
+      }
     }
   });
 

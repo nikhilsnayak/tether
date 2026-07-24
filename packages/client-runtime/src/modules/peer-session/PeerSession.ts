@@ -57,6 +57,8 @@ const MAX_RECONNECT_ATTEMPTS = 2;
 const POSE_BUFFER_HIGH_WATER_BYTES = 64 * 1024;
 const POSE_BUFFER_LOW_WATER_BYTES = 16 * 1024;
 const POSE_RETRY_DELAY = Duration.millis(100);
+const WATCH_MEDIA_BUFFER_HIGH_WATER_BYTES = 1024 * 1024;
+const WATCH_MEDIA_SEND_POLL_INTERVAL = Duration.millis(50);
 
 export interface PeerSessionWatchDependencies {
   readonly role: 'host' | 'guest';
@@ -340,6 +342,19 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
     return watchMediaChannel;
   });
 
+  // Waits for the media channel's send buffer to fall below the high-water mark,
+  // pacing the file pump to the link without dropping bytes.
+  const awaitMediaSendCapacity = (channel: DataChannelHandle): Effect.Effect<void> => {
+    const bufferedAmount = platform.dataChannelBufferedAmount;
+    if (bufferedAmount === undefined) return Effect.void;
+    const loop: Effect.Effect<void> = Effect.suspend(() =>
+      bufferedAmount(channel) > WATCH_MEDIA_BUFFER_HIGH_WATER_BYTES
+        ? Effect.andThen(Effect.sleep(WATCH_MEDIA_SEND_POLL_INTERVAL), loop)
+        : Effect.void,
+    );
+    return loop;
+  };
+
   const startWatchRuntimeForChannel = Effect.fnUntraced(function* (dataChannel: DataChannelHandle) {
     if (
       state._tag !== 'PeerKnown' ||
@@ -365,11 +380,16 @@ const makePeerSessionActor = Effect.fnUntraced(function* (
       capabilities: watch.capabilities,
       sendRaw: (payload) => platform.sendDataChannelMessage(dataChannel, payload),
       // Resolved per send: the control channel can open before the media channel
-      // is accepted, but sends only happen after both are established.
-      sendMediaRaw: (data) =>
-        state._tag === 'PeerKnown' && state.watchMediaChannel !== null
-          ? platform.sendDataChannelBinary(state.watchMediaChannel, data)
-          : Effect.fail(new Error('watch-media channel unavailable')),
+      // is accepted, but sends only happen after both are established. Waits for
+      // send capacity first so a fast file read cannot outrun the link.
+      sendMediaRaw: (data) => {
+        const channel = state._tag === 'PeerKnown' ? state.watchMediaChannel : null;
+        return channel === null
+          ? Effect.fail(new Error('watch-media channel unavailable'))
+          : awaitMediaSendCapacity(channel).pipe(
+              Effect.andThen(platform.sendDataChannelBinary(channel, data)),
+            );
+      },
       closeWatchChannel: closeDataChannel(dataChannel),
       attach: (stream) =>
         platform
