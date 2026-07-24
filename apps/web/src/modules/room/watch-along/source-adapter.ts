@@ -142,7 +142,7 @@ const acquireWatchSource = Effect.fn('acquireWatchSource')(function* (
     return yield* sourceError('prepare', 'captureStream() did not expose a video track');
   }
   yield* trySource('prepare', () => {
-    videoTrack.contentHint = 'detail';
+    videoTrack.contentHint = 'motion';
   });
 
   return { element, stream };

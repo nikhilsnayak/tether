@@ -392,10 +392,10 @@ describe('web peer-session platform', () => {
           [harness.mediaStream.audioTrack],
           [null],
         ]);
-        assert.strictEqual(harness.mediaStream.videoTrack.contentHint, 'detail');
+        assert.strictEqual(harness.mediaStream.videoTrack.contentHint, 'motion');
         assert.strictEqual(
           reserved.video.sender.parameters.degradationPreference,
-          'maintain-resolution',
+          'maintain-framerate',
         );
         assert.strictEqual(reserved.video.sender.parameters.encodings[0]?.priority, 'low');
         assert.strictEqual(reserved.audio.sender.parameters.encodings[0]?.priority, 'medium');
@@ -443,7 +443,7 @@ describe('web peer-session platform', () => {
     const unsupported = { encodings: [{}] } as RTCRtpSendParameters;
     assert.isFalse(tuneSenderParameters(unsupported, 'voice-audio'));
     assert.isTrue(tuneSenderParameters(unsupported, 'program-video'));
-    assert.strictEqual(unsupported.degradationPreference, 'maintain-resolution');
+    assert.strictEqual(unsupported.degradationPreference, 'maintain-framerate');
 
     const voice = {
       encodings: [{ priority: 'low', networkPriority: 'medium' }],
@@ -461,7 +461,7 @@ describe('web peer-session platform', () => {
       priority: 'low',
       networkPriority: 'low',
     });
-    assert.strictEqual(programVideo.degradationPreference, 'maintain-resolution');
+    assert.strictEqual(programVideo.degradationPreference, 'maintain-framerate');
   });
 
   it.effect('gives local voice the highest supported sender priority', () => {
